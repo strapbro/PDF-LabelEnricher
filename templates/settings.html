@@ -182,7 +182,7 @@
           </div>
         </div>
 
-        <button type="submit">Save</button>
+        <button id="saveSettingsBtn" class="btn btn-secondary save-btn save-passive" type="submit">Save</button>
       </form>
     </div>
 
@@ -210,6 +210,8 @@
 <style>
 .settings-split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
 .settings-right { position: sticky; top: 12px; }
+.save-btn { min-width: 150px; margin-top: 8px; }
+.save-passive { opacity: 0.68; filter: saturate(0.72); }
 @media (max-width: 1100px) {
   .settings-split { grid-template-columns: 1fr; }
   .settings-right { position: static; }
@@ -222,10 +224,19 @@
   const img = document.getElementById('livePreviewImg');
   const labelSel = document.getElementById('preview_label_pdf');
   const modeSel = document.getElementById('line_layout_mode');
+  const saveBtn = document.getElementById('saveSettingsBtn');
   const customIds = ['field_order_csv', 'inline_fields_csv', 'inline_separator'];
-  if (!form || !img || !labelSel || !modeSel) return;
+  if (!form || !img || !labelSel || !modeSel || !saveBtn) return;
 
   let timer = null;
+  let isDirty = false;
+
+  function setSaveDirty(dirty) {
+    isDirty = !!dirty;
+    saveBtn.classList.toggle('save-passive', !isDirty);
+    saveBtn.classList.toggle('btn-secondary', !isDirty);
+    saveBtn.classList.toggle('btn-primary', isDirty);
+  }
 
   function applyCustomEnabled() {
     const isCustom = (modeSel.value || '') === 'custom';
@@ -264,8 +275,8 @@
   function queueRefresh() { if (timer) clearTimeout(timer); timer = setTimeout(refreshPreview, 180); }
 
   modeSel.addEventListener('change', () => { applyCustomEnabled(); queueRefresh(); });
-  form.addEventListener('input', queueRefresh);
-  form.addEventListener('change', queueRefresh);
+  form.addEventListener('input', () => { setSaveDirty(true); queueRefresh(); });
+  form.addEventListener('change', () => { setSaveDirty(true); queueRefresh(); });
   labelSel.addEventListener('change', queueRefresh);
 
   applyCustomEnabled();
