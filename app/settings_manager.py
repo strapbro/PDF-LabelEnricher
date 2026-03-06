@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import subprocess
@@ -65,6 +65,22 @@ DEFAULT_CONFIG = {
     "csv_mapping_cache": {
         "enable": True,
         "mapping_file": "csv_mapping.json",
+    },
+    "output_sort": {
+        "mode": "processed",
+        "priority_fields": ["label", "location", "qty", "item_key"],
+        "enabled_fields": {
+            "label": True,
+            "qty": False,
+            "item_key": False,
+            "location": False,
+        },
+        "directions": {
+            "label": "asc",
+            "qty": "asc",
+            "item_key": "asc",
+            "location": "asc",
+        },
     },
 }
 
@@ -158,4 +174,3 @@ class SettingsManager:
             return True
         except Exception:
             return False
-

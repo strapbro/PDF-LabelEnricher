@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import copy
 import os
@@ -666,6 +666,19 @@ def _layout_ui_defaults() -> dict[str, Any]:
         "show_field_labels": bool(layout.get("show_field_labels", True)),
         "page_mode": str(layout.get("page_mode", "half_sheet_top")),
         "archive_retention_days": int(settings.config.get("admin", {}).get("archive_retention_days", 14)),
+        "output_sort_mode": str(settings.config.get("output_sort", {}).get("mode", "processed")),
+        "sort_priority_1": str((settings.config.get("output_sort", {}).get("priority_fields", ["label", "location", "qty", "item_key"]) + ["", "", "", ""])[0]),
+        "sort_priority_2": str((settings.config.get("output_sort", {}).get("priority_fields", ["label", "location", "qty", "item_key"]) + ["", "", "", ""])[1]),
+        "sort_priority_3": str((settings.config.get("output_sort", {}).get("priority_fields", ["label", "location", "qty", "item_key"]) + ["", "", "", ""])[2]),
+        "sort_priority_4": str((settings.config.get("output_sort", {}).get("priority_fields", ["label", "location", "qty", "item_key"]) + ["", "", "", ""])[3]),
+        "sort_enable_label": bool(settings.config.get("output_sort", {}).get("enabled_fields", {}).get("label", True)),
+        "sort_enable_qty": bool(settings.config.get("output_sort", {}).get("enabled_fields", {}).get("qty", False)),
+        "sort_enable_item_key": bool(settings.config.get("output_sort", {}).get("enabled_fields", {}).get("item_key", False)),
+        "sort_enable_location": bool(settings.config.get("output_sort", {}).get("enabled_fields", {}).get("location", False)),
+        "sort_dir_label": str(settings.config.get("output_sort", {}).get("directions", {}).get("label", "asc")),
+        "sort_dir_qty": str(settings.config.get("output_sort", {}).get("directions", {}).get("qty", "asc")),
+        "sort_dir_item_key": str(settings.config.get("output_sort", {}).get("directions", {}).get("item_key", "asc")),
+        "sort_dir_location": str(settings.config.get("output_sort", {}).get("directions", {}).get("location", "asc")),
     }
 
 
@@ -685,6 +698,19 @@ def _build_preview_config(
     inline_separator: str,
     show_field_labels: bool,
     page_mode: str,
+    output_sort_mode: str = "processed",
+    sort_priority_1: str = "label",
+    sort_priority_2: str = "location",
+    sort_priority_3: str = "qty",
+    sort_priority_4: str = "item_key",
+    sort_enable_label: bool = True,
+    sort_enable_qty: bool = False,
+    sort_enable_item_key: bool = False,
+    sort_enable_location: bool = False,
+    sort_dir_label: str = "asc",
+    sort_dir_qty: str = "asc",
+    sort_dir_item_key: str = "asc",
+    sort_dir_location: str = "asc",
 ) -> dict[str, Any]:
     cfg = copy.deepcopy(settings.config)
     layout = cfg.setdefault("print_layout", {})
@@ -715,6 +741,33 @@ def _build_preview_config(
     layout["inline_fields_csv"] = inline_fields_csv
     layout["line_groups_csv"] = _line_groups_for_mode(line_layout_mode)
     layout["overflow_mode"] = "secondary_margin" if margin_mode == "both" else "backside"
+
+    allowed = {"label", "qty", "item_key", "location"}
+    raw_priorities = [sort_priority_1, sort_priority_2, sort_priority_3, sort_priority_4]
+    priorities: list[str] = []
+    for f in raw_priorities:
+        ff = str(f or "").strip().lower()
+        if ff in allowed and ff not in priorities:
+            priorities.append(ff)
+    if not priorities:
+        priorities = ["label", "location", "qty", "item_key"]
+
+    cfg["output_sort"] = {
+        "mode": str(output_sort_mode or "processed").strip().lower(),
+        "priority_fields": priorities,
+        "enabled_fields": {
+            "label": bool(sort_enable_label),
+            "qty": bool(sort_enable_qty),
+            "item_key": bool(sort_enable_item_key),
+            "location": bool(sort_enable_location),
+        },
+        "directions": {
+            "label": "desc" if str(sort_dir_label).lower() == "desc" else "asc",
+            "qty": "desc" if str(sort_dir_qty).lower() == "desc" else "asc",
+            "item_key": "desc" if str(sort_dir_item_key).lower() == "desc" else "asc",
+            "location": "desc" if str(sort_dir_location).lower() == "desc" else "asc",
+        },
+    }
     return cfg
 
 
@@ -1597,6 +1650,19 @@ def create_app() -> FastAPI:
         show_field_labels: str | None = Form(None),
         page_mode: str = Form("half_sheet_top"),
         archive_retention_days: int = Form(14),
+        output_sort_mode: str = Form("processed"),
+        sort_priority_1: str = Form("label"),
+        sort_priority_2: str = Form("location"),
+        sort_priority_3: str = Form("qty"),
+        sort_priority_4: str = Form("item_key"),
+        sort_enable_label: str | None = Form(None),
+        sort_enable_qty: str | None = Form(None),
+        sort_enable_item_key: str | None = Form(None),
+        sort_enable_location: str | None = Form(None),
+        sort_dir_label: str = Form("asc"),
+        sort_dir_qty: str = Form("asc"),
+        sort_dir_item_key: str = Form("asc"),
+        sort_dir_location: str = Form("asc"),
     ):
         cfg = _build_preview_config(
             margin_direction=margin_direction,
@@ -1614,6 +1680,19 @@ def create_app() -> FastAPI:
             inline_separator=inline_separator,
             show_field_labels=bool(show_field_labels),
             page_mode=page_mode,
+            output_sort_mode=output_sort_mode,
+            sort_priority_1=sort_priority_1,
+            sort_priority_2=sort_priority_2,
+            sort_priority_3=sort_priority_3,
+            sort_priority_4=sort_priority_4,
+            sort_enable_label=bool(sort_enable_label),
+            sort_enable_qty=bool(sort_enable_qty),
+            sort_enable_item_key=bool(sort_enable_item_key),
+            sort_enable_location=bool(sort_enable_location),
+            sort_dir_label=sort_dir_label,
+            sort_dir_qty=sort_dir_qty,
+            sort_dir_item_key=sort_dir_item_key,
+            sort_dir_location=sort_dir_location,
         )
         cfg["admin"]["archive_retention_days"] = int(archive_retention_days)
         settings.save(cfg)

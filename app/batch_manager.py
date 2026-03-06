@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import copy
 import json
@@ -470,6 +470,7 @@ class BatchManager:
                     continue
 
                 out_path = self._render_one_label(label_pdf, order, idx, output_dir)
+                sort_meta = self._sort_meta_for_order(order, idx)
                 report["results"].append(
                     {
                         "label_pdf": str(label_pdf),
@@ -482,6 +483,11 @@ class BatchManager:
                         "method": m.get("method", ""),
                         "confidence": m.get("confidence", 0),
                         "output_pdf": str(out_path),
+                        "process_index": len(report["results"]),
+                        "sort_label": sort_meta.get("label", ""),
+                        "sort_qty": sort_meta.get("qty", 0),
+                        "sort_item_key": sort_meta.get("item_key", ""),
+                        "sort_location": sort_meta.get("location", ""),
                     }
                 )
                 report["summary"]["matched"] += 1
@@ -541,6 +547,124 @@ class BatchManager:
                 return db_title
         return (item.get("title") or "").strip()
 
+    def _sort_meta_for_order(self, order: dict[str, Any], idx: dict[tuple[str, str], dict[str, str]]) -> dict[str, Any]:
+        items = order.get("items", []) or []
+        first = items[0] if items else {}
+        platform = str(order.get("platform", "")).lower().strip()
+        row = self._find_row_for_item(platform, first, idx) if first else None
+
+        keys = self._order_item_keys(first) if first else []
+        item_key = keys[0] if keys else ""
+
+        qty_raw = first.get("quantity", 0) if isinstance(first, dict) else 0
+        try:
+            qty = int(float(qty_raw))
+        except Exception:
+            qty = 0
+
+        label = self._effective_item_label(row, first) if isinstance(first, dict) else ""
+        location = (row.get("location", "") if isinstance(row, dict) else "") or ""
+
+        return {
+            "label": str(label or "").strip(),
+            "qty": qty,
+            "item_key": str(item_key or "").strip(),
+            "location": str(location or "").strip(),
+        }
+
+    def _output_sort_config(self) -> dict[str, Any]:
+        cfg = self.settings.config.get("output_sort", {}) if isinstance(self.settings.config, dict) else {}
+        mode = str(cfg.get("mode", "processed") or "processed").strip().lower()
+        if mode not in {"processed", "processed_reverse", "custom"}:
+            mode = "processed"
+
+        pr = cfg.get("priority_fields", ["label", "location", "qty", "item_key"])
+        priority_fields = [str(x).strip().lower() for x in (pr if isinstance(pr, list) else []) if str(x).strip()]
+        if not priority_fields:
+            priority_fields = ["label", "location", "qty", "item_key"]
+
+        enabled = cfg.get("enabled_fields", {}) if isinstance(cfg.get("enabled_fields", {}), dict) else {}
+        directions = cfg.get("directions", {}) if isinstance(cfg.get("directions", {}), dict) else {}
+
+        return {
+            "mode": mode,
+            "priority_fields": priority_fields,
+            "enabled_fields": {
+                "label": bool(enabled.get("label", True)),
+                "qty": bool(enabled.get("qty", False)),
+                "item_key": bool(enabled.get("item_key", False)),
+                "location": bool(enabled.get("location", False)),
+            },
+            "directions": {
+                "label": "desc" if str(directions.get("label", "asc")).lower() == "desc" else "asc",
+                "qty": "desc" if str(directions.get("qty", "asc")).lower() == "desc" else "asc",
+                "item_key": "desc" if str(directions.get("item_key", "asc")).lower() == "desc" else "asc",
+                "location": "desc" if str(directions.get("location", "asc")).lower() == "desc" else "asc",
+            },
+        }
+
+    def _sort_value_for_entry(self, entry: dict[str, Any], field: str) -> Any:
+        f = str(field or "").lower().strip()
+        if f == "qty":
+            try:
+                return int(entry.get("sort_qty", 0) or 0)
+            except Exception:
+                return 0
+        if f == "item_key":
+            return str(entry.get("sort_item_key", "") or "").lower()
+        if f == "location":
+            return str(entry.get("sort_location", "") or "").lower()
+        return str(entry.get("sort_label", "") or "").lower()
+
+    def _sorted_output_pdfs_from_report(self, batch_dir: Path, pdfs: list[Path]) -> list[Path]:
+        report_path = batch_dir / "batch_report.json"
+        report: dict[str, Any] = {}
+        if report_path.exists():
+            try:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            except Exception:
+                report = {}
+
+        results = report.get("results", []) if isinstance(report, dict) else []
+        matched = [r for r in results if str(r.get("status", "")).lower() == "matched"]
+
+        by_name = {p.name: p for p in pdfs}
+        entries: list[dict[str, Any]] = []
+        for i, r in enumerate(matched):
+            out_name = Path(str(r.get("output_pdf", "") or "")).name
+            p = by_name.get(out_name)
+            if p is None:
+                continue
+            row = dict(r)
+            row["_pdf"] = p
+            row["_process_index"] = int(r.get("process_index", i) or i)
+            entries.append(row)
+
+        if not entries:
+            return pdfs
+
+        # Start in processing order for deterministic custom sorting.
+        entries.sort(key=lambda e: e.get("_process_index", 0))
+        sort_cfg = self._output_sort_config()
+        mode = sort_cfg.get("mode", "processed")
+
+        if mode == "processed_reverse":
+            entries.reverse()
+
+        elif mode == "custom":
+            enabled = sort_cfg.get("enabled_fields", {})
+            directions = sort_cfg.get("directions", {})
+            priorities = [f for f in sort_cfg.get("priority_fields", []) if str(f) in {"label", "qty", "item_key", "location"}]
+            active = [f for f in priorities if bool(enabled.get(f, False))]
+            if active:
+                for f in reversed(active):
+                    rev = str(directions.get(f, "asc")) == "desc"
+                    entries.sort(key=lambda e, ff=f: self._sort_value_for_entry(e, ff), reverse=rev)
+
+        ordered = [e["_pdf"] for e in entries]
+        included = {p.name for p in ordered}
+        remaining = [p for p in sorted(pdfs, key=lambda x: x.name.lower()) if p.name not in included]
+        return ordered + remaining
     def _resolve_item_rows(
         self,
         order: dict[str, Any],
@@ -981,12 +1105,15 @@ class BatchManager:
             return {"ok": False, "error": "No processed batches found."}
 
         output_dir = batch_dir / "output_pdfs"
-        pdfs = sorted([p for p in output_dir.glob("*.pdf") if p.name.lower() != "combined_print.pdf"])
+        pdfs = [p for p in output_dir.glob("*.pdf") if p.name.lower() != "combined_print.pdf"]
         if order_ids:
             wanted = {str(x or "").strip() for x in order_ids if str(x or "").strip()}
             pdfs = [p for p in pdfs if any(f"_{oid}_" in p.name for oid in wanted)]
         if not pdfs:
             return {"ok": False, "error": "No output PDFs found in latest batch."}
+
+        # Respect configured combine/print sort mode using batch report metadata.
+        pdfs = self._sorted_output_pdfs_from_report(batch_dir, pdfs)
 
         writer = PdfWriter()
         for pdf in pdfs:
@@ -1013,65 +1140,4 @@ class BatchManager:
                 shutil.rmtree(p, ignore_errors=True)
                 removed += 1
         return removed
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
