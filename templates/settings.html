@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 <section class="card">
   <h2>Layout + Formatting (Live Preview)</h2>
@@ -71,11 +71,11 @@
             </label>
 
             <label>Distance from page edge (top/bottom) (points)
-              <input type="number" name="edge_padding" id="edge_padding" value="{{ ui.edge_padding }}" min="0" max="80">
+              <input type="number" name="edge_padding" id="edge_padding" value="{{ ui.edge_padding }}" min="-80" max="120">
             </label>
 
             <label>Distance from page side (left/right) (points)
-              <input type="number" name="side_padding" id="side_padding" value="{{ ui.side_padding }}" min="0" max="80">
+              <input type="number" name="side_padding" id="side_padding" value="{{ ui.side_padding }}" min="-80" max="120">
             </label>
 
             <label>Font size
@@ -201,5 +201,6 @@
 })();
 </script>
 {% endblock %}
+
 
 

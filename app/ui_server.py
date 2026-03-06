@@ -1267,7 +1267,10 @@ def create_app() -> FastAPI:
 
         msg = f"Manual batch complete. Generated: {len(rendered)}"
         if errors:
-            msg += f" | Errors: {len(errors)}"
+            preview = "; ".join(errors[:3])
+            if len(errors) > 3:
+                preview += f"; (+{len(errors)-3} more)"
+            msg += f" | Errors: {len(errors)} | {preview}"
         if rendered:
             msg += " | Opened combined manual PDF"
         return RedirectResponse(url=f"/manual-entry?msg={msg}", status_code=303)
