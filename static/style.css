@@ -1,22 +1,48 @@
-﻿body {
+﻿:root {
+  --bg-1: #f5f8ff;
+  --bg-2: #edf2ff;
+  --ink: #172033;
+  --ink-soft: #4c5b74;
+  --line: #d6e2f3;
+  --card: rgba(255, 255, 255, 0.62);
+  --card-strong: rgba(255, 255, 255, 0.76);
+  --blur: 14px;
+  --blue: #2d63e2;
+  --green: #159f60;
+  --slate: #50607a;
+  --warn: #f4b32d;
+  --danger: #e64f5a;
+}
+
+* { box-sizing: border-box; }
+
+body {
   font-family: "Segoe UI", Arial, sans-serif;
   margin: 0;
-  background: #f4f6fb;
-  color: #172033;
+  color: var(--ink);
+  background:
+    radial-gradient(900px 460px at -5% -5%, #dbe7ff 0%, rgba(219, 231, 255, 0) 60%),
+    radial-gradient(820px 420px at 110% -8%, #d7f1ff 0%, rgba(215, 241, 255, 0) 58%),
+    linear-gradient(180deg, var(--bg-1), var(--bg-2));
 }
 
 header {
-  background: linear-gradient(135deg, #172033 0%, #1f2e4f 100%);
-  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  color: #f2f7ff;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, rgba(23, 32, 51, 0.9), rgba(30, 45, 78, 0.88));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
 }
 
 header h1 {
   margin: 0 0 8px;
   font-size: 22px;
   font-weight: 800;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.24px;
 }
 
 .nav-row {
@@ -35,18 +61,21 @@ nav,
 
 nav a,
 .nav-links a {
-  color: #e9efff;
+  color: #ebf3ff;
   text-decoration: none;
   padding: 7px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   font-size: 13px;
   font-weight: 600;
+  transition: transform 0.12s ease, background 0.16s ease;
 }
 
 nav a:hover,
 .nav-links a:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
 }
 
 .nav-close {
@@ -63,12 +92,15 @@ main {
 }
 
 .card {
-  background: #fff;
-  border: 1px solid #dbe4f2;
-  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
   padding: 14px;
   margin-bottom: 12px;
-  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.04);
+  box-shadow: 0 8px 24px rgba(24, 38, 71, 0.08);
+  backdrop-filter: blur(var(--blur)) saturate(120%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(120%);
+  animation: card-enter 220ms ease both;
 }
 
 .grid {
@@ -86,10 +118,8 @@ main {
 button,
 .btn {
   padding: 8px 12px;
-  background: #2156d8;
-  color: #fff;
   border: 0;
-  border-radius: 9px;
+  border-radius: 10px;
   text-decoration: none;
   cursor: pointer;
   font-weight: 700;
@@ -100,14 +130,16 @@ button,
   line-height: 1.2;
   text-align: center;
   white-space: normal;
-  box-sizing: border-box;
   max-width: 100%;
-  transition: transform 0.06s ease, filter 0.14s ease;
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(35, 65, 138, 0.2);
+  transition: transform 0.08s ease, filter 0.16s ease, box-shadow 0.16s ease;
 }
 
 button:hover,
 .btn:hover {
   filter: brightness(1.06);
+  box-shadow: 0 10px 18px rgba(35, 65, 138, 0.26);
 }
 
 button:active,
@@ -115,46 +147,26 @@ button:active,
   transform: translateY(1px);
 }
 
-.btn-sm {
-  min-height: 34px;
-  font-size: 12px;
-}
+.btn-sm { min-height: 34px; font-size: 12px; }
+.btn-md { min-height: 40px; font-size: 13px; }
+.btn-lg { min-height: 46px; font-size: 15px; }
 
-.btn-md {
-  min-height: 40px;
-  font-size: 13px;
-}
-
-.btn-lg {
-  min-height: 46px;
-  font-size: 15px;
-}
-
-.btn-primary {
-  background: #2156d8;
-}
-
-.btn-success {
-  background: #118d57;
-}
-
-.btn-secondary {
-  background: #4b5d78;
-}
-
-.btn-warn {
-  background: #ffb020;
-  color: #1f2937;
-}
-
-.btn-attn {
-  background: #e5484d;
-}
+.btn-primary { background: linear-gradient(135deg, #2d63e2, #2452bf); }
+.btn-success { background: linear-gradient(135deg, #159f60, #10834f); }
+.btn-secondary { background: linear-gradient(135deg, #596b89, #44556f); }
+.btn-warn { background: linear-gradient(135deg, #ffc14b, #f4b32d); color: #1f2937; }
+.btn-attn { background: linear-gradient(135deg, #ef5b66, #d9434e); }
 
 .btn-outline {
-  background: #fff;
-  color: #334155;
-  border: 1px solid #cdd9ea;
+  background: var(--card-strong);
+  color: #2f415f;
+  border: 1px solid #bfd0e8;
+  box-shadow: none;
+}
+
+.btn-outline:hover {
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 14px rgba(40, 57, 93, 0.12);
 }
 
 input,
@@ -163,52 +175,89 @@ textarea {
   padding: 7px;
   margin: 4px 0;
   width: 100%;
-  box-sizing: border-box;
-  border: 1px solid #cfd8e6;
-  border-radius: 8px;
-  background: #fff;
+  border: 1px solid #c7d6eb;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--ink);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: #7da1ea;
+  box-shadow: 0 0 0 3px rgba(61, 101, 192, 0.14);
+  background: rgba(255, 255, 255, 0.95);
 }
 
 label {
   display: block;
   margin-bottom: 8px;
+  color: var(--ink-soft);
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  background: rgba(255, 255, 255, 0.54);
 }
 
 th,
 td {
-  border: 1px solid #d7e0ec;
+  border: 1px solid #d4e0f0;
   padding: 7px;
   vertical-align: top;
 }
 
 th {
-  background: #f7f9fd;
+  background: rgba(246, 250, 255, 0.9);
 }
 
 pre {
   white-space: pre-wrap;
   max-height: 260px;
   overflow: auto;
-  background: #0f172a;
+  background: rgba(18, 26, 43, 0.96);
   color: #dbe5f6;
   padding: 10px;
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .msg {
   margin: 10px 16px;
   padding: 10px 12px;
-  background: #e6f0ff;
-  border: 1px solid #bdd7ff;
-  border-radius: 8px;
+  background: rgba(227, 239, 255, 0.85);
+  border: 1px solid #bfd7ff;
+  border-radius: 10px;
   color: #14346b;
   font-weight: 600;
+  backdrop-filter: blur(8px);
+}
+
+.actions .btn,
+.actions button {
+  margin: 2px 0;
+}
+
+.time-greeting {
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1.05;
+  margin: 2px 0 10px;
+  letter-spacing: 0.4px;
+}
+
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 900px) {
@@ -228,26 +277,8 @@ pre {
   .nav-close .btn {
     width: 100%;
   }
-}
 
-.actions .btn,
-.actions button {
-  margin: 2px 0;
-}
-
-.time-greeting {
-  font-size: 30px;
-  font-weight: 900;
-  line-height: 1.05;
-  margin: 2px 0 10px;
-  letter-spacing: 0.4px;
-}
-
-@media (max-width: 900px) {
   .time-greeting {
     font-size: 24px;
   }
 }
-
-
-

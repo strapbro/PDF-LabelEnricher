@@ -335,11 +335,14 @@ def _extract_manual_prefill_from_text(blob: str) -> dict[str, str]:
             "shipping service",
             "buyer name",
             "seller name",
+            "order summary",
             "item subtotal",
             "item total",
             "grand total",
             "tax",
             "shipped",
+            "package 1",
+            "sales proceeds",
         }
         if ll in header_words:
             return False
@@ -347,13 +350,21 @@ def _extract_manual_prefill_from_text(blob: str) -> dict[str, str]:
             return False
         return True
 
-    stop_idx = len(lines)
+    start_idx = 0
     for i, ln in enumerate(lines):
+        if re.search(r"^\s*order contents\s*$", ln, re.IGNORECASE):
+            start_idx = i
+            break
+
+    stop_idx = len(lines)
+    for i in range(start_idx, len(lines)):
+        ln = lines[i]
         if re.search(r"\b(?:asin|sku)\s*:", ln, re.IGNORECASE):
             stop_idx = i
             break
 
-    candidates = [ln for ln in lines[:stop_idx] if _looks_like_title_line(ln)]
+    search_lines = lines[start_idx:stop_idx] if stop_idx > start_idx else lines[:stop_idx]
+    candidates = [ln for ln in search_lines if _looks_like_title_line(ln)]
     title = max(candidates, key=len).strip() if candidates else ""
 
     platform = "amazon" if ("amazon" in lower or asin or sku) else "ebay"
@@ -380,24 +391,24 @@ def _split_manual_text_chunks(blob: str) -> list[str]:
     if not text:
         return []
 
-    marker_matches = list(re.finditer(r"(?im)^\s*order contents\s*$", text))
-    if len(marker_matches) >= 2:
+    order_matches = list(re.finditer(r"\b\d{3}-\d{7}-\d{7}\b", text))
+    if len(order_matches) >= 2:
         chunks: list[str] = []
-        for i, m in enumerate(marker_matches):
+        for i, m in enumerate(order_matches):
             start = m.start()
-            end = marker_matches[i + 1].start() if (i + 1) < len(marker_matches) else len(text)
+            end = order_matches[i + 1].start() if (i + 1) < len(order_matches) else len(text)
             chunk = text[start:end].strip()
             if chunk:
                 chunks.append(chunk)
         if chunks:
             return chunks
 
-    order_matches = list(re.finditer(r"\b\d{3}-\d{7}-\d{7}\b", text))
-    if len(order_matches) >= 2:
+    marker_matches = list(re.finditer(r"(?im)^\s*order contents\s*$", text))
+    if len(marker_matches) >= 2:
         chunks = []
-        for i, m in enumerate(order_matches):
+        for i, m in enumerate(marker_matches):
             start = m.start()
-            end = order_matches[i + 1].start() if (i + 1) < len(order_matches) else len(text)
+            end = marker_matches[i + 1].start() if (i + 1) < len(marker_matches) else len(text)
             chunk = text[start:end].strip()
             if chunk:
                 chunks.append(chunk)
