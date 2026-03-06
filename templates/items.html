@@ -5,16 +5,16 @@
   <p style="margin-top:4px;color:#555;font-size:13px;">Auto backup is enabled for every save/sync. Current backups: <strong>{{ backups_count or 0 }}</strong></p>
   <form action="/items/sync" method="post" enctype="multipart/form-data">
     <input type="file" name="master_csv" accept=".csv,.tsv,.txt" required>
-    <button type="submit">Import / Re-sync</button>
+    <button class="btn btn-secondary items-action-btn" type="submit">Import / Re-sync</button>
   </form>
   <div class="items-controls" style="margin-top:8px;">
-    <form action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button type="submit">Create Backup Now</button></form>
-    <form action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button type="submit">Open Backups Folder</button></form>
-    <a class="btn btn-secondary" href="/items/export">Download items.csv</a>
+    <form action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Create Backup Now</button></form>
+    <form action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Open Backups Folder</button></form>
+    <a class="btn btn-primary items-action-btn" href="/items/export">Download items.csv</a>
   </div>
   <form action="/items/clear-needs-review" method="post" onsubmit="return confirm('Clear all items from Needs Review list?')" style="margin-top:8px;">
     <input type="hidden" name="from_page" value="items">
-    <button type="submit">Clear Needs Review Flags</button>
+    <button class="btn btn-secondary items-action-btn" type="submit">Clear Needs Review Flags</button>
   </form>
 </section>
 
@@ -22,8 +22,8 @@
   <h2>Items</h2>
   <div class="items-controls">
     <input id="itemsFilter" type="text" placeholder="Quick filter (SKU, ASIN, title, label, location)">
-    <button id="itemsWidthToggle" type="button">Wide View</button>
-    <button id="itemsFilterClear" type="button">Clear Filter</button>
+    <button id="itemsWidthToggle" class="btn btn-secondary items-action-btn" type="button">Wide View</button>
+    <button id="itemsFilterClear" class="btn btn-secondary items-action-btn" type="button">Clear Filter</button>
   </div>
   <p style="margin-top:8px;color:#555;font-size:13px;">Tip: click column headers to sort. Click again to reverse.</p>
   <p style="margin-top:4px;color:#555;font-size:13px;">Needs Review is a system status for items that require human attention. Use <strong>Clear Needs Review Flags</strong> after you verify/fix them.</p>
@@ -100,19 +100,27 @@
           <option value="{{ t.id_value }}">{{ t.platform }} | {{ t.id_type }} | {{ t.title }}</option>
         {% endfor %}
       </datalist>
+      <div class="items-scroll-controls">
+        <button id="itemsScrollLeft" class="btn btn-secondary items-scroll-btn" type="button">&#x25C0; Scroll Left</button>
+        <button id="itemsScrollRight" class="btn btn-secondary items-scroll-btn" type="button">Scroll Right &#x25B6;</button>
+      </div>
     </div>
-    <button type="submit" style="margin-top:10px;">Save Changes</button>
+    <button id="saveChangesBtn" class="btn btn-secondary save-btn save-passive" type="submit" style="margin-top:10px;">Save Changes</button>
   </form>
 </section>
 
 <style>
 .items-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.items-action-btn { min-height: 38px; }
 .items-controls input[type="text"] { min-width: 320px; max-width: 520px; }
-.items-table-wrap { overflow-x: auto; }
+.items-table-wrap { overflow-x: auto; padding-bottom: 8px; }
+.items-table-wrap::-webkit-scrollbar { height: 18px; }
+.items-table-wrap::-webkit-scrollbar-track { background: rgba(180, 190, 180, 0.28); border-radius: 999px; }
+.items-table-wrap::-webkit-scrollbar-thumb { background: rgba(74, 110, 88, 0.58); border-radius: 999px; }
 .items-table { table-layout: fixed; }
 .items-table.mode-compact { min-width: 1950px; }
 .items-table.mode-wide { min-width: 2450px; }
-.items-table th { user-select: none; cursor: pointer; white-space: normal; word-break: break-word; line-height: 1.2; background: #f7f9fb; }
+.items-table th { user-select: none; cursor: pointer; white-space: normal; word-break: break-word; line-height: 1.2; background: #f7f9fb; position: sticky; top: 108px; z-index: 3; font-size: 14px; padding: 10px 8px; }
 .items-table th.sort-asc::after { content: " \2191"; }
 .items-table th.sort-desc::after { content: " \2193"; }
 .items-table td.center { text-align: center; }
@@ -157,6 +165,10 @@
 .items-table.mode-wide th:nth-child(11), .items-table.mode-wide td:nth-child(11) { width: 560px; }
 .items-table.mode-wide th:nth-child(12), .items-table.mode-wide td:nth-child(12) { width: 360px; }
 .items-table.mode-wide th:nth-child(14), .items-table.mode-wide td:nth-child(14) { width: 150px; }
+.items-scroll-controls { position: sticky; right: 0; bottom: 10px; z-index: 6; display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; pointer-events: none; }
+.items-scroll-btn { pointer-events: auto; min-width: 132px; }
+.save-btn { min-width: 150px; }
+.save-passive { opacity: 0.68; filter: saturate(0.72); }
 </style>
 
 <script id="linkTargetsData" type="application/json">{{ link_targets|tojson }}</script>
@@ -168,6 +180,12 @@
   const filterClearBtn = document.getElementById('itemsFilterClear');
   const widthBtn = document.getElementById('itemsWidthToggle');
   const dataEl = document.getElementById('linkTargetsData');
+  const wrap = document.querySelector('.items-table-wrap');
+  const scrollLeftBtn = document.getElementById('itemsScrollLeft');
+  const scrollRightBtn = document.getElementById('itemsScrollRight');
+  const saveBtn = document.getElementById('saveChangesBtn');
+  const saveForm = table ? table.closest('form') : null;
+  let isDirty = false;
   if (!table) return;
 
   let targets = [];
@@ -191,6 +209,14 @@
 
   function savePrefs() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs)); } catch (e) {}
+  }
+
+  function setSaveDirty(dirty) {
+    isDirty = !!dirty;
+    if (!saveBtn) return;
+    saveBtn.classList.toggle('save-passive', !isDirty);
+    saveBtn.classList.toggle('btn-secondary', !isDirty);
+    saveBtn.classList.toggle('btn-primary', isDirty);
   }
 
   function clearHeaderIndicators() {
@@ -323,6 +349,19 @@
   filterInput.addEventListener('input', (e) => applyFilter(e.target.value || ''));
   filterClearBtn.addEventListener('click', () => { filterInput.value = ''; applyFilter(''); });
   widthBtn.addEventListener('click', () => applyWidthMode(prefs.widthMode === 'wide' ? 'compact' : 'wide'));
+  if (scrollLeftBtn && wrap) {
+    scrollLeftBtn.addEventListener('click', () => wrap.scrollBy({ left: -420, behavior: 'smooth' }));
+  }
+  if (scrollRightBtn && wrap) {
+    scrollRightBtn.addEventListener('click', () => wrap.scrollBy({ left: 420, behavior: 'smooth' }));
+  }
+  if (saveForm) {
+    saveForm.addEventListener('input', (e) => {
+      if (e.target && e.target.id === 'itemsFilter') return;
+      setSaveDirty(true);
+    });
+    saveForm.addEventListener('change', () => setSaveDirty(true));
+  }
   tbody.addEventListener('input', (e) => {
     if (e.target.classList && (e.target.classList.contains('link-platform') || e.target.classList.contains('link-id-type') || e.target.classList.contains('link-id-value'))) {
       if (e.target.classList.contains('link-platform')) {
@@ -331,6 +370,7 @@
       }
       updateLinkPreviews();
     }
+    setSaveDirty(true);
   });
 
 
@@ -365,6 +405,7 @@
       const row = delBtn.closest('tr');
       if (confirm('Mark this row for deletion when you save?')) {
         toggleDeleteRow(row, true);
+        setSaveDirty(true);
       }
       return;
     }
@@ -372,6 +413,7 @@
     if (undoBtn) {
       const row = undoBtn.closest('tr');
       toggleDeleteRow(row, false);
+      setSaveDirty(true);
     }
   });
   loadPrefs();
@@ -382,25 +424,8 @@
     setDefaultTypeForPlatform(row.querySelector('.link-platform'), row.querySelector('.link-id-type'));
   });
   updateLinkPreviews();
+  setSaveDirty(false);
   if (prefs.sortCol >= 0) sortBy(prefs.sortCol, true);
 })();
 </script>
 {% endblock %}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
