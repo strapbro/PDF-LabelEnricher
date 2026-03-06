@@ -156,6 +156,9 @@ button:active,
 .btn-secondary { background: linear-gradient(135deg, #596b89, #44556f); }
 .btn-warn { background: linear-gradient(135deg, #ffc14b, #f4b32d); color: #1f2937; }
 .btn-attn { background: linear-gradient(135deg, #ef5b66, #d9434e); }
+.btn-open { background: linear-gradient(135deg, #10a9a4, #0f8a86); }
+.btn-quick { background: linear-gradient(135deg, #7b55f2, #5c39c8); }
+
 
 .btn-outline {
   background: var(--card-strong);

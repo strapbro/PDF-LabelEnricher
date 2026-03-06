@@ -23,8 +23,8 @@
     </div>
 
     <div class="upload-quick-actions">
-      <button class="btn btn-lg btn-primary" type="submit" name="quick_action" value="upload_process_open">Upload, Process, + Open Combined PDF</button>
-      <button class="btn btn-lg btn-success" type="submit" name="quick_action" value="upload_only">Upload to incoming/batch</button>
+      <button class="btn btn-lg btn-quick" type="submit" name="quick_action" value="upload_process_open">Upload + Process + Open Combined</button>
+      <button class="btn btn-lg btn-secondary" type="submit" name="quick_action" value="upload_only">Upload to incoming/batch</button>
     </div>
   </form>
 </section>
@@ -60,9 +60,24 @@
 <section class="card split-actions">
   <div>
     <h3>Primary Actions</h3>
+    {% if stale_open %}
+    <div class="stale-warning">
+      <strong>Layout settings changed since last batch.</strong> Reprocess before opening so the print file matches current layout.
+      <div class="stale-warning-actions">
+        <form action="/batch/open-combined-latest" method="post">
+          <input type="hidden" name="reprocess_if_stale" value="1">
+          <button class="btn btn-md btn-primary" type="submit">Reprocess + Open (Recommended)</button>
+        </form>
+        <form action="/batch/open-combined-latest" method="post">
+          <input type="hidden" name="force_open" value="1">
+          <button class="btn btn-md btn-outline" type="submit">Open Last Combined Anyway</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
     <div class="actions-grid main-actions">
       <form action="/process" method="post"><button class="btn btn-lg btn-primary" type="submit">Process Batch</button></form>
-      <form action="/batch/open-combined-latest" method="post"><button class="btn btn-lg btn-success" type="submit">Open Combined PDF</button></form>
+      <form action="/batch/open-combined-latest" method="post"><button class="btn btn-lg btn-open" type="submit">Open Combined PDF</button></form>
       <form action="/process/reprocess-latest" method="post" onsubmit="return confirm('Reprocess latest archived batch? This will clear current staged files first.')"><button class="btn btn-md btn-secondary" type="submit">Reprocess Previous Batch</button></form>
       <a class="btn btn-md btn-secondary" href="/reprocess-select">Reprocess Select PDFs (Prev Batch)</a>
     </div>
@@ -178,6 +193,11 @@
 .stat-miss { border-color: #f8d3d3; background: #fff5f5; }
 .stat-alert { border-color: #f9d68a; background: #fff8ea; }
 
+.stale-warning { margin: 0 0 10px; padding: 10px 12px; border: 1px solid #f3d18d; background: #fff6e7; border-radius: 10px; color: #5b3b09; font-size: 13px; }
+.stale-warning-actions { display: grid; grid-template-columns: 1.2fr 1fr; gap: 8px; margin-top: 8px; }
+.stale-warning-actions form { margin: 0; }
+.stale-warning-actions .btn { width: 100%; }
+
 .split-actions h3 { margin: 2px 0 10px; font-size: 15px; color: #1e293b; }
 .split-actions > div + div { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #d7e1ef; }
 .actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; align-items: stretch; }
@@ -193,6 +213,7 @@
 }
 
 @media (max-width: 900px) {
+  .stale-warning-actions { grid-template-columns: 1fr; }
   .upload-quick-actions { grid-template-columns: 1fr; }
   .actions-grid { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
@@ -251,5 +272,6 @@ document.getElementById('uploadForm').addEventListener('submit', () => {
 refreshPending();
 </script>
 {% endblock %}
+
 
 
