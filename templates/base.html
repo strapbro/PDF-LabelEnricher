@@ -6,7 +6,7 @@
   <link rel="stylesheet" href="/static/style.css?v=20260307a">
 </head>
 <body>
-  <header>
+  <header id="appHeader">
     <h1>Label Enricher</h1>
     <div id="timeGreeting" class="time-greeting" aria-live="polite"></div>
     <div class="nav-row">
@@ -18,7 +18,7 @@
         <a href="/manual-entry">Manual Entry</a>
       </nav>
       <form class="nav-close" action="/app/close" method="post">
-        <button class="btn btn-sm btn-attn" type="submit">Close App</button>
+        <button class="btn btn-md btn-attn" type="submit">Close App</button>
       </form>
     </div>
   </header>
@@ -39,9 +39,22 @@
         el.textContent = 'GOOD FUCKING EVENINGGGGGGGG DAPH';
       }
     })();
+    (function () {
+      const header = document.getElementById('appHeader');
+      if (!header) return;
+      header.addEventListener('click', (e) => {
+        const tgt = e.target;
+        if (!(tgt instanceof Element)) return;
+        if (tgt.closest('a, button, input, select, textarea, label, form')) return;
+        window.location.href = '/';
+      });
+    })();
   </script>
 </body>
 </html>
+
+
+
 
 
 
