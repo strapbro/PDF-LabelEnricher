@@ -34,8 +34,7 @@ if "%PORT%"=="" (
 )
 
 echo Starting Label Enricher on http://127.0.0.1:%PORT%
+start "" "http://127.0.0.1:%PORT%"
 python -m uvicorn app.ui_server:app --host 127.0.0.1 --port %PORT%
 
 echo.
-echo App stopped. Press any key to close.
-pause
