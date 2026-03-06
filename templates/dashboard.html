@@ -23,7 +23,7 @@
     </div>
 
     <div class="upload-quick-actions">
-      <button class="btn btn-lg btn-quick" type="submit" name="quick_action" value="upload_process_open">Upload + Process + Open Combined</button>
+      <button class="btn btn-lg btn-quick btn-spotlight" type="submit" name="quick_action" value="upload_process_open">Upload + Process + Open Combined</button>
       <button class="btn btn-lg btn-secondary" type="submit" name="quick_action" value="upload_only">Upload to incoming/batch</button>
     </div>
   </form>
@@ -269,9 +269,20 @@ document.getElementById('uploadForm').addEventListener('submit', () => {
   }, 0);
 });
 
+
+document.querySelectorAll('.btn-spotlight').forEach((btn) => {
+  btn.addEventListener('mousemove', (e) => {
+    const rect = btn.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    btn.style.setProperty('--x', `${x}px`);
+    btn.style.setProperty('--y', `${y}px`);
+  });
+});
 refreshPending();
 </script>
 {% endblock %}
+
 
 
 

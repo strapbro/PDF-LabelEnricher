@@ -159,6 +159,40 @@ button:active,
 .btn-open { background: linear-gradient(135deg, #10a9a4, #0f8a86); }
 .btn-quick { background: linear-gradient(135deg, #7b55f2, #5c39c8); }
 
+.btn-spotlight {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(180, 206, 255, 0.38);
+  background: linear-gradient(135deg, rgba(123, 85, 242, 0.92), rgba(92, 57, 200, 0.92));
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.btn-spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.28s ease-out;
+  background: radial-gradient(
+    circle at var(--x, 50%) var(--y, 50%),
+    rgba(168, 212, 255, 0.42) 0%,
+    rgba(122, 173, 255, 0.2) 22%,
+    rgba(0, 0, 0, 0) 58%
+  );
+}
+
+.btn-spotlight:hover::before,
+.btn-spotlight:focus-visible::before {
+  opacity: 1;
+}
+
+.btn-spotlight:hover,
+.btn-spotlight:focus-visible {
+  border-color: rgba(138, 186, 255, 0.72);
+}
+
 
 .btn-outline {
   background: var(--card-strong);
