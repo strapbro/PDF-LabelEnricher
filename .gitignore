@@ -1,0 +1,29 @@
+﻿# Python caches and virtualenvs
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local runtime data
+logs/
+processed/
+incoming/batch/
+incoming/batch/_unzipped/
+backups/
+
+# Local app data (keep sample_data tracked instead)
+items.csv
+config.local.yaml
+
+# Temp/probe files
+_tmp_*
+*.tmp

@@ -1,0 +1,45 @@
+﻿<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Label Enricher</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Label Enricher</h1>
+    <div id="timeGreeting" class="time-greeting" aria-live="polite"></div>
+    <div class="nav-row">
+      <nav class="nav-links">
+        <a href="/">Dashboard</a>
+        <a href="/settings">Layout & Settings</a>
+        <a href="/unprocessed">Unprocessed Queue</a>
+        <a href="/items">Item Database</a>
+        <a href="/manual-entry">Manual Entry</a>
+      </nav>
+      <form class="nav-close" action="/app/close" method="post" onsubmit="return confirm('Close Label Enricher now?')">
+        <button class="btn btn-sm btn-attn" type="submit">Close App</button>
+      </form>
+    </div>
+  </header>
+  {% if message %}<div class="msg">{{ message }}</div>{% endif %}
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <script>
+    (function () {
+      const el = document.getElementById('timeGreeting');
+      if (!el) return;
+      const hour = new Date().getHours();
+      if (hour < 12) {
+        el.textContent = 'GOOD FUCKING MORNINGGGGGG DAPH';
+      } else if (hour < 18) {
+        el.textContent = 'GOOD FUCKING AFTERNOONNNNNNN DAPH';
+      } else {
+        el.textContent = 'GOOD FUCKING EVENINGGGGGGGG DAPH';
+      }
+    })();
+  </script>
+</body>
+</html>
+

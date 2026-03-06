@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Manual Entry (One-Off or Small Batch)</h2>
+  <p style="font-size:13px;color:#555;">Use this when you want to process labels manually without full CSV/TXT matching.</p>
+  <p style="font-size:13px;color:#555;">Rules: <strong>Qty required</strong>, <strong>label-link reference required</strong> (name/tracking/order ref), and <strong>internal label OR item key</strong> required.</p>
+  <p style="font-size:13px;color:#555;">Unprocessed queue count: <strong>{{ unresolved_count }}</strong></p>
+</section>
+
+<section class="card">
+  <h3>Option A: Upload/Stage Small Batch Files</h3>
+  <form id="manualUploadForm" action="/manual-entry/upload" method="post" enctype="multipart/form-data">
+    <input id="manualFileInput" type="file" name="files" multiple required style="display:none;">
+    <div id="manualDropZone" class="drop-zone" role="button" tabindex="0" aria-label="Drop files or click to choose files">
+      <div class="drop-title">Drag & drop .pdf/.zip/.txt/.csv here</div>
+      <div class="drop-sub">or click anywhere in this box to choose files</div>
+      <div class="drop-choose">Choose Files</div>
+    </div>
+    <div id="manualPendingCount" class="pending-count">Pending selection: 0 file(s)</div>
+    <button class="btn btn-md btn-success" type="submit">Upload to incoming/batch</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Option B: Single Label Text Parse</h3>
+  <form action="/manual-entry/parse-text" method="post">
+    <label>Label PDF (human-readable)
+      <select name="label_pdf">
+        <option value="">(No label selected)</option>
+        {% for l in labels %}
+        <option value="{{ l.path }}" {% if prefill.label_pdf == l.path %}selected{% endif %}>{{ l.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Paste one order text block
+      <textarea class="manual-paste" name="messy_text" rows="14" placeholder="Paste text for one order...">{{ prefill.messy_text or '' }}</textarea>
+    </label>
+    <button class="btn btn-md btn-secondary" type="submit">Parse Single</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Structured Single Output</h3>
+  <form action="/manual-entry/create" method="post">
+    <div class="grid2">
+      <label>Label PDF
+        <select name="label_pdf" required>
+          <option value="">Select label PDF...</option>
+          {% for l in labels %}
+          <option value="{{ l.path }}" {% if prefill.label_pdf == l.path %}selected{% endif %}>{{ l.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label>Platform
+        <select name="platform" required>
+          <option value="amazon" {% if prefill.platform == 'amazon' %}selected{% endif %}>Amazon</option>
+          <option value="ebay" {% if prefill.platform == 'ebay' %}selected{% endif %}>eBay</option>
+        </select>
+      </label>
+
+      <label>Item # / SKU / ASIN (optional if internal label provided)
+        <input name="item_key" placeholder="Optional if internal label provided" value="{{ prefill.item_key or '' }}">
+      </label>
+
+      <label>Label Link Reference (required)
+        <input name="label_ref" required placeholder="Name, tracking, or order ref" value="{{ prefill.label_ref or '' }}">
+      </label>
+
+      <label>ASIN (optional)
+        <input name="item_asin" placeholder="Optional; helps for Amazon linking" value="{{ prefill.item_asin or '' }}">
+      </label>
+
+      <label>Order ID (optional)
+        <input name="order_id" placeholder="If blank, auto MANUAL-YYYYMMDD-HHMMSS" value="{{ prefill.order_id or '' }}">
+      </label>
+
+      <label>Quantity
+        <input name="quantity" type="number" min="1" step="1" value="{{ prefill.quantity or '1' }}" required>
+      </label>
+
+      <label>Internal Label (optional if item key can resolve)
+        <input name="custom_label" placeholder="If blank: use DB label or title fallback" value="{{ prefill.custom_label or '' }}">
+      </label>
+
+      <label>Item Title (optional)
+        <input name="title" placeholder="Used for title fallback" value="{{ prefill.title or '' }}">
+      </label>
+
+      <label>Total Paid (optional)
+        <input name="total_paid" placeholder="e.g. 26.98" value="{{ prefill.total_paid or '' }}">
+      </label>
+
+      <label>Location (optional)
+        <input name="location" placeholder="e.g. A-12" value="{{ prefill.location or '' }}">
+      </label>
+    </div>
+
+    <label style="margin-top:8px;"><input type="checkbox" name="use_title_as_label" {% if prefill.use_title_as_label != '0' %}checked{% endif %} style="width:auto;"> Use title as label if Internal Label is blank</label>
+    <label style="margin-top:4px;"><input type="checkbox" name="write_to_items" {% if prefill.write_to_items == '1' %}checked{% endif %} style="width:auto;"> Write/update this row in items.csv (off by default for safety)</label>
+    <button class="btn btn-lg btn-primary" type="submit" style="margin-top:10px;">Create Manual Output PDF</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Manual Batch (Multi Label)</h3>
+  <form action="/manual-entry/parse-text-batch" method="post">
+    <label>Paste text for all orders (all 5, etc.)
+      <textarea class="manual-paste manual-paste-lg" name="batch_messy_text" rows="18" placeholder="Paste all order-page text blocks here...">{{ prefill.batch_messy_text or '' }}</textarea>
+    </label>
+
+    <div class="batch-grid">
+      {% for row in prefill.batch_entries %}
+      <div class="batch-row card">
+        <h4>Label {{ loop.index }}</h4>
+        <label>Label PDF
+          <select name="row_{{ loop.index0 }}_label_pdf">
+            <option value="">Select label...</option>
+            {% for l in labels %}
+            <option value="{{ l.path }}" {% if row.label_pdf == l.path %}selected{% endif %}>{{ l.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Platform
+          <select name="row_{{ loop.index0 }}_platform">
+            <option value="amazon" {% if row.platform == 'amazon' %}selected{% endif %}>Amazon</option>
+            <option value="ebay" {% if row.platform == 'ebay' %}selected{% endif %}>eBay</option>
+          </select>
+        </label>
+        <label>Item # / SKU / ASIN <input name="row_{{ loop.index0 }}_item_key" value="{{ row.item_key or '' }}"></label>
+        <label>Label Link Reference* <input name="row_{{ loop.index0 }}_label_ref" value="{{ row.label_ref or '' }}" placeholder="Name/tracking/order ref"></label>
+        <label>ASIN <input name="row_{{ loop.index0 }}_item_asin" value="{{ row.item_asin or '' }}"></label>
+        <label>Order ID <input name="row_{{ loop.index0 }}_order_id" value="{{ row.order_id or '' }}"></label>
+        <label>Qty <input type="number" min="1" step="1" name="row_{{ loop.index0 }}_quantity" value="{{ row.quantity or '1' }}"></label>
+        <label>Internal Label <input name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}"></label>
+        <label>Title <input name="row_{{ loop.index0 }}_title" value="{{ row.title or '' }}"></label>
+        <label>Total <input name="row_{{ loop.index0 }}_total_paid" value="{{ row.total_paid or '' }}"></label>
+        <label>Location <input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"></label>
+        <label><input type="checkbox" name="row_{{ loop.index0 }}_use_title_as_label" {% if row.use_title_as_label != '0' %}checked{% endif %} style="width:auto;"> Use title as label if label blank</label>
+      </div>
+      {% endfor %}
+    </div>
+
+    <label><input type="checkbox" name="write_to_items" {% if prefill.write_to_items == '1' %}checked{% endif %} style="width:auto;"> Write/update items.csv during batch (off by default)</label>
+    <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn btn-md btn-secondary" type="submit">Parse Batch Text into Rows</button>
+      <button class="btn btn-lg btn-primary" type="submit" formaction="/manual-entry/create-batch">Create Combined Manual Output PDF</button>
+    </div>
+  </form>
+</section>
+
+<style>
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 10px 14px;
+}
+.batch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+.batch-row h4 { margin: 0 0 8px; }
+.drop-zone {
+  border: 2px dashed #7d8a99;
+  border-radius: 10px;
+  padding: 20px;
+  text-align: center;
+  margin-bottom: 10px;
+  cursor: pointer;
+  background: #f8fbff;
+}
+.drop-zone:hover { background: #eef6ff; }
+.drop-zone.active { background: #e8f2ff; border-color: #2f6fed; }
+.drop-title { font-weight: 700; font-size: 16px; }
+.drop-sub { color: #4b5563; margin-top: 4px; font-size: 13px; }
+.drop-choose {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #0b5ed7;
+  color: #fff;
+  font-weight: 600;
+}
+.pending-count { margin: 8px 0; font-size: 13px; color: #444; }
+.manual-paste {
+  width: 100%;
+  min-height: 260px;
+  box-sizing: border-box;
+}
+.manual-paste-lg {
+  min-height: 360px;
+}
+@media (max-width: 900px) {
+  .grid2 { grid-template-columns: 1fr; }
+}
+</style>
+
+<script>
+(function () {
+  const dropZone = document.getElementById('manualDropZone');
+  const fileInput = document.getElementById('manualFileInput');
+  const pendingCount = document.getElementById('manualPendingCount');
+  const uploadForm = document.getElementById('manualUploadForm');
+  if (!dropZone || !fileInput || !pendingCount || !uploadForm) return;
+
+  let dt = new DataTransfer();
+
+  function refreshPending() {
+    pendingCount.textContent = `Pending selection: ${dt.files.length} file(s)`;
+  }
+
+  function addFiles(fileList) {
+    for (const f of fileList) dt.items.add(f);
+    fileInput.files = dt.files;
+    refreshPending();
+  }
+
+  fileInput.addEventListener('change', (e) => addFiles(e.target.files));
+
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fileInput.click();
+    }
+  });
+
+  ['dragenter','dragover'].forEach(evt => dropZone.addEventListener(evt, e => {
+    e.preventDefault();
+    dropZone.classList.add('active');
+  }));
+
+  ['dragleave','drop'].forEach(evt => dropZone.addEventListener(evt, e => {
+    e.preventDefault();
+    dropZone.classList.remove('active');
+  }));
+
+  dropZone.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+
+  uploadForm.addEventListener('submit', () => {
+    setTimeout(() => {
+      dt = new DataTransfer();
+      fileInput.value = '';
+      refreshPending();
+    }, 0);
+  });
+
+  refreshPending();
+})();
+</script>
+{% endblock %}
+
+
+

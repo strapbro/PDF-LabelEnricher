@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Unprocessed Label Queue (Resolve Matches)</h2>
+  <form action="/resolve/clear" method="post" onsubmit="return confirm('Clear all unresolved queue items?')" style="margin-bottom:10px;">
+    <button type="submit">Clear Queue</button>
+  </form>
+  <table>
+    <thead><tr><th>Label</th><th>Reason</th><th>Candidates (Most likely first)</th><th>Action</th></tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><strong>{{ row.label_identity or row.recipient_name or row.tracking_number or row.label_pdf }}</strong><br><small>{{ row.label_pdf }}</small></td>
+        <td><strong>{{ row.reason_human or row.reason }}</strong><br><small>{{ row.reason }}</small></td>
+        <td>
+          <ul>
+          {% for c in (row.candidates or []) %}
+            {% set c_order = c.get("order", {}) %}
+            {% set c_items = c_order.get("items", []) if c_order else [] %}
+            {% set first_item = c_items[0] if c_items and c_items|length > 0 else None %}
+            <li>
+              <strong>Order {{ c.get("order_id", "") }}</strong>
+              | {{ ((c.get("score", 0) * 100) | round(0)) }}% match
+              | {{ c.get("ship_name", "") }}
+              | ZIP {{ c.get("ship_postal", "") }}
+              {% if first_item %}| Item: {{ first_item.get("title", "") }}{% endif %}
+              {% if first_item %}| Qty: {{ first_item.get("quantity", "") }}{% endif %}
+            </li>
+          {% else %}
+            <li>No candidate matches found</li>
+          {% endfor %}
+          </ul>
+        </td>
+        <td>
+          {% if row.candidates and row.candidates|length > 0 %}
+          <form action="/resolve/assign" method="post" style="margin-bottom:6px;">
+            <input type="hidden" name="label_pdf" value="{{ row.label_pdf }}">
+            <select name="order_id" required>
+              {% for c in row.candidates %}
+              <option value="{{ c.get('order_id', '') }}">Order {{ c.get('order_id', '') }} ({{ ((c.get('score', 0) * 100) | round(0)) }}%)</option>
+              {% endfor %}
+            </select>
+            <button type="submit">Resolve + Generate Output</button>
+          </form>
+          {% endif %}
+          <form action="/resolve/remove" method="post" onsubmit="return confirm('Remove this queue item?')">
+            <input type="hidden" name="label_pdf" value="{{ row.label_pdf }}">
+            <button type="submit">Remove From Queue</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">No unresolved labels</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

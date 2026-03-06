@@ -1,0 +1,8 @@
+﻿fastapi==0.116.1
+uvicorn==0.35.0
+PyMuPDF==1.26.4
+reportlab==4.4.3
+pypdf==6.0.0
+python-multipart==0.0.20
+Jinja2==3.1.6
+PyYAML==6.0.2

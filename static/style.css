@@ -1,0 +1,253 @@
+﻿body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  margin: 0;
+  background: #f4f6fb;
+  color: #172033;
+}
+
+header {
+  background: linear-gradient(135deg, #172033 0%, #1f2e4f 100%);
+  color: #fff;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+header h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+nav,
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+nav a,
+.nav-links a {
+  color: #e9efff;
+  text-decoration: none;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+nav a:hover,
+.nav-links a:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.nav-close {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.nav-close .btn {
+  min-height: 34px;
+}
+
+main {
+  padding: 16px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #dbe4f2;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.04);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+button,
+.btn {
+  padding: 8px 12px;
+  background: #2156d8;
+  color: #fff;
+  border: 0;
+  border-radius: 9px;
+  text-decoration: none;
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+  box-sizing: border-box;
+  max-width: 100%;
+  transition: transform 0.06s ease, filter 0.14s ease;
+}
+
+button:hover,
+.btn:hover {
+  filter: brightness(1.06);
+}
+
+button:active,
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn-sm {
+  min-height: 34px;
+  font-size: 12px;
+}
+
+.btn-md {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+.btn-lg {
+  min-height: 46px;
+  font-size: 15px;
+}
+
+.btn-primary {
+  background: #2156d8;
+}
+
+.btn-success {
+  background: #118d57;
+}
+
+.btn-secondary {
+  background: #4b5d78;
+}
+
+.btn-warn {
+  background: #ffb020;
+  color: #1f2937;
+}
+
+.btn-attn {
+  background: #e5484d;
+}
+
+.btn-outline {
+  background: #fff;
+  color: #334155;
+  border: 1px solid #cdd9ea;
+}
+
+input,
+select,
+textarea {
+  padding: 7px;
+  margin: 4px 0;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cfd8e6;
+  border-radius: 8px;
+  background: #fff;
+}
+
+label {
+  display: block;
+  margin-bottom: 8px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  border: 1px solid #d7e0ec;
+  padding: 7px;
+  vertical-align: top;
+}
+
+th {
+  background: #f7f9fd;
+}
+
+pre {
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow: auto;
+  background: #0f172a;
+  color: #dbe5f6;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.msg {
+  margin: 10px 16px;
+  padding: 10px 12px;
+  background: #e6f0ff;
+  border: 1px solid #bdd7ff;
+  border-radius: 8px;
+  color: #14346b;
+  font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .nav-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .nav-close {
+    width: 100%;
+  }
+
+  .nav-close .btn {
+    width: 100%;
+  }
+}
+
+.actions .btn,
+.actions button {
+  margin: 2px 0;
+}
+
+.time-greeting {
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1.05;
+  margin: 2px 0 10px;
+  letter-spacing: 0.4px;
+}
+
+@media (max-width: 900px) {
+  .time-greeting {
+    font-size: 24px;
+  }
+}
+
+
+

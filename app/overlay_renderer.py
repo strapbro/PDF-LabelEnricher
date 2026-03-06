@@ -1,0 +1,610 @@
+from __future__ import annotations
+
+import io
+from pathlib import Path
+from typing import Any
+
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfgen import canvas
+from pypdf import PdfReader
+
+
+INLINE_LOCK_PREFIX = "@@INLINE@@ "
+
+
+def _strip_emph_markers(text: str) -> tuple[str, bool]:
+    if text.startswith(INLINE_LOCK_PREFIX):
+        text = text[len(INLINE_LOCK_PREFIX) :]
+    if text.startswith("*") and text.endswith("*") and len(text) >= 3:
+        return text[1:-1], True
+    return text, False
+
+
+def _text_width(text: str, font_name: str, font_size: int) -> float:
+    clean, _ = _strip_emph_markers(text)
+    return pdfmetrics.stringWidth(clean, font_name, font_size)
+
+
+def _fit_text(text: str, font_name: str, font_size: int, max_width: float) -> str:
+    clean, emph = _strip_emph_markers(text)
+    if _text_width(text, font_name, font_size) <= max_width:
+        return text
+    suffix = "..."
+    for i in range(len(clean), 0, -1):
+        test_clean = clean[:i].rstrip() + suffix
+        wrapped = f"*{test_clean}*" if emph else test_clean
+        if _text_width(wrapped, font_name, font_size) <= max_width:
+            return wrapped
+    return f"*{suffix}*" if emph else suffix
+
+
+def _wrap_text_word(text: str, font_name: str, font_size: int, max_width: float) -> list[str]:
+    clean, emph = _strip_emph_markers(text)
+    words = clean.split()
+    if not words:
+        return [text]
+    out: list[str] = []
+    cur = words[0]
+    for w in words[1:]:
+        cand = f"{cur} {w}"
+        cand_wrapped = f"*{cand}*" if emph else cand
+        if _text_width(cand_wrapped, font_name, font_size) <= max_width:
+            cur = cand
+        else:
+            out.append(f"*{cur}*" if emph else cur)
+            cur = w
+    out.append(f"*{cur}*" if emph else cur)
+
+    final: list[str] = []
+    for line in out:
+        if _text_width(line, font_name, font_size) <= max_width:
+            final.append(line)
+        else:
+            final.extend(_wrap_text_char(line, font_name, font_size, max_width))
+    return final
+
+
+def _wrap_text_char(text: str, font_name: str, font_size: int, max_width: float) -> list[str]:
+    clean, emph = _strip_emph_markers(text)
+    if not clean:
+        return [text]
+    out: list[str] = []
+    cur = ""
+    for ch in clean:
+        cand = cur + ch
+        cand_wrapped = f"*{cand}*" if emph else cand
+        if cur and _text_width(cand_wrapped, font_name, font_size) > max_width:
+            out.append(f"*{cur}*" if emph else cur)
+            cur = ch
+        else:
+            cur = cand
+    if cur:
+        out.append(f"*{cur}*" if emph else cur)
+    return out
+
+
+def _expand_lines(lines: list[str], font_name: str, font_size: int, max_width: float, wrap_mode: str) -> list[str]:
+    expanded: list[str] = []
+    for line in lines:
+        if line.startswith(INLINE_LOCK_PREFIX):
+            expanded.append(_fit_text(line[len(INLINE_LOCK_PREFIX) :], font_name, font_size, max_width))
+            continue
+        if wrap_mode == "word":
+            expanded.extend(_wrap_text_word(line, font_name, font_size, max_width))
+        elif wrap_mode == "char":
+            expanded.extend(_wrap_text_char(line, font_name, font_size, max_width))
+        else:
+            expanded.append(_fit_text(line, font_name, font_size, max_width))
+    return expanded
+
+
+def _auto_perpendicular_primary(base_preset: str) -> str:
+    if base_preset in ("top_margin", "bottom_margin"):
+        return "left_margin"
+    if base_preset in ("left_margin", "right_margin"):
+        return "top_margin"
+    return "left_margin"
+
+
+def _auto_perpendicular_secondary(base_preset: str) -> str:
+    if base_preset in ("top_margin", "bottom_margin"):
+        return "right_margin"
+    if base_preset in ("left_margin", "right_margin"):
+        return "bottom_margin"
+    return "right_margin"
+
+
+def _resolve_preset(layout: dict[str, Any], region: str) -> str:
+    orientation = str(layout.get("orientation_mode", "normal"))
+    base = str(layout.get("placement_preset", "right_margin"))
+    if orientation != "rotated_90":
+        return base
+
+    if region == "secondary":
+        rp = str(layout.get("rotated_secondary_preset", "auto_perpendicular"))
+        if rp == "auto_perpendicular":
+            return _auto_perpendicular_secondary(base)
+        return rp
+
+    rp = str(layout.get("rotated_primary_preset", "auto_perpendicular"))
+    if rp == "auto_perpendicular":
+        return _auto_perpendicular_primary(base)
+    return rp
+
+
+def _safe_rect(config: dict[str, Any], page_w: float, page_h: float, preset_override: str | None = None) -> tuple[float, float, float, float]:
+    layout = config["print_layout"]
+    preset = preset_override or str(layout.get("placement_preset", "right_margin"))
+    custom = layout.get("overlay_safe_rect", {})
+
+    edge_x = float(layout.get("edge_inset_x", 8))
+    edge_y = float(layout.get("edge_inset_y", 24))
+    box_w = float(layout.get("margin_box_width", 220))
+    box_h = float(layout.get("margin_box_height", max(120, page_h - (2 * edge_y))))
+    page_mode = str(layout.get("page_mode", "half_sheet_top"))
+
+    if preset == "custom":
+        x = float(custom.get("x", 40))
+        y = float(custom.get("y", 40))
+        w = float(custom.get("w", 260))
+        h = float(custom.get("h", 180))
+        return (x, y, w, h)
+
+    if page_mode == "half_sheet_top":
+        region_y0 = page_h / 2.0
+        region_y1 = page_h
+    elif page_mode == "half_sheet_bottom":
+        region_y0 = 0.0
+        region_y1 = page_h / 2.0
+    else:
+        region_y0 = 0.0
+        region_y1 = page_h
+
+    region_h = max(24.0, region_y1 - region_y0)
+    usable_h = max(24.0, min(box_h, region_h - (2 * edge_y)))
+    usable_w = max(24.0, min(box_w, page_w - (2 * edge_x)))
+
+    if preset == "left_margin":
+        return (edge_x, region_y0 + edge_y, usable_w, usable_h)
+    if preset == "top_margin":
+        return (edge_x, region_y1 - edge_y - usable_h, page_w - (2 * edge_x), usable_h)
+    if preset == "bottom_margin":
+        return (edge_x, region_y0 + edge_y, page_w - (2 * edge_x), usable_h)
+
+    return (page_w - edge_x - usable_w, region_y0 + edge_y, usable_w, usable_h)
+
+
+def _secondary_rect(config: dict[str, Any], page_w: float, page_h: float) -> tuple[float, float, float, float]:
+    layout = config["print_layout"]
+    edge_x = float(layout.get("edge_inset_x", 8))
+    edge_y = float(layout.get("edge_inset_y", 24))
+    strip_h = float(layout.get("secondary_strip_height", 36))
+    gap = float(layout.get("secondary_strip_gap", 6))
+    anchor = str(layout.get("secondary_anchor", "midline"))
+    page_mode = str(layout.get("page_mode", "half_sheet_top"))
+
+    if page_mode == "half_sheet_top":
+        region_y0 = page_h / 2.0
+        region_y1 = page_h
+    elif page_mode == "half_sheet_bottom":
+        region_y0 = 0.0
+        region_y1 = page_h / 2.0
+    else:
+        region_y0 = 0.0
+        region_y1 = page_h
+
+    region_h = max(24.0, region_y1 - region_y0)
+    w = max(80.0, page_w - (2 * edge_x))
+    h = max(12.0, min(strip_h, region_h - (2 * edge_y)))
+    x = edge_x
+
+    if anchor == "bottom_margin":
+        y = region_y0 + edge_y
+        return (x, y, w, h)
+
+    # midline means "near the divider line" within the active page half.
+    if page_mode == "half_sheet_top":
+        y = min(region_y1 - h - edge_y, region_y0 + gap)
+    elif page_mode == "half_sheet_bottom":
+        y = max(region_y0 + edge_y, region_y1 - h - gap)
+    else:
+        mid = page_h / 2.0
+        y = min(page_h - h - edge_y, max(edge_y, mid + gap))
+
+    return (x, y, w, h)
+
+
+def _draw_text_line(c: canvas.Canvas, x: float, y: float, w: float, text: str, align: str, font_name: str, font_size: int) -> None:
+    clean, emph = _strip_emph_markers(text)
+    tw = pdfmetrics.stringWidth(clean, font_name, font_size)
+
+    if align == "center":
+        draw_x = x + (w - tw) / 2.0
+    elif align == "right":
+        draw_x = x + w - tw
+    else:
+        draw_x = x
+
+    c.drawString(draw_x, y, clean)
+    if emph:
+        c.setLineWidth(1)
+        c.line(draw_x, y - 1.5, draw_x + tw, y - 1.5)
+
+
+def _draw_text_line_local(c: canvas.Canvas, y: float, w: float, text: str, align: str, font_name: str, font_size: int) -> None:
+    clean, emph = _strip_emph_markers(text)
+    tw = pdfmetrics.stringWidth(clean, font_name, font_size)
+
+    if align == "center":
+        draw_x = (w - tw) / 2.0
+    elif align == "right":
+        draw_x = w - tw
+    else:
+        draw_x = 0
+
+    c.drawString(draw_x, y, clean)
+    if emph:
+        c.setLineWidth(1)
+        c.line(draw_x, y - 1.5, draw_x + tw, y - 1.5)
+
+
+def _item_row_matches(row: dict[str, str], item: dict[str, Any]) -> bool:
+    keys = [
+        (item.get("item_id") or "").strip(),
+        (item.get("item_sku") or "").strip(),
+        (item.get("item_asin") or "").strip(),
+        (item.get("ebay_item_number") or "").strip(),
+    ]
+    row_keys = [
+        (row.get("item_id") or "").strip(),
+        (row.get("ebay_item_number") or "").strip(),
+        (row.get("amazon_sku") or "").strip(),
+        (row.get("amazon_asin") or "").strip(),
+    ]
+    keyset = {k for k in keys if k}
+    rowset = {k for k in row_keys if k}
+    return bool(keyset & rowset)
+
+
+def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], config: dict[str, Any]) -> list[str]:
+    layout = config.get("print_layout", {})
+    show_labels = layout.get("show_field_labels", True)
+    lines: list[str] = []
+
+    default_order = ["label", "qty", "total", "location", "title"]
+    raw_order = layout.get("field_order", default_order)
+    if isinstance(raw_order, str):
+        tokens = [t.strip().lower() for t in raw_order.split(",") if t.strip()]
+    elif isinstance(raw_order, list):
+        tokens = [str(t).strip().lower() for t in raw_order if str(t).strip()]
+    else:
+        tokens = default_order
+
+    allowed = ["label", "qty", "total", "location", "title"]
+    field_order = [t for t in tokens if t in allowed]
+    for t in allowed:
+        if t not in field_order:
+            field_order.append(t)
+
+    inline_raw = str(layout.get("inline_fields_csv", "")).strip().lower()
+    inline_fields = {x.strip() for x in inline_raw.split(",") if x.strip()} if inline_raw else set()
+    inline_fields = {x for x in inline_fields if x in allowed}
+    inline_sep = str(layout.get("inline_separator", " | "))
+
+    line_groups_raw = str(layout.get("line_groups_csv", "")).strip().lower()
+    line_groups: list[list[str]] = []
+    if line_groups_raw:
+        for grp in line_groups_raw.split(";"):
+            fields = [x.strip().lower() for x in grp.split(",") if x.strip()]
+            fields = [x for x in fields if x in allowed]
+            if fields:
+                line_groups.append(fields)
+    defer_summary_line = line_groups_raw.replace(" ", "") == "qty,label;total,location"
+
+    locations = [r.get("location", "").strip() for r in item_rows if r.get("location", "").strip()]
+    uniq_locations: list[str] = []
+    for loc in locations:
+        if loc not in uniq_locations:
+            uniq_locations.append(loc)
+
+    items = order.get("items", []) or []
+    use_numbering = len(items) > 1
+
+    total = order.get("total_paid")
+    total_line = ""
+    if total is not None and float(total or 0) > 0:
+        total_line = (f"TOTAL ${float(total):.2f}") if show_labels else f"${float(total):.2f}"
+
+    location_emitted = False
+    total_emitted = False
+
+    def _flag_on(value: Any, default: bool = True) -> bool:
+        if value is None:
+            return default
+        s = str(value).strip().lower()
+        if not s:
+            return default
+        return s not in ("0", "false", "off", "no")
+
+    def _emit_with_inline(chunks: list[tuple[str, str]]) -> None:
+        inline_parts: list[str] = []
+        for field, text in chunks:
+            text = (text or "").strip()
+            if not text:
+                continue
+            if field in inline_fields:
+                inline_parts.append(text)
+                continue
+            if inline_parts:
+                lines.append(INLINE_LOCK_PREFIX + inline_sep.join(inline_parts))
+                inline_parts = []
+            lines.append(text)
+        if inline_parts:
+            lines.append(INLINE_LOCK_PREFIX + inline_sep.join(inline_parts))
+
+    def _emit_with_line_groups(chunks: list[tuple[str, str]]) -> None:
+        used_idx: set[int] = set()
+        for grp in line_groups:
+            grp_parts: list[str] = []
+            for gf in grp:
+                for idx, (field, text) in enumerate(chunks):
+                    if idx in used_idx:
+                        continue
+                    if field != gf:
+                        continue
+                    text = (text or "").strip()
+                    if text:
+                        grp_parts.append(text)
+                        used_idx.add(idx)
+                    break
+            if grp_parts:
+                lines.append(INLINE_LOCK_PREFIX + inline_sep.join(grp_parts))
+
+        remainder = [chunks[i] for i in range(len(chunks)) if i not in used_idx]
+        if remainder:
+            _emit_with_inline(remainder)
+
+    for idx, item in enumerate(items, start=1):
+        title = (item.get("title") or "").strip()
+        qty = int(item.get("quantity", 1) or 1)
+        row = next((r for r in item_rows if _item_row_matches(r, item)), None)
+
+        label = (
+            (row or {}).get("custom_label", "").strip()
+            or (row or {}).get("item_title", "").strip()
+            or (item.get("item_sku") or "").strip()
+            or (item.get("item_id") or "").strip()
+            or title
+        )
+        prefix = f"{idx}) " if use_numbering else ""
+
+        qty_line = f"QTY {qty}"
+        if qty > 1:
+            qty_line = f"*QTY {qty}*"
+
+        chunks: list[tuple[str, str]] = []
+
+        for field in field_order:
+            if field == "location":
+                if defer_summary_line:
+                    continue
+                if location_emitted:
+                    continue
+                if uniq_locations:
+                    loc_text = " | ".join(uniq_locations)
+                    chunks.append(("location", ("LOC " + loc_text) if show_labels else loc_text))
+                location_emitted = True
+            elif field == "label":
+                # Required field for fulfillment workflow: always render label when available.
+                if label:
+                    chunks.append(("label", f"{prefix}{label}"))
+            elif field == "qty":
+                # Required field for fulfillment workflow: always render qty.
+                chunks.append(("qty", qty_line))
+            elif field == "title":
+                if row is not None and not _flag_on(row.get("show_title", "0"), default=False):
+                    continue
+                if title:
+                    chunks.append(("title", f"{prefix}{title}" if not label else title))
+            elif field == "total":
+                if defer_summary_line:
+                    continue
+                # TOTAL is an order-level value; render once when available,
+                # independent of per-item label/title data source.
+                if total_line and not total_emitted:
+                    chunks.append(("total", total_line))
+                    total_emitted = True
+
+        # Ensure required fulfillment fields are present even if settings order was customized.
+        has_label = any(f == "label" for f, _ in chunks)
+        has_qty = any(f == "qty" for f, _ in chunks)
+        if not has_label and label:
+            chunks.insert(0, ("label", f"{prefix}{label}"))
+        if not has_qty:
+            pos = 1 if chunks and chunks[0][0] == "label" else 0
+            chunks.insert(pos, ("qty", qty_line))
+        if line_groups:
+            _emit_with_line_groups(chunks)
+        else:
+            _emit_with_inline(chunks)
+
+    if not location_emitted and uniq_locations:
+        loc_text = " | ".join(uniq_locations)
+        lines.insert(0, ("LOC " + loc_text) if show_labels else loc_text)
+
+    if defer_summary_line:
+        summary_parts: list[str] = []
+        if total_line:
+            summary_parts.append(total_line)
+            total_emitted = True
+        if uniq_locations:
+            loc_text = " | ".join(uniq_locations)
+            summary_parts.append(("LOC " + loc_text) if show_labels else loc_text)
+            location_emitted = True
+        if summary_parts:
+            lines.append(INLINE_LOCK_PREFIX + inline_sep.join(summary_parts))
+    # Fallback if order total exists but was not emitted in field-order loop.
+    if total_line and not total_emitted:
+        lines.append(total_line)
+
+    return lines
+def create_overlay_pdf(
+    page_w: float,
+    page_h: float,
+    lines: list[str],
+    config: dict[str, Any],
+    draw_rect: bool = False,
+    region: str = "primary",
+) -> tuple[bytes, list[str]]:
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+
+    layout = config["print_layout"]
+    font_name = str(layout.get("font_name", "Helvetica-Bold"))
+    font_size = int(layout.get("font_size", 16))
+    line_spacing = int(layout.get("line_spacing", 20))
+    wrap_mode = str(layout.get("wrap_mode", "truncate"))
+    text_align = str(layout.get("text_align", "left"))
+    orientation = str(layout.get("orientation_mode", "normal"))
+
+    if orientation == "rotated_90":
+        preset = _resolve_preset(layout, region)
+        x, y, w, h = _safe_rect(config, page_w, page_h, preset_override=preset)
+    else:
+        x, y, w, h = _safe_rect(config, page_w, page_h) if region == "primary" else _secondary_rect(config, page_w, page_h)
+
+    if draw_rect:
+        c.setStrokeColorRGB(1, 0, 0)
+        c.rect(x, y, w, h, stroke=1, fill=0)
+
+    if orientation == "rotated_90":
+        logical_line_width = h
+        cap_by_height = int(w // max(1, line_spacing))
+    else:
+        logical_line_width = w
+        cap_by_height = int(h // max(1, line_spacing))
+
+    max_lines_cfg = int(layout.get("max_lines", cap_by_height))
+    max_lines = max(1, min(cap_by_height, max_lines_cfg))
+
+    wrapped_lines = _expand_lines(lines, font_name, font_size, logical_line_width, wrap_mode)
+    drawn = wrapped_lines[:max_lines]
+
+    c.setFont(font_name, font_size)
+
+    if orientation == "rotated_90":
+        c.saveState()
+        c.translate(x + w, y)
+        c.rotate(90)
+        current_y = w - font_size
+        for line in drawn:
+            _draw_text_line_local(c, current_y, logical_line_width, line, text_align, font_name, font_size)
+            current_y -= line_spacing
+            if current_y < 0:
+                break
+        c.restoreState()
+    else:
+        current_y = y + h - font_size
+        for line in drawn:
+            _draw_text_line(c, x, current_y, logical_line_width, line, text_align, font_name, font_size)
+            current_y -= line_spacing
+            if current_y < y:
+                break
+
+    c.save()
+    return buf.getvalue(), wrapped_lines[len(drawn) :]
+
+
+def create_backside_pdf(page_w: float, page_h: float, lines: list[str], config: dict[str, Any]) -> bytes:
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+
+    layout = config["print_layout"]
+    font_name = str(layout.get("font_name", "Helvetica-Bold"))
+    font_size = int(layout.get("font_size", 16))
+    line_spacing = int(layout.get("line_spacing", 20))
+    wrap_mode = str(layout.get("wrap_mode", "word"))
+    text_align = str(layout.get("text_align", "left"))
+    orientation = str(layout.get("orientation_mode", "normal"))
+
+    if orientation == "rotated_90":
+        preset = _resolve_preset(layout, "primary")
+        x, y, w, h = _safe_rect(config, page_w, page_h, preset_override=preset)
+        logical_line_width = h
+        cap_by_height = int(w // max(1, line_spacing))
+    else:
+        x, y, w, h = _safe_rect(config, page_w, page_h)
+        logical_line_width = w
+        cap_by_height = int(h // max(1, line_spacing))
+
+    wrapped_lines = _expand_lines(lines, font_name, font_size, logical_line_width, wrap_mode)
+
+    c.setFont(font_name, font_size)
+
+    if orientation == "rotated_90":
+        idx = 0
+        while idx < len(wrapped_lines):
+            c.saveState()
+            c.translate(x + w, y)
+            c.rotate(90)
+            current_y = w - font_size
+            lines_left = cap_by_height
+            while idx < len(wrapped_lines) and lines_left > 0:
+                _draw_text_line_local(c, current_y, logical_line_width, wrapped_lines[idx], text_align, font_name, font_size)
+                current_y -= line_spacing
+                idx += 1
+                lines_left -= 1
+            c.restoreState()
+            if idx < len(wrapped_lines):
+                c.showPage()
+                c.setFont(font_name, font_size)
+    else:
+        cur_y = y + h - font_size
+        for line in wrapped_lines:
+            if cur_y < y:
+                c.showPage()
+                c.setFont(font_name, font_size)
+                cur_y = y + h - font_size
+            _draw_text_line(c, x, cur_y, logical_line_width, line, text_align, font_name, font_size)
+            cur_y -= line_spacing
+
+    c.save()
+    return buf.getvalue()
+
+
+def get_page_size(pdf_path: Path) -> tuple[float, float]:
+    reader = PdfReader(str(pdf_path))
+    page = reader.pages[0]
+    return float(page.mediabox.width), float(page.mediabox.height)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

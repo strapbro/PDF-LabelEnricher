@@ -1,0 +1,2 @@
+﻿order-id	sku	product-name	quantity-purchased	item-price	item-tax	shipping-price	shipping-tax	item-promotion-discount	ship-promotion-discount	recipient-name	ship-postal-code
+114-1234567-1234567	ABC-123	Sample Product	2	19.99	1.50	0.00	0.00	0.00	0.00	John Smith	90001

@@ -1,0 +1,255 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section class="card upload-card">
+  <div class="section-head">
+    <h2>Drop Files</h2>
+    <span class="section-note">Fast path: upload + process + open combined PDF</span>
+  </div>
+
+  <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+    <input id="fileInput" type="file" name="files" multiple required style="display:none;">
+    <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Drop files or click to choose files">
+      <div class="drop-title">Drag & drop .zip/.pdf/.csv/.txt here</div>
+      <div class="drop-sub">or click anywhere in this box to choose files</div>
+      <div class="drop-choose">Choose Files</div>
+    </div>
+
+    <div class="upload-meta-row">
+      <div id="pendingCount" class="pending-count">Pending selection: 0 file(s)</div>
+      <label class="inline-check" for="autoPrintAfterProcess">
+        <input id="autoPrintAfterProcess" type="checkbox" name="auto_print_after_process" value="1">
+        Auto-print after processing
+      </label>
+    </div>
+
+    <div class="upload-quick-actions">
+      <button class="btn btn-lg btn-primary" type="submit" name="quick_action" value="upload_process_open">Upload, Process, + Open Combined PDF</button>
+      <button class="btn btn-lg btn-success" type="submit" name="quick_action" value="upload_only">Upload to incoming/batch</button>
+    </div>
+  </form>
+</section>
+
+<section class="grid stats-grid">
+  <div class="card stat-card">
+    <div class="stat-label">Staged Files</div>
+    <div class="stat-value">{{ status.staged_file_count }}</div>
+  </div>
+  <div class="card stat-card">
+    <div class="stat-label">Label Sources</div>
+    <div class="stat-value">{{ status.label_source_count }}</div>
+    <div class="stat-sub">PDF + ZIP</div>
+  </div>
+  <div class="card stat-card {{ 'stat-ok' if status.ebay_csv_found else 'stat-miss' }}">
+    <div class="stat-label">eBay CSV</div>
+    <div class="stat-value">{{ 'Yes' if status.ebay_csv_found else 'No' }}</div>
+  </div>
+  <div class="card stat-card {{ 'stat-ok' if status.amazon_txt_found else 'stat-miss' }}">
+    <div class="stat-label">Amazon TXT</div>
+    <div class="stat-value">{{ 'Yes' if status.amazon_txt_found else 'No' }}</div>
+  </div>
+  <div class="card stat-card {{ 'stat-alert' if status.unresolved_count > 0 else '' }}">
+    <div class="stat-label">Unprocessed Queue</div>
+    <div class="stat-value">{{ status.unresolved_count }}</div>
+  </div>
+  <div class="card stat-card {{ 'stat-alert' if needs_review_count > 0 else '' }}">
+    <div class="stat-label">Items Need Review</div>
+    <div class="stat-value">{{ needs_review_count }}</div>
+  </div>
+</section>
+
+<section class="card split-actions">
+  <div>
+    <h3>Primary Actions</h3>
+    <div class="actions-grid main-actions">
+      <form action="/process" method="post"><button class="btn btn-lg btn-primary" type="submit">Process Batch</button></form>
+      <form action="/batch/open-combined-latest" method="post"><button class="btn btn-lg btn-success" type="submit">Open Combined PDF</button></form>
+      <form action="/process/reprocess-latest" method="post" onsubmit="return confirm('Reprocess latest archived batch? This will clear current staged files first.')"><button class="btn btn-md btn-secondary" type="submit">Reprocess Previous Batch</button></form>
+      <a class="btn btn-md btn-secondary" href="/reprocess-select">Reprocess Select PDFs (Prev Batch)</a>
+    </div>
+  </div>
+
+  <div>
+    <h3>Queues + Data</h3>
+    <div class="actions-grid helper-actions">
+      <a class="btn btn-md {% if status.unresolved_count > 0 %}btn-warn{% else %}btn-secondary{% endif %}" href="/unprocessed">
+        View Unprocessed Queue {% if status.unresolved_count > 0 %}({{ status.unresolved_count }}){% endif %}
+      </a>
+      <a class="btn btn-md {% if needs_review_count > 0 %}btn-attn{% else %}btn-secondary{% endif %}" href="/items/review">
+        View Items Needing Review {% if needs_review_count > 0 %}({{ needs_review_count }}){% endif %}
+      </a>
+      <a class="btn btn-md btn-secondary" href="/items">Item Database</a>
+      <a class="btn btn-md btn-secondary" href="/manual-entry">Manual Entry</a>
+      <form action="/open" method="post"><input type="hidden" name="target" value="incoming"><button class="btn btn-sm btn-outline" type="submit">Open Incoming Folder</button></form>
+      <form action="/open" method="post"><input type="hidden" name="target" value="processed"><button class="btn btn-sm btn-outline" type="submit">Open Processed Folder</button></form>
+    </div>
+  </div>
+
+  <div>
+    <h3>Maintenance</h3>
+    <div class="actions-grid helper-actions">
+      <form action="/staged/clear" method="post" onsubmit="return confirm('Clear all staged files in incoming/batch?')"><button class="btn btn-sm btn-outline" type="submit">Clear Staged Files</button></form>
+      <form action="/resolve/clear" method="post" onsubmit="return confirm('Clear all unresolved queue items?')"><input type="hidden" name="from_page" value="dashboard"><button class="btn btn-sm btn-outline" type="submit">Clear Unprocessed Queue</button></form>
+      <form action="/items/clear-needs-review" method="post" onsubmit="return confirm('Clear all items from Needs Review list?')"><input type="hidden" name="from_page" value="dashboard"><button class="btn btn-sm btn-outline" type="submit">Clear Item Needs Review</button></form>
+    </div>
+  </div>
+</section>
+
+<section class="card tiny-meta">
+  <strong>Staged breakdown:</strong> PDF {{ status.pdf_count }}, ZIP {{ status.zip_count }}, CSV {{ status.csv_count }}, TXT {{ status.txt_count }}
+</section>
+
+<section class="card tiny-meta">
+  <strong>Counter meanings:</strong>
+  Unprocessed Queue = labels not matched yet.
+  Item DB Needs Review = rows in <code>items.csv</code> with <code>needs_review=1</code>.
+</section>
+
+<section class="two-col">
+  <section class="card">
+    <h2>Items Needing Review (Top 15)</h2>
+    <ul>
+      {% for r in needs_review_rows %}
+        <li>{{ r.platform }} | eBay {{ r.ebay_item_number or '-' }} | SKU {{ r.amazon_sku or '-' }} | ASIN {{ r.amazon_asin or '-' }} | {{ r.custom_label or r.item_title or 'No label' }}{% if r.needs_review_reason %} | Reason: {{ r.needs_review_reason }}{% endif %}</li>
+      {% else %}
+        <li>None</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  {% if latest_batch %}
+  <section class="card">
+    <h2>Latest Batch</h2>
+    <p><strong>Folder:</strong> {{ latest_batch.batch_dir }}</p>
+    <p><strong>Matched:</strong> {{ latest_batch.summary.matched or 0 }} | <strong>Unprocessed:</strong> {{ latest_batch.summary.unresolved or 0 }} | <strong>Errors:</strong> {{ latest_batch.summary.errors or 0 }}</p>
+    {% if latest_batch.combined_pdf %}
+    <p><strong>Combined print PDF:</strong> {{ latest_batch.combined_pdf }}</p>
+    {% endif %}
+  </section>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Activity Log (last 50)</h2>
+  <pre>{% for line in log_lines %}{{ line }}
+{% endfor %}</pre>
+</section>
+
+<style>
+.upload-card { border-width: 2px; border-color: #d6e4ff; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.section-head h2 { margin: 0; }
+.section-note { font-size: 12px; color: #53627a; font-weight: 600; }
+
+.drop-zone {
+  border: 2px dashed #7d8a99;
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+  margin-bottom: 10px;
+  cursor: pointer;
+  background: linear-gradient(180deg, #f8fbff, #f2f7ff);
+}
+.drop-zone:hover { background: linear-gradient(180deg, #eef6ff, #e8f2ff); }
+.drop-zone.active { background: #e8f2ff; border-color: #2f6fed; }
+.drop-title { font-weight: 800; font-size: 16px; }
+.drop-sub { color: #4b5563; margin-top: 4px; font-size: 13px; }
+.drop-choose {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #0b5ed7;
+  color: #fff;
+  font-weight: 700;
+}
+
+.upload-meta-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pending-count { margin: 6px 0; font-size: 13px; color: #334155; font-weight: 700; }
+.inline-check { display:flex; align-items:center; gap:8px; margin: 6px 0; font-size:13px; color:#1e293b; font-weight: 600; }
+.upload-quick-actions { display:grid; grid-template-columns: 1.2fr 1fr; gap:10px; margin-top: 4px; }
+.upload-quick-actions .btn { width: 100%; }
+
+.stats-grid { grid-template-columns: repeat(6, minmax(120px, 1fr)); margin-bottom: 12px; }
+.stat-card { margin: 0; padding: 12px; }
+.stat-label { color: #475569; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+.stat-value { font-size: 24px; font-weight: 900; margin-top: 3px; color: #0f172a; }
+.stat-sub { font-size: 11px; color: #64748b; margin-top: 3px; }
+.stat-ok { border-color: #b6e2cb; background: #f4fcf8; }
+.stat-miss { border-color: #f8d3d3; background: #fff5f5; }
+.stat-alert { border-color: #f9d68a; background: #fff8ea; }
+
+.split-actions h3 { margin: 2px 0 10px; font-size: 15px; color: #1e293b; }
+.split-actions > div + div { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #d7e1ef; }
+.actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; align-items: stretch; }
+.actions-grid form { margin: 0; width: 100%; }
+.actions-grid .btn, .actions-grid button { width: 100%; min-height: 40px; }
+
+.tiny-meta { font-size: 13px; color: #344256; }
+.two-col { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }
+
+@media (max-width: 1100px) {
+  .stats-grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+  .two-col { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .upload-quick-actions { grid-template-columns: 1fr; }
+  .actions-grid { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+}
+</style>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const pendingCount = document.getElementById('pendingCount');
+
+let dt = new DataTransfer();
+
+function refreshPending() {
+  pendingCount.textContent = `Pending selection: ${dt.files.length} file(s)`;
+}
+
+function addFiles(fileList) {
+  for (const f of fileList) dt.items.add(f);
+  fileInput.files = dt.files;
+  refreshPending();
+}
+
+fileInput.addEventListener('change', (e) => addFiles(e.target.files));
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    fileInput.click();
+  }
+});
+
+['dragenter','dragover'].forEach(evt => dropZone.addEventListener(evt, e => {
+  e.preventDefault();
+  dropZone.classList.add('active');
+}));
+
+['dragleave','drop'].forEach(evt => dropZone.addEventListener(evt, e => {
+  e.preventDefault();
+  dropZone.classList.remove('active');
+}));
+
+dropZone.addEventListener('drop', e => {
+  addFiles(e.dataTransfer.files);
+});
+
+document.getElementById('uploadForm').addEventListener('submit', () => {
+  setTimeout(() => {
+    dt = new DataTransfer();
+    fileInput.value = '';
+    refreshPending();
+  }, 0);
+});
+
+refreshPending();
+</script>
+{% endblock %}
+
+

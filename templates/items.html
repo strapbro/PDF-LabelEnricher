@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Sync From Hot/Live Spreadsheet</h2>
+  <p style="margin-top:4px;color:#555;font-size:13px;">Auto backup is enabled for every save/sync. Current backups: <strong>{{ backups_count or 0 }}</strong></p>
+  <form action="/items/sync" method="post" enctype="multipart/form-data">
+    <input type="file" name="master_csv" accept=".csv,.tsv,.txt" required>
+    <button type="submit">Import / Re-sync</button>
+  </form>
+  <div class="items-controls" style="margin-top:8px;">
+    <form action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button type="submit">Create Backup Now</button></form>
+    <form action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button type="submit">Open Backups Folder</button></form>
+    <a class="btn btn-secondary" href="/items/export">Download items.csv</a>
+  </div>
+  <form action="/items/clear-needs-review" method="post" onsubmit="return confirm('Clear all items from Needs Review list?')" style="margin-top:8px;">
+    <input type="hidden" name="from_page" value="items">
+    <button type="submit">Clear Needs Review Flags</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Items</h2>
+  <div class="items-controls">
+    <input id="itemsFilter" type="text" placeholder="Quick filter (SKU, ASIN, title, label, location)">
+    <button id="itemsWidthToggle" type="button">Wide View</button>
+    <button id="itemsFilterClear" type="button">Clear Filter</button>
+  </div>
+  <p style="margin-top:8px;color:#555;font-size:13px;">Tip: click column headers to sort. Click again to reverse.</p>
+  <p style="margin-top:4px;color:#555;font-size:13px;">Needs Review is a system status for items that require human attention. Use <strong>Clear Needs Review Flags</strong> after you verify/fix them.</p>
+
+  <form action="/items/save" method="post">
+    <input type="hidden" name="source_page" value="{{ page_mode or 'items' }}">
+    <div class="items-table-wrap">
+      <table id="itemsTable" class="items-table mode-compact">
+        <thead>
+          <tr>
+            <th data-sort="text">Platform</th>
+            <th data-sort="text">eBay Item #</th>
+            <th data-sort="text">Amazon SKU</th>
+            <th data-sort="text">Amazon ASIN</th>
+            <th data-sort="text">Item Title</th>
+            <th data-sort="text">Custom Label</th>
+            <th data-sort="text">Location</th>
+            <th data-sort="text">Link Platform</th>
+            <th data-sort="text">Link ID Type</th>
+            <th data-sort="text">Link ID Value</th>
+            <th data-sort="text">Link Preview</th>
+            <th data-sort="text">Status</th>
+            <th data-sort="bool">Show Title</th>
+            <th data-sort="text">Delete Row/Item</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          {% set has_ebay = (row.ebay_item_number or '') %}
+          {% set has_amazon = (row.amazon_sku or row.amazon_asin or '') %}
+          {% set is_merged = (row.platform == 'both') or (has_ebay and has_amazon) %}
+          {% set default_link_platform = row.linked_platform or ('amazon' if has_ebay and not has_amazon else ('ebay' if has_amazon and not has_ebay else '')) %}
+          {% set default_link_id_type = row.linked_id_type or ('amazon_sku' if default_link_platform == 'amazon' else ('ebay_item_number' if default_link_platform == 'ebay' else '')) %}
+          <tr class="{% if row.needs_review == '1' %}needs-review-row{% endif %}">
+            <input type="hidden" name="row_{{ loop.index0 }}_row_key" value="{{ row._row_key or '' }}">
+            <td>{{ row.platform }}</td>
+            <td><input name="row_{{ loop.index0 }}_ebay_item_number" value="{{ row.ebay_item_number or '' }}"></td>
+            <td><input name="row_{{ loop.index0 }}_amazon_sku" value="{{ row.amazon_sku or '' }}"></td>
+            <td><input name="row_{{ loop.index0 }}_amazon_asin" value="{{ row.amazon_asin or '' }}"></td>
+            <td><input name="row_{{ loop.index0 }}_item_title" value="{{ row.item_title or '' }}"></td>
+            <td><input name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}"></td>
+            <td><input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"></td>
+            <td class="{% if is_merged %}link-locked{% endif %}">
+              <select class="link-platform" name="row_{{ loop.index0 }}_linked_platform" {% if is_merged %}disabled{% endif %}>
+                <option value="" {% if not default_link_platform %}selected{% endif %}></option>
+                <option value="amazon" {% if default_link_platform == 'amazon' %}selected{% endif %}>amazon</option>
+                <option value="ebay" {% if default_link_platform == 'ebay' %}selected{% endif %}>ebay</option>
+              </select>
+            </td>
+            <td class="{% if is_merged %}link-locked{% endif %}">
+              <select class="link-id-type" name="row_{{ loop.index0 }}_linked_id_type" {% if is_merged %}disabled{% endif %}>
+                <option value="" {% if not default_link_id_type %}selected{% endif %}></option>
+                <option value="amazon_sku" {% if default_link_id_type == 'amazon_sku' %}selected{% endif %}>amazon_sku</option>
+                <option value="amazon_asin" {% if default_link_id_type == 'amazon_asin' %}selected{% endif %}>amazon_asin</option>
+                <option value="ebay_item_number" {% if default_link_id_type == 'ebay_item_number' %}selected{% endif %}>ebay_item_number</option>
+                <option value="item_id" {% if default_link_id_type == 'item_id' %}selected{% endif %}>item_id</option>
+              </select>
+            </td>
+            <td class="{% if is_merged %}link-locked{% endif %}"><input class="link-id-value" name="row_{{ loop.index0 }}_linked_id_value" value="{{ row.linked_id_value or '' }}" list="linkTargetsList" {% if is_merged %}disabled{% endif %}></td>
+            <td class="link-preview-cell">{% if is_merged %}Merged row{% endif %}</td>
+            <td class="status-cell">{% if row.needs_review == '1' %}<span class="status-review">{{ row.needs_review_reason or 'Needs human review' }}</span>{% else %}<span class="status-ok">OK</span>{% endif %}</td>
+            <td class="center"><input type="checkbox" name="row_{{ loop.index0 }}_show_title" {% if row.show_title == '1' %}checked{% endif %}></td>
+            <td class="center">
+              <input type="hidden" class="delete-flag" name="row_{{ loop.index0 }}_delete_row" value="">
+              <button type="button" class="delete-row-btn" title="Delete row">X</button>
+              <button type="button" class="undo-row-btn" style="display:none;">Undo</button>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <datalist id="linkTargetsList">
+        {% for t in link_targets %}
+          <option value="{{ t.id_value }}">{{ t.platform }} | {{ t.id_type }} | {{ t.title }}</option>
+        {% endfor %}
+      </datalist>
+    </div>
+    <button type="submit" style="margin-top:10px;">Save Changes</button>
+  </form>
+</section>
+
+<style>
+.items-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.items-controls input[type="text"] { min-width: 320px; max-width: 520px; }
+.items-table-wrap { overflow-x: auto; }
+.items-table { table-layout: fixed; }
+.items-table.mode-compact { min-width: 1950px; }
+.items-table.mode-wide { min-width: 2450px; }
+.items-table th { user-select: none; cursor: pointer; white-space: normal; word-break: break-word; line-height: 1.2; background: #f7f9fb; }
+.items-table th.sort-asc::after { content: " \2191"; }
+.items-table th.sort-desc::after { content: " \2193"; }
+.items-table td.center { text-align: center; }
+.items-table td.center input[type="checkbox"] { width: auto; margin: 0; }
+.items-table input, .items-table select { width: 100%; }
+.items-table td { word-break: break-word; }
+.status-cell { font-size: 12px; line-height: 1.25; }
+.status-ok { color: #2b7a0b; font-weight: 700; }
+.status-review { color: #b26a00; font-weight: 700; }
+.items-table td.link-locked { background: #f3f3f3; }
+.items-table td.link-locked input,
+.items-table td.link-locked select { background: #f3f3f3; color: #888; cursor: not-allowed; }
+.items-table tr.needs-review-row td { background: #fff8e1; }
+.items-table tr.pending-delete td { background: #ffe3e3 !important; opacity: 0.75; }
+.delete-row-btn { background:#d62828; color:#fff; border:0; border-radius:6px; padding:4px 10px; cursor:pointer; font-weight:700; }
+.delete-row-btn:hover { background:#b71f1f; }
+.undo-row-btn { margin-left:6px; background:#6c757d; color:#fff; border:0; border-radius:6px; padding:4px 8px; cursor:pointer; }
+
+.items-table.mode-compact th:nth-child(1), .items-table.mode-compact td:nth-child(1) { width: 90px; }
+.items-table.mode-compact th:nth-child(2), .items-table.mode-compact td:nth-child(2) { width: 150px; }
+.items-table.mode-compact th:nth-child(3), .items-table.mode-compact td:nth-child(3) { width: 170px; }
+.items-table.mode-compact th:nth-child(4), .items-table.mode-compact td:nth-child(4) { width: 140px; }
+.items-table.mode-compact th:nth-child(5), .items-table.mode-compact td:nth-child(5) { width: 330px; }
+.items-table.mode-compact th:nth-child(6), .items-table.mode-compact td:nth-child(6) { width: 250px; }
+.items-table.mode-compact th:nth-child(7), .items-table.mode-compact td:nth-child(7) { width: 120px; }
+.items-table.mode-compact th:nth-child(8), .items-table.mode-compact td:nth-child(8) { width: 130px; }
+.items-table.mode-compact th:nth-child(9), .items-table.mode-compact td:nth-child(9) { width: 160px; }
+.items-table.mode-compact th:nth-child(10), .items-table.mode-compact td:nth-child(10) { width: 180px; }
+.items-table.mode-compact th:nth-child(11), .items-table.mode-compact td:nth-child(11) { width: 320px; }
+.items-table.mode-compact th:nth-child(12), .items-table.mode-compact td:nth-child(12) { width: 230px; }
+.items-table.mode-compact th:nth-child(13), .items-table.mode-compact td:nth-child(13) { width: 95px; }
+.items-table.mode-compact th:nth-child(14), .items-table.mode-compact td:nth-child(14) { width: 125px; }
+
+.items-table.mode-wide th:nth-child(5), .items-table.mode-wide td:nth-child(5) { width: 520px; }
+.items-table.mode-wide th:nth-child(6), .items-table.mode-wide td:nth-child(6) { width: 420px; }
+.items-table.mode-wide th:nth-child(10), .items-table.mode-wide td:nth-child(10) { width: 260px; }
+.items-table.mode-wide th:nth-child(11), .items-table.mode-wide td:nth-child(11) { width: 560px; }
+.items-table.mode-wide th:nth-child(12), .items-table.mode-wide td:nth-child(12) { width: 360px; }
+.items-table.mode-wide th:nth-child(14), .items-table.mode-wide td:nth-child(14) { width: 150px; }
+</style>
+
+<script id="linkTargetsData" type="application/json">{{ link_targets|tojson }}</script>
+<script>
+(function () {
+  const STORAGE_KEY = 'label_enricher_items_table_prefs_v1';
+  const table = document.getElementById('itemsTable');
+  const filterInput = document.getElementById('itemsFilter');
+  const filterClearBtn = document.getElementById('itemsFilterClear');
+  const widthBtn = document.getElementById('itemsWidthToggle');
+  const dataEl = document.getElementById('linkTargetsData');
+  if (!table) return;
+
+  let targets = [];
+  try { targets = JSON.parse((dataEl && dataEl.textContent) || '[]'); } catch (e) { targets = []; }
+
+  const headers = Array.from(table.querySelectorAll('thead th[data-sort]'));
+  const tbody = table.querySelector('tbody');
+  const prefs = { sortCol: -1, sortDir: 'asc', widthMode: 'compact', filterText: '' };
+
+  function loadPrefs() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (typeof saved.sortCol === 'number') prefs.sortCol = saved.sortCol;
+      if (saved.sortDir === 'asc' || saved.sortDir === 'desc') prefs.sortDir = saved.sortDir;
+      if (saved.widthMode === 'compact' || saved.widthMode === 'wide') prefs.widthMode = saved.widthMode;
+      if (typeof saved.filterText === 'string') prefs.filterText = saved.filterText;
+    } catch (e) {}
+  }
+
+  function savePrefs() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs)); } catch (e) {}
+  }
+
+  function clearHeaderIndicators() {
+    headers.forEach(h => { h.classList.remove('sort-asc'); h.classList.remove('sort-desc'); });
+  }
+
+  function cellValue(row, colIndex, sortType) {
+    const cell = row.cells[colIndex];
+    if (!cell) return '';
+    const checkbox = cell.querySelector('input[type="checkbox"]');
+    if (sortType === 'bool') return checkbox && checkbox.checked ? 1 : 0;
+    const input = cell.querySelector('input, select, textarea');
+    if (input) return (input.value || '').toLowerCase().trim();
+    return (cell.textContent || '').toLowerCase().trim();
+  }
+
+  function sortBy(colIndex, preserveDir) {
+    const th = headers[colIndex];
+    if (!th) return;
+    const sortType = th.dataset.sort || 'text';
+
+    if (preserveDir) {
+      prefs.sortCol = colIndex;
+    } else if (prefs.sortCol === colIndex) {
+      prefs.sortDir = prefs.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      prefs.sortCol = colIndex;
+      prefs.sortDir = 'asc';
+    }
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort((a, b) => {
+      const av = cellValue(a, colIndex, sortType);
+      const bv = cellValue(b, colIndex, sortType);
+      if (av < bv) return prefs.sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return prefs.sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+
+    clearHeaderIndicators();
+    th.classList.add(prefs.sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+    savePrefs();
+  }
+
+  function rowText(row) {
+    const inputs = Array.from(row.querySelectorAll('input[type="text"], input:not([type]), textarea, select'));
+    const parts = inputs.map(i => (i.value || '').toLowerCase());
+    parts.push((row.textContent || '').toLowerCase());
+    return parts.join(' ');
+  }
+
+  function applyFilter(text) {
+    const needle = (text || '').toLowerCase().trim();
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.forEach(row => {
+      row.style.display = (!needle || rowText(row).includes(needle)) ? '' : 'none';
+    });
+    prefs.filterText = text || '';
+    savePrefs();
+  }
+
+  function applyWidthMode(mode) {
+    const safe = mode === 'wide' ? 'wide' : 'compact';
+    table.classList.remove('mode-compact', 'mode-wide');
+    table.classList.add(safe === 'wide' ? 'mode-wide' : 'mode-compact');
+    prefs.widthMode = safe;
+    widthBtn.textContent = safe === 'wide' ? 'Compact View' : 'Wide View';
+    savePrefs();
+  }
+
+  function setDefaultTypeForPlatform(platEl, typeEl) {
+    if (!platEl || !typeEl || platEl.disabled || typeEl.disabled) return;
+    if ((typeEl.value || '').trim()) return;
+    const p = (platEl.value || '').toLowerCase();
+    if (p === 'amazon') typeEl.value = 'amazon_sku';
+    if (p === 'ebay') typeEl.value = 'ebay_item_number';
+  }
+
+  function toggleDeleteRow(row, markDelete) {
+    if (!row) return;
+    const flag = row.querySelector('.delete-flag');
+    const delBtn = row.querySelector('.delete-row-btn');
+    const undoBtn = row.querySelector('.undo-row-btn');
+    if (!flag || !delBtn || !undoBtn) return;
+    if (markDelete) {
+      flag.value = 'on';
+      row.classList.add('pending-delete');
+      delBtn.style.display = 'none';
+      undoBtn.style.display = '';
+    } else {
+      flag.value = '';
+      row.classList.remove('pending-delete');
+      delBtn.style.display = '';
+      undoBtn.style.display = 'none';
+    }
+  }
+
+  function updateLinkPreviews() {
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.forEach(row => {
+      const platEl = row.querySelector('.link-platform');
+      const typeEl = row.querySelector('.link-id-type');
+      const valEl = row.querySelector('.link-id-value');
+      const prevEl = row.querySelector('.link-preview-cell');
+      if (!platEl || !typeEl || !valEl || !prevEl) return;
+      if (platEl.disabled || typeEl.disabled || valEl.disabled) {
+        prevEl.textContent = 'Merged row';
+        return;
+      }
+
+      const plat = (platEl.value || '').toLowerCase();
+      const typ = (typeEl.value || '').toLowerCase();
+      const raw = (valEl.value || '').trim();
+      if (!plat || !raw) {
+        prevEl.textContent = '';
+        return;
+      }
+      const key = (plat === 'amazon' && (typ === 'amazon_asin' || typ === 'item_id')) ? raw.toUpperCase() : raw;
+      const hit = targets.find(t =>
+        (t.platform || '').toLowerCase() === plat &&
+        (t.id_value || '') === key &&
+        (!typ || (t.id_type || '').toLowerCase() === typ)
+      );
+      prevEl.textContent = hit ? `${hit.platform} | ${hit.id_type} | ${hit.title || ''}` : 'No target found';
+    });
+  }
+
+  headers.forEach((th, index) => th.addEventListener('click', () => sortBy(index, false)));
+  filterInput.addEventListener('input', (e) => applyFilter(e.target.value || ''));
+  filterClearBtn.addEventListener('click', () => { filterInput.value = ''; applyFilter(''); });
+  widthBtn.addEventListener('click', () => applyWidthMode(prefs.widthMode === 'wide' ? 'compact' : 'wide'));
+  tbody.addEventListener('input', (e) => {
+    if (e.target.classList && (e.target.classList.contains('link-platform') || e.target.classList.contains('link-id-type') || e.target.classList.contains('link-id-value'))) {
+      if (e.target.classList.contains('link-platform')) {
+        const row = e.target.closest('tr');
+        setDefaultTypeForPlatform(row ? row.querySelector('.link-platform') : null, row ? row.querySelector('.link-id-type') : null);
+      }
+      updateLinkPreviews();
+    }
+  });
+
+
+  tbody.addEventListener('click', (e) => {
+    const delBtn = e.target.closest('.delete-row-btn');
+    if (delBtn) {
+      const row = delBtn.closest('tr');
+      if (confirm('Mark this row for deletion when you save?')) {
+        toggleDeleteRow(row, true);
+      }
+      return;
+    }
+    const undoBtn = e.target.closest('.undo-row-btn');
+    if (undoBtn) {
+      const row = undoBtn.closest('tr');
+      toggleDeleteRow(row, false);
+    }
+  });
+  loadPrefs();
+  applyWidthMode(prefs.widthMode);
+  filterInput.value = prefs.filterText;
+  applyFilter(prefs.filterText);
+  Array.from(tbody.querySelectorAll('tr')).forEach(row => {
+    setDefaultTypeForPlatform(row.querySelector('.link-platform'), row.querySelector('.link-id-type'));
+  });
+  updateLinkPreviews();
+  if (prefs.sortCol >= 0) sortBy(prefs.sortCol, true);
+})();
+</script>
+{% endblock %}
+
+
+
+
+
+
+
+
+
+
+

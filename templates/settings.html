@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Layout + Formatting (Live Preview)</h2>
+  <p style="font-size:13px;color:#555;">Pick a line layout mode first. Use Custom only if you want manual field/inline control.</p>
+
+  <div class="settings-split">
+    <div class="settings-left">
+      <form id="layoutForm" action="/settings/save" method="post">
+        <div class="grid" style="grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px;">
+          <div>
+            <label>Text goes on which two margins?
+              <select name="margin_direction" id="margin_direction">
+                <option value="top_bottom" {% if ui.margin_direction == 'top_bottom' %}selected{% endif %}>Top + Bottom margins</option>
+                <option value="left_right" {% if ui.margin_direction == 'left_right' %}selected{% endif %}>Left + Right margins</option>
+              </select>
+            </label>
+
+            <label>Use one margin or both margins?
+              <select name="margin_mode" id="margin_mode">
+                <option value="both" {% if ui.margin_mode == 'both' %}selected{% endif %}>Both margins (overflow wraps to second margin)</option>
+                <option value="single" {% if ui.margin_mode == 'single' %}selected{% endif %}>Single margin (overflow goes to backside)</option>
+              </select>
+            </label>
+
+            <label>Line layout mode
+              <select name="line_layout_mode" id="line_layout_mode">
+                <option value="qty_label_loc_inline" {% if ui.line_layout_mode == 'qty_label_loc_inline' %}selected{% endif %}>Qty + Label + Loc inline</option>
+                <option value="label_qty_total_inline" {% if ui.line_layout_mode == 'label_qty_total_inline' %}selected{% endif %}>Label + Qty + Total inline</option>
+                <option value="location_label_qty_total_inline" {% if ui.line_layout_mode == 'location_label_qty_total_inline' %}selected{% endif %}>Location + Label + Qty + Total inline</option>
+                <option value="qty_label_then_total_loc" {% if ui.line_layout_mode == 'qty_label_then_total_loc' %}selected{% endif %}>Line1: Qty + Label, Line2: Total + Loc</option>
+                <option value="stacked" {% if ui.line_layout_mode == 'stacked' %}selected{% endif %}>Stacked lines (no inline)</option>
+                <option value="custom" {% if ui.line_layout_mode == 'custom' %}selected{% endif %}>Custom</option>
+              </select>
+            </label>
+
+            <label>Field order (custom)
+              <select name="field_order_csv" id="field_order_csv">
+                <option value="label,qty,total,location,title" {% if ui.field_order_csv == 'label,qty,total,location,title' %}selected{% endif %}>Label, Qty, Total, Location, Title</option>
+                <option value="location,label,qty,total,title" {% if ui.field_order_csv == 'location,label,qty,total,title' %}selected{% endif %}>Location, Label, Qty, Total, Title</option>
+                <option value="location,label,total,qty,title" {% if ui.field_order_csv == 'location,label,total,qty,title' %}selected{% endif %}>Location, Label, Total, Qty, Title</option>
+                <option value="label,total,qty,title,location" {% if ui.field_order_csv == 'label,total,qty,title,location' %}selected{% endif %}>Label, Total, Qty, Title, Location</option>
+              </select>
+            </label>
+
+            <label>Inline fields (custom)
+              <select name="inline_fields_csv" id="inline_fields_csv">
+                <option value="" {% if not ui.inline_fields_csv %}selected{% endif %}>None</option>
+                <option value="label,qty,total" {% if ui.inline_fields_csv == 'label,qty,total' %}selected{% endif %}>Label + Qty + Total</option>
+                <option value="location,label,qty,total" {% if ui.inline_fields_csv == 'location,label,qty,total' %}selected{% endif %}>Location + Label + Qty + Total</option>
+                <option value="label,qty" {% if ui.inline_fields_csv == 'label,qty' %}selected{% endif %}>Label + Qty</option>
+              </select>
+            </label>
+
+            <label>Inline separator (custom)
+              <input type="text" name="inline_separator" id="inline_separator" value="{{ ui.inline_separator or ' | ' }}">
+            </label>
+
+            <label>Page mode
+              <select name="page_mode" id="page_mode">
+                <option value="half_sheet_top" {% if ui.page_mode == 'half_sheet_top' %}selected{% endif %}>Top half-sheet labels</option>
+                <option value="half_sheet_bottom" {% if ui.page_mode == 'half_sheet_bottom' %}selected{% endif %}>Bottom half-sheet labels</option>
+                <option value="full_page" {% if ui.page_mode == 'full_page' %}selected{% endif %}>Full-page labels</option>
+              </select>
+            </label>
+          </div>
+
+          <div>
+            <label>Margin strip thickness (points)
+              <input type="number" name="strip_thickness" id="strip_thickness" value="{{ ui.strip_thickness }}" min="16" max="180">
+            </label>
+
+            <label>Distance from page edge (top/bottom) (points)
+              <input type="number" name="edge_padding" id="edge_padding" value="{{ ui.edge_padding }}" min="0" max="80">
+            </label>
+
+            <label>Distance from page side (left/right) (points)
+              <input type="number" name="side_padding" id="side_padding" value="{{ ui.side_padding }}" min="0" max="80">
+            </label>
+
+            <label>Font size
+              <input type="number" name="font_size" id="font_size" value="{{ ui.font_size }}" min="8" max="32">
+            </label>
+
+            <label>Line spacing
+              <input type="number" name="line_spacing" id="line_spacing" value="{{ ui.line_spacing }}" min="10" max="40">
+            </label>
+
+            <label>Text alignment
+              <select name="text_align" id="text_align">
+                <option value="left" {% if ui.text_align == 'left' %}selected{% endif %}>Left</option>
+                <option value="center" {% if ui.text_align == 'center' %}selected{% endif %}>Center</option>
+                <option value="right" {% if ui.text_align == 'right' %}selected{% endif %}>Right</option>
+              </select>
+            </label>
+
+            <label>Wrapping style
+              <select name="wrap_mode" id="wrap_mode">
+                <option value="word" {% if ui.wrap_mode == 'word' %}selected{% endif %}>Wrap by words</option>
+                <option value="char" {% if ui.wrap_mode == 'char' %}selected{% endif %}>Wrap by characters</option>
+                <option value="truncate" {% if ui.wrap_mode == 'truncate' %}selected{% endif %}>Cut with ...</option>
+              </select>
+            </label>
+
+            <label><input type="checkbox" name="show_field_labels" id="show_field_labels" {% if ui.show_field_labels %}checked{% endif %}> Show labels like "QTY" and "TOTAL"</label>
+
+            <label>Archive retention days
+              <input type="number" name="archive_retention_days" value="{{ ui.archive_retention_days }}" min="1" max="365">
+            </label>
+          </div>
+        </div>
+
+        <button type="submit">Save</button>
+      </form>
+    </div>
+
+    <div class="settings-right">
+      <h3 style="margin-top:0;">Live Preview</h3>
+      {% if labels and labels|length > 0 %}
+      <label>Preview using label file
+        <select id="preview_label_pdf" style="max-width:100%;">
+          {% for p in labels %}
+          <option value="{{ p }}">{{ p }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <p style="font-size:13px;color:#555;">Red boxes show safe text areas (primary + secondary). Preview does not save until you click <strong>Save</strong>.</p>
+      <div style="border:1px solid #ddd;background:#fafafa;padding:8px;overflow:auto;">
+        <img id="livePreviewImg" alt="Live preview" style="max-width:100%;height:auto;display:block;">
+      </div>
+      {% else %}
+      <p>No label PDFs found. Upload a label PDF/ZIP in Dashboard first, then come back.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<style>
+.settings-split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.settings-right { position: sticky; top: 12px; }
+@media (max-width: 1100px) {
+  .settings-split { grid-template-columns: 1fr; }
+  .settings-right { position: static; }
+}
+</style>
+
+<script>
+(function () {
+  const form = document.getElementById('layoutForm');
+  const img = document.getElementById('livePreviewImg');
+  const labelSel = document.getElementById('preview_label_pdf');
+  const modeSel = document.getElementById('line_layout_mode');
+  const customIds = ['field_order_csv', 'inline_fields_csv', 'inline_separator'];
+  if (!form || !img || !labelSel || !modeSel) return;
+
+  let timer = null;
+
+  function applyCustomEnabled() {
+    const isCustom = (modeSel.value || '') === 'custom';
+    customIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = !isCustom;
+      el.style.opacity = isCustom ? '1' : '0.6';
+    });
+  }
+
+  function queryFromForm() {
+    const fd = new FormData(form);
+    const q = new URLSearchParams();
+    q.set('label_pdf', labelSel.value || '');
+    q.set('margin_direction', fd.get('margin_direction') || 'top_bottom');
+    q.set('margin_mode', fd.get('margin_mode') || 'both');
+    q.set('font_size', fd.get('font_size') || '14');
+    q.set('line_spacing', fd.get('line_spacing') || '18');
+    q.set('strip_thickness', fd.get('strip_thickness') || '32');
+    q.set('edge_padding', fd.get('edge_padding') || '8');
+    q.set('side_padding', fd.get('side_padding') || '8');
+    q.set('text_align', fd.get('text_align') || 'left');
+    q.set('wrap_mode', fd.get('wrap_mode') || 'word');
+    q.set('line_layout_mode', fd.get('line_layout_mode') || 'qty_label_loc_inline');
+    q.set('field_order_csv', fd.get('field_order_csv') || 'label,qty,total,location,title');
+    q.set('inline_fields_csv', fd.get('inline_fields_csv') || 'qty,label,location');
+    q.set('inline_separator', fd.get('inline_separator') || ' | ');
+    q.set('show_field_labels', fd.get('show_field_labels') ? '1' : '0');
+    q.set('page_mode', fd.get('page_mode') || 'half_sheet_top');
+    q.set('_t', String(Date.now()));
+    return q.toString();
+  }
+
+  function refreshPreview() { img.src = '/settings/live-preview.png?' + queryFromForm(); }
+  function queueRefresh() { if (timer) clearTimeout(timer); timer = setTimeout(refreshPreview, 180); }
+
+  modeSel.addEventListener('change', () => { applyCustomEnabled(); queueRefresh(); });
+  form.addEventListener('input', queueRefresh);
+  form.addEventListener('change', queueRefresh);
+  labelSel.addEventListener('change', queueRefresh);
+
+  applyCustomEnabled();
+  refreshPreview();
+})();
+</script>
+{% endblock %}
+
+

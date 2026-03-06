@@ -1,0 +1,21 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Generate Preview</h2>
+  {% if labels and labels|length > 0 %}
+  <form action="/preview/generate" method="post">
+    <label for="label_pdf"><strong>Select label PDF</strong></label><br>
+    <select id="label_pdf" name="label_pdf" required style="min-width: 620px; max-width: 100%;">
+      {% for p in labels %}
+      <option value="{{ p }}">{{ p }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Generate Preview PDF</button>
+  </form>
+  {% else %}
+  <p>No label PDFs found yet.</p>
+  <p style="font-size:13px;color:#555;">Upload PDFs or ZIP files on Dashboard first. Then reopen this page.</p>
+  {% endif %}
+  <p>Preview output: processed/preview_output.pdf</p>
+</section>
+{% endblock %}
