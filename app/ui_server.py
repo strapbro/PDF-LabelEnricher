@@ -102,6 +102,23 @@ def _needs_review_rows(limit: int = 15) -> list[dict[str, Any]]:
     rows = item_db.load_rows()
     return [r for r in rows if str(r.get("needs_review", "0")).strip() == "1"][:limit]
 
+def _queue_counts() -> tuple[int, int]:
+    unresolved_count = len(_unresolved())
+    review_count = _needs_review_count()
+    return unresolved_count, review_count
+
+
+def _queue_guard_redirect(action: str = "open_combined") -> RedirectResponse | None:
+    unresolved_count, review_count = _queue_counts()
+    if unresolved_count > 0:
+        msg = f"Address+{unresolved_count}+unprocessed+label(s)+before+{action}."
+        return RedirectResponse(url=f"/unprocessed?msg={msg}", status_code=303)
+    if review_count > 0:
+        msg = f"Address+{review_count}+items+needing+review+before+{action}."
+        return RedirectResponse(url=f"/items/review?msg={msg}", status_code=303)
+    return None
+
+
 def _items_link_targets(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
@@ -289,23 +306,55 @@ def _extract_manual_prefill_from_text(blob: str) -> dict[str, str]:
 
     qty = _grab(r"\b(?:qty|quantity)\b\s*[:#-]?\s*(\d{1,4})")
     if not qty:
+        qty = _grab(r"(?m)^\s*(\d{1,3})\s+\$?\d")
+    if not qty:
         qty = "1"
 
-    total = _grab(r"\b(?:total|paid|amount)\b[^\d$]{0,8}\$?\s*([0-9]+(?:\.[0-9]{2})?)")
+    total = _grab(r"(?im)^\s*(?:grand total|item total)\s*[:$]*\s*\$?\s*([0-9]+(?:\.[0-9]{2})?)")
+    if not total:
+        total = _grab(r"\b(?:total|paid|amount)\b[^\d$]{0,8}\$?\s*([0-9]+(?:\.[0-9]{2})?)")
 
-    title = ""
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    skip = ("ship to", "tracking", "order", "sku", "asin", "qty", "quantity", "total", "us postage", "zip")
-    for ln in lines:
-        ll = ln.lower()
-        if len(ln) < 12:
-            continue
-        if any(s in ll for s in skip):
-            continue
-        if re.search(r"\b\d{3}-\d{7}-\d{7}\b", ln):
-            continue
-        title = ln
-        break
+
+    def _looks_like_title_line(ln: str) -> bool:
+        ll = ln.strip().lower().strip(":")
+        if len(ll) < 8:
+            return False
+        if re.search(r"\b(?:asin|sku|order item id|condition|tracking|order id|zip|qty|quantity)\b", ll):
+            return False
+        header_words = {
+            "order contents",
+            "status",
+            "image",
+            "product name",
+            "more information",
+            "unit price",
+            "proceeds",
+            "shipping address",
+            "order date",
+            "shipping service",
+            "buyer name",
+            "seller name",
+            "item subtotal",
+            "item total",
+            "grand total",
+            "tax",
+            "shipped",
+        }
+        if ll in header_words:
+            return False
+        if re.fullmatch(r"\$?\d+(?:\.\d{2})?", ll):
+            return False
+        return True
+
+    stop_idx = len(lines)
+    for i, ln in enumerate(lines):
+        if re.search(r"\b(?:asin|sku)\s*:", ln, re.IGNORECASE):
+            stop_idx = i
+            break
+
+    candidates = [ln for ln in lines[:stop_idx] if _looks_like_title_line(ln)]
+    title = max(candidates, key=len).strip() if candidates else ""
 
     platform = "amazon" if ("amazon" in lower or asin or sku) else "ebay"
     item_key = sku or asin or ebay_item
@@ -331,9 +380,21 @@ def _split_manual_text_chunks(blob: str) -> list[str]:
     if not text:
         return []
 
+    marker_matches = list(re.finditer(r"(?im)^\s*order contents\s*$", text))
+    if len(marker_matches) >= 2:
+        chunks: list[str] = []
+        for i, m in enumerate(marker_matches):
+            start = m.start()
+            end = marker_matches[i + 1].start() if (i + 1) < len(marker_matches) else len(text)
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+        if chunks:
+            return chunks
+
     order_matches = list(re.finditer(r"\b\d{3}-\d{7}-\d{7}\b", text))
     if len(order_matches) >= 2:
-        chunks: list[str] = []
+        chunks = []
         for i, m in enumerate(order_matches):
             start = m.start()
             end = order_matches[i + 1].start() if (i + 1) < len(order_matches) else len(text)
@@ -345,8 +406,6 @@ def _split_manual_text_chunks(blob: str) -> list[str]:
 
     parts = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
     return parts if parts else [text]
-
-
 def _manual_batch_defaults(label_options: list[dict[str, str]], limit: int = 12) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     for opt in label_options[: max(1, min(limit, len(label_options)))]:
@@ -754,6 +813,9 @@ def create_app() -> FastAPI:
 
     @app.post("/batch/open-combined-latest")
     def open_combined_latest():
+        guard = _queue_guard_redirect("opening+combined+pdf")
+        if guard is not None:
+            return guard
         snap = batch_manager.latest_batch_snapshot()
         path = snap.get("combined_pdf", "") if isinstance(snap, dict) else ""
         if not path:
@@ -949,8 +1011,9 @@ def create_app() -> FastAPI:
 
     def _render_manual_entry(request: Request, msg: str = "", prefill: dict[str, Any] | None = None):
         label_options = _manual_label_options()
+        first_label = label_options[0].get("path", "") if label_options else ""
         defaults: dict[str, Any] = {
-            "label_pdf": "",
+            "label_pdf": first_label,
             "platform": "amazon",
             "order_id": "",
             "item_key": "",
@@ -971,6 +1034,9 @@ def create_app() -> FastAPI:
             defaults.update({k: v for k, v in prefill.items() if v is not None})
             if not defaults.get("batch_entries"):
                 defaults["batch_entries"] = _manual_batch_defaults(label_options)
+
+        if not str(defaults.get("label_pdf", "") or "").strip() and first_label:
+            defaults["label_pdf"] = first_label
 
         return _templates().TemplateResponse(
             "manual_entry.html",
@@ -1035,6 +1101,9 @@ def create_app() -> FastAPI:
 
     @app.post("/manual-entry/create-batch")
     async def manual_entry_create_batch(request: Request):
+        guard = _queue_guard_redirect("creating+manual+output")
+        if guard is not None:
+            return guard
         form = await request.form()
         rows = _manual_rows_from_form(dict(form))
         write_to_items = bool(form.get("write_to_items"))
@@ -1219,6 +1288,10 @@ def create_app() -> FastAPI:
         use_title_as_label: str | None = Form(None),
         write_to_items: str | None = Form(None),
     ):
+        guard = _queue_guard_redirect("creating+manual+output")
+        if guard is not None:
+            return guard
+
         src = Path(label_pdf)
         if not src.exists():
             name = src.name

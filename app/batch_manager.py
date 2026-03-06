@@ -62,7 +62,8 @@ class BatchManager:
     def _all_batch_files(self) -> list[Path]:
         root = self.settings.incoming_batch_folder
         root.mkdir(parents=True, exist_ok=True)
-        return [p for p in root.rglob("*") if p.is_file()]
+        files = [p for p in root.rglob("*") if p.is_file()]
+        return [p for p in files if "_split_pages" not in p.parts]
 
     def _extract_zip_files(self) -> list[Path]:
         extracted: list[Path] = []
@@ -86,6 +87,46 @@ class BatchManager:
             if "packing slip" in p.name.lower():
                 continue
             out.append(p)
+        return out
+
+
+    def _split_runtime_dir(self) -> Path:
+        d = self.settings.incoming_batch_folder / "_split_pages"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _expand_multi_page_label_pdfs(self, label_pdfs: list[Path]) -> list[Path]:
+        out: list[Path] = []
+        split_dir = self._split_runtime_dir()
+
+        # Fresh split output each batch run to avoid stale page files.
+        shutil.rmtree(split_dir, ignore_errors=True)
+        split_dir.mkdir(parents=True, exist_ok=True)
+
+        for src in label_pdfs:
+            try:
+                reader = PdfReader(str(src))
+            except Exception:
+                logging.exception("Failed to open PDF while checking page count: %s", src)
+                out.append(src)
+                continue
+
+            pages = len(reader.pages)
+            if pages <= 1:
+                out.append(src)
+                continue
+
+            base = sanitize_filename(src.stem) or "label"
+            for i, page in enumerate(reader.pages, start=1):
+                one = split_dir / f"{base}__p{i:03d}.pdf"
+                try:
+                    writer = PdfWriter()
+                    writer.add_page(page)
+                    with one.open("wb") as f:
+                        writer.write(f)
+                    out.append(one)
+                except Exception:
+                    logging.exception("Failed to split page %s from %s", i, src)
         return out
 
     def _find_packing_slips(self, files: list[Path]) -> list[Path]:
@@ -297,6 +338,7 @@ class BatchManager:
         self._extract_zip_files()
         files = self._all_batch_files()
         label_pdfs = self._find_label_pdfs(files)
+        label_pdfs = self._expand_multi_page_label_pdfs(label_pdfs)
         if not label_pdfs:
             sync = self._sync_packing_slips_to_item_db(files)
             if sync.get("processed_slips", 0) <= 0:
@@ -971,6 +1013,9 @@ class BatchManager:
                 shutil.rmtree(p, ignore_errors=True)
                 removed += 1
         return removed
+
+
+
 
 
 
