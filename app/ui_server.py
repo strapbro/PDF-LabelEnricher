@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import threading
+from difflib import SequenceMatcher
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -101,6 +102,34 @@ def _needs_review_count() -> int:
 def _needs_review_rows(limit: int = 15) -> list[dict[str, Any]]:
     rows = item_db.load_rows()
     return [r for r in rows if str(r.get("needs_review", "0")).strip() == "1"][:limit]
+
+def _queue_counts() -> tuple[int, int]:
+    unresolved_count = len(_unresolved())
+    review_count = _needs_review_count()
+    return unresolved_count, review_count
+
+
+def _queue_guard_redirect(action: str = "open_combined") -> RedirectResponse | None:
+    unresolved_count, review_count = _queue_counts()
+    if unresolved_count > 0:
+        msg = f"Address+{unresolved_count}+unprocessed+label(s)+before+{action}."
+        return RedirectResponse(url=f"/unprocessed?msg={msg}", status_code=303)
+    if review_count > 0:
+        msg = f"Address+{review_count}+items+needing+review+before+{action}."
+        return RedirectResponse(url=f"/items/review?msg={msg}", status_code=303)
+    return None
+
+
+def _settings_changed_since_latest_batch() -> bool:
+    snap = batch_manager.latest_batch_snapshot()
+    batch_dir = Path(str(snap.get("batch_dir", ""))) if isinstance(snap, dict) and snap.get("batch_dir") else None
+    if not batch_dir or not batch_dir.exists() or not settings.config_path.exists():
+        return False
+    try:
+        return settings.config_path.stat().st_mtime > (batch_dir.stat().st_mtime + 0.5)
+    except Exception:
+        return False
+
 
 def _items_link_targets(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
@@ -289,23 +318,66 @@ def _extract_manual_prefill_from_text(blob: str) -> dict[str, str]:
 
     qty = _grab(r"\b(?:qty|quantity)\b\s*[:#-]?\s*(\d{1,4})")
     if not qty:
+        qty = _grab(r"(?m)^\s*(\d{1,3})\s+\$?\d")
+    if not qty:
         qty = "1"
 
-    total = _grab(r"\b(?:total|paid|amount)\b[^\d$]{0,8}\$?\s*([0-9]+(?:\.[0-9]{2})?)")
+    total = _grab(r"(?im)^\s*(?:grand total|item total)\s*[:$]*\s*\$?\s*([0-9]+(?:\.[0-9]{2})?)")
+    if not total:
+        total = _grab(r"\b(?:total|paid|amount)\b[^\d$]{0,8}\$?\s*([0-9]+(?:\.[0-9]{2})?)")
 
-    title = ""
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    skip = ("ship to", "tracking", "order", "sku", "asin", "qty", "quantity", "total", "us postage", "zip")
-    for ln in lines:
-        ll = ln.lower()
-        if len(ln) < 12:
-            continue
-        if any(s in ll for s in skip):
-            continue
-        if re.search(r"\b\d{3}-\d{7}-\d{7}\b", ln):
-            continue
-        title = ln
-        break
+
+    def _looks_like_title_line(ln: str) -> bool:
+        ll = ln.strip().lower().strip(":")
+        if len(ll) < 8:
+            return False
+        if re.search(r"\b(?:asin|sku|order item id|condition|tracking|order id|zip|qty|quantity)\b", ll):
+            return False
+        header_words = {
+            "order contents",
+            "status",
+            "image",
+            "product name",
+            "more information",
+            "unit price",
+            "proceeds",
+            "shipping address",
+            "order date",
+            "shipping service",
+            "buyer name",
+            "seller name",
+            "order summary",
+            "item subtotal",
+            "item total",
+            "grand total",
+            "tax",
+            "shipped",
+            "package 1",
+            "sales proceeds",
+        }
+        if ll in header_words:
+            return False
+        if re.fullmatch(r"\$?\d+(?:\.\d{2})?", ll):
+            return False
+        return True
+
+    start_idx = 0
+    for i, ln in enumerate(lines):
+        if re.search(r"^\s*order contents\s*$", ln, re.IGNORECASE):
+            start_idx = i
+            break
+
+    stop_idx = len(lines)
+    for i in range(start_idx, len(lines)):
+        ln = lines[i]
+        if re.search(r"\b(?:asin|sku)\s*:", ln, re.IGNORECASE):
+            stop_idx = i
+            break
+
+    search_lines = lines[start_idx:stop_idx] if stop_idx > start_idx else lines[:stop_idx]
+    candidates = [ln for ln in search_lines if _looks_like_title_line(ln)]
+    title = max(candidates, key=len).strip() if candidates else ""
 
     platform = "amazon" if ("amazon" in lower or asin or sku) else "ebay"
     item_key = sku or asin or ebay_item
@@ -343,10 +415,20 @@ def _split_manual_text_chunks(blob: str) -> list[str]:
         if chunks:
             return chunks
 
+    marker_matches = list(re.finditer(r"(?im)^\s*order contents\s*$", text))
+    if len(marker_matches) >= 2:
+        chunks = []
+        for i, m in enumerate(marker_matches):
+            start = m.start()
+            end = marker_matches[i + 1].start() if (i + 1) < len(marker_matches) else len(text)
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+        if chunks:
+            return chunks
+
     parts = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
     return parts if parts else [text]
-
-
 def _manual_batch_defaults(label_options: list[dict[str, str]], limit: int = 12) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     for opt in label_options[: max(1, min(limit, len(label_options)))]:
@@ -437,6 +519,80 @@ def _manual_lookup_row(
         if row is not None:
             return row
     return None
+
+
+TRACKING_REF_RE = re.compile(r"\b(1Z[0-9A-Z]{16}|9[0-9]{19,24}|[0-9]{12,22})\b", re.IGNORECASE)
+
+def _looks_like_tracking_ref(value: str) -> bool:
+    return bool(TRACKING_REF_RE.search(str(value or "").strip()))
+
+def _has_letters(value: str) -> bool:
+    return bool(re.search(r"[A-Za-z]", str(value or "")))
+
+def _strong_name_match(a: str, b: str) -> bool:
+    aa = str(a or "").strip()
+    bb = str(b or "").strip()
+    if not aa or not bb:
+        return False
+    if not _has_letters(aa) or not _has_letters(bb):
+        return False
+    return SequenceMatcher(None, aa.lower(), bb.lower()).ratio() >= 0.72
+
+def _mark_item_needs_review(platform: str, key: str, asin: str, reason: str) -> None:
+    p = (platform or "").strip().lower()
+    if p not in ("amazon", "ebay"):
+        return
+    key_norm = (key or "").strip()
+    asin_norm = (asin or "").strip().upper()
+    wanted = {v for v in [key_norm, asin_norm] if v}
+    if not wanted:
+        return
+    rows = item_db.load_rows()
+    changed = False
+    for row in rows:
+        aliases = {
+            str(row.get("item_id", "") or "").strip(),
+            str(row.get("ebay_item_number", "") or "").strip(),
+            str(row.get("amazon_sku", "") or "").strip(),
+            str(row.get("amazon_asin", "") or "").strip().upper(),
+        }
+        aliases = {a for a in aliases if a}
+        if wanted.intersection(aliases):
+            row["needs_review"] = "1"
+            row["needs_review_reason"] = reason
+            changed = True
+    if changed:
+        item_db.save_rows(rows)
+
+def _append_manual_unresolved(label_pdf: Path, reason: str) -> None:
+    signals = extract_label_signals(label_pdf)
+    queue = batch_manager._load_unresolved_queue()
+    label_str = str(label_pdf)
+    if any(str(q.get("label_pdf", "")) == label_str and str(q.get("reason", "")) == reason for q in queue):
+        return
+    queue.append({
+        "label_pdf": label_str,
+        "label_identity": batch_manager._build_label_identity(label_pdf, signals),
+        "recipient_name": signals.get("recipient_name", ""),
+        "tracking_number": signals.get("tracking_number", ""),
+        "ship_postal": signals.get("ship_postal", ""),
+        "reason": reason,
+        "candidates": [],
+    })
+    batch_manager._save_unresolved_queue(queue)
+
+def _manual_ebay_safety_ok(label_pdf: Path, label_ref: str) -> tuple[bool, str]:
+    ref = str(label_ref or "").strip()
+    if _looks_like_tracking_ref(ref):
+        return True, "tracking_ref"
+    signals = extract_label_signals(label_pdf)
+    sig_tracking = str(signals.get("tracking_number", "") or "").strip()
+    if _looks_like_tracking_ref(sig_tracking):
+        return True, "label_tracking"
+    sig_name = str(signals.get("recipient_name", "") or "").strip()
+    if _strong_name_match(ref, sig_name):
+        return True, "name_match"
+    return False, "missing_tracking_or_weak_name_match"
 
 def _detect_line_layout_mode(field_order_csv: str, inline_fields_csv: str, line_groups_csv: str = "") -> str:
     fo = (field_order_csv or "").replace(" ", "").lower()
@@ -607,10 +763,11 @@ def _sample_lines_for_order(field_order_csv: str, inline_fields_csv: str, show_f
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Label Enricher")
+
     app.mount("/static", StaticFiles(directory=str(settings.base_dir / "static")), name="static")
 
     @app.get("/", response_class=HTMLResponse)
-    def dashboard(request: Request, msg: str = ""):
+    def dashboard(request: Request, msg: str = "", stale_open: int = 0):
         status = batch_manager.scan_inputs()
         latest_batch = batch_manager.latest_batch_snapshot()
         return _templates().TemplateResponse(
@@ -624,6 +781,7 @@ def create_app() -> FastAPI:
                 "latest_batch": latest_batch,
                 "needs_review_count": _needs_review_count(),
                 "needs_review_rows": _needs_review_rows(),
+                "stale_open": bool(stale_open),
             },
         )
 
@@ -753,17 +911,39 @@ def create_app() -> FastAPI:
         return RedirectResponse(url=f"/?msg=Combined+{result.get('count', 0)}+PDFs:+{result.get('path', '')}", status_code=303)
 
     @app.post("/batch/open-combined-latest")
-    def open_combined_latest():
+    def open_combined_latest(force_open: str | None = Form(None), reprocess_if_stale: str | None = Form(None)):
+        guard = _queue_guard_redirect("opening+combined+pdf")
+        if guard is not None:
+            return guard
+
+        stale = _settings_changed_since_latest_batch()
+        if stale and not _parse_bool(force_open, False) and not _parse_bool(reprocess_if_stale, False):
+            return RedirectResponse(
+                url="/?msg=Layout+settings+changed+since+last+batch.+Reprocess+before+opening+for+accurate+output.&stale_open=1",
+                status_code=303,
+            )
+
+        if stale and _parse_bool(reprocess_if_stale, False):
+            processed = batch_manager.process_batch()
+            if not processed.get("ok"):
+                return RedirectResponse(url=f"/?msg=Reprocess+failed:+{processed.get('error', 'Batch failed')}", status_code=303)
+            summary = processed.get("report", {}).get("summary", {})
+            if int(summary.get("matched", 0) or 0) <= 0:
+                return RedirectResponse(url="/?msg=Reprocess+completed+but+no+matched+labels+were+generated", status_code=303)
+
         snap = batch_manager.latest_batch_snapshot()
         path = snap.get("combined_pdf", "") if isinstance(snap, dict) else ""
-        if not path:
+        if not path or (stale and _parse_bool(reprocess_if_stale, False)):
             result = batch_manager.combine_latest_output_pdfs()
             if not result.get("ok"):
                 return RedirectResponse(url=f"/?msg={result.get('error', 'Combine failed')}", status_code=303)
             path = result.get("path", "")
+
         if path:
-            settings.open_folder(Path(path))
-            return RedirectResponse(url=f"/?msg=Opened+combined+PDF:+{path}", status_code=303)
+            opened = _open_file(Path(path))
+            if opened:
+                return RedirectResponse(url=f"/?msg=Opened+combined+PDF:+{path}", status_code=303)
+            return RedirectResponse(url=f"/?msg=Combined+PDF+ready+but+could+not+auto-open:+{path}", status_code=303)
         return RedirectResponse(url="/?msg=No+combined+PDF+available", status_code=303)
 
     @app.post("/open")
@@ -949,8 +1129,9 @@ def create_app() -> FastAPI:
 
     def _render_manual_entry(request: Request, msg: str = "", prefill: dict[str, Any] | None = None):
         label_options = _manual_label_options()
+        first_label = label_options[0].get("path", "") if label_options else ""
         defaults: dict[str, Any] = {
-            "label_pdf": "",
+            "label_pdf": first_label,
             "platform": "amazon",
             "order_id": "",
             "item_key": "",
@@ -971,6 +1152,9 @@ def create_app() -> FastAPI:
             defaults.update({k: v for k, v in prefill.items() if v is not None})
             if not defaults.get("batch_entries"):
                 defaults["batch_entries"] = _manual_batch_defaults(label_options)
+
+        if not str(defaults.get("label_pdf", "") or "").strip() and first_label:
+            defaults["label_pdf"] = first_label
 
         return _templates().TemplateResponse(
             "manual_entry.html",
@@ -1035,6 +1219,9 @@ def create_app() -> FastAPI:
 
     @app.post("/manual-entry/create-batch")
     async def manual_entry_create_batch(request: Request):
+        guard = _queue_guard_redirect("creating+manual+output")
+        if guard is not None:
+            return guard
         form = await request.form()
         rows = _manual_rows_from_form(dict(form))
         write_to_items = bool(form.get("write_to_items"))
@@ -1076,6 +1263,20 @@ def create_app() -> FastAPI:
                 errors.append(f"Row {i}: Label link reference required")
                 continue
 
+            asin = str(r.get("item_asin", "") or "").strip().upper()
+            if platform == "amazon" and not asin and key.upper().startswith("B") and len(key) == 10:
+                asin = key.upper()
+
+            if platform == "ebay":
+                ok, why = _manual_ebay_safety_ok(src, label_ref)
+                if not ok:
+                    reason = f"manual_ebay_safety:{why}"
+                    _mark_item_needs_review(platform, key, asin, reason)
+                    _append_manual_unresolved(src, reason)
+                    errors.append(f"Row {i}: Manual eBay safety check failed (tracking missing and name is not a strong match)")
+                    continue
+
+
             try:
                 qty = int(float(str(r.get("quantity", "1") or "1")))
             except Exception:
@@ -1084,9 +1285,6 @@ def create_app() -> FastAPI:
                 errors.append(f"Row {i}: Quantity invalid")
                 continue
 
-            asin = str(r.get("item_asin", "") or "").strip().upper()
-            if platform == "amazon" and not asin and key.upper().startswith("B") and len(key) == 10:
-                asin = key.upper()
 
             title = str(r.get("title", "") or "").strip()
             label = str(r.get("custom_label", "") or "").strip()
@@ -1198,7 +1396,10 @@ def create_app() -> FastAPI:
 
         msg = f"Manual batch complete. Generated: {len(rendered)}"
         if errors:
-            msg += f" | Errors: {len(errors)}"
+            preview = "; ".join(errors[:3])
+            if len(errors) > 3:
+                preview += f"; (+{len(errors)-3} more)"
+            msg += f" | Errors: {len(errors)} | {preview}"
         if rendered:
             msg += " | Opened combined manual PDF"
         return RedirectResponse(url=f"/manual-entry?msg={msg}", status_code=303)
@@ -1219,6 +1420,10 @@ def create_app() -> FastAPI:
         use_title_as_label: str | None = Form(None),
         write_to_items: str | None = Form(None),
     ):
+        guard = _queue_guard_redirect("creating+manual+output")
+        if guard is not None:
+            return guard
+
         src = Path(label_pdf)
         if not src.exists():
             name = src.name
@@ -1245,6 +1450,18 @@ def create_app() -> FastAPI:
         asin = (item_asin or "").strip().upper()
         if p == "amazon" and not asin and key.upper().startswith("B") and len(key) == 10:
             asin = key.upper()
+
+
+        if p == "ebay":
+            ok, why = _manual_ebay_safety_ok(src, ref)
+            if not ok:
+                reason = f"manual_ebay_safety:{why}"
+                _mark_item_needs_review(p, key, asin, reason)
+                _append_manual_unresolved(src, reason)
+                return RedirectResponse(
+                    url="/manual-entry?msg=Manual+eBay+safety+check+failed:+tracking+missing+and+name+match+too+weak.+Sent+to+review.",
+                    status_code=303,
+                )
 
         t = (title or "").strip()
         label = (custom_label or "").strip()
@@ -1436,6 +1653,11 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+
+
+
 
 
 

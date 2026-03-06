@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 <section class="card">
   <h2>Sync From Hot/Live Spreadsheet</h2>
@@ -60,12 +60,12 @@
           <tr class="{% if row.needs_review == '1' %}needs-review-row{% endif %}">
             <input type="hidden" name="row_{{ loop.index0 }}_row_key" value="{{ row._row_key or '' }}">
             <td>{{ row.platform }}</td>
-            <td><input name="row_{{ loop.index0 }}_ebay_item_number" value="{{ row.ebay_item_number or '' }}"></td>
-            <td><input name="row_{{ loop.index0 }}_amazon_sku" value="{{ row.amazon_sku or '' }}"></td>
-            <td><input name="row_{{ loop.index0 }}_amazon_asin" value="{{ row.amazon_asin or '' }}"></td>
-            <td><input name="row_{{ loop.index0 }}_item_title" value="{{ row.item_title or '' }}"></td>
-            <td><input name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}"></td>
-            <td><input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_ebay_item_number" value="{{ row.ebay_item_number or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_sku" value="{{ row.amazon_sku or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_asin" value="{{ row.amazon_asin or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_item_title" value="{{ row.item_title or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
             <td class="{% if is_merged %}link-locked{% endif %}">
               <select class="link-platform" name="row_{{ loop.index0 }}_linked_platform" {% if is_merged %}disabled{% endif %}>
                 <option value="" {% if not default_link_platform %}selected{% endif %}></option>
@@ -130,6 +130,11 @@
 .delete-row-btn { background:#d62828; color:#fff; border:0; border-radius:6px; padding:4px 10px; cursor:pointer; font-weight:700; }
 .delete-row-btn:hover { background:#b71f1f; }
 .undo-row-btn { margin-left:6px; background:#6c757d; color:#fff; border:0; border-radius:6px; padding:4px 8px; cursor:pointer; }
+.copy-field { display:flex; gap:4px; align-items:center; }
+.copy-field input { flex: 1 1 auto; }
+.copy-btn { flex:0 0 auto; width:30px; height:30px; padding:0; border:1px solid #c9d4e3; background:#f8fbff; color:#234; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
+.copy-btn:hover { background:#eaf2ff; }
+.copy-btn svg { width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 
 .items-table.mode-compact th:nth-child(1), .items-table.mode-compact td:nth-child(1) { width: 90px; }
 .items-table.mode-compact th:nth-child(2), .items-table.mode-compact td:nth-child(2) { width: 150px; }
@@ -329,7 +334,32 @@
   });
 
 
+  async function copyTextSafe(text) {
+    const val = (text || "").trim();
+    if (!val) return;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(val);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = val;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+    } catch (err) {}
+  }
+
   tbody.addEventListener('click', (e) => {
+    const copyBtn = e.target.closest('.copy-btn');
+    if (copyBtn) {
+      const field = copyBtn.closest('.copy-field');
+      const input = field ? field.querySelector('input,textarea') : null;
+      copyTextSafe(input ? input.value : '');
+      return;
+    }
+
     const delBtn = e.target.closest('.delete-row-btn');
     if (delBtn) {
       const row = delBtn.closest('tr');
@@ -356,6 +386,13 @@
 })();
 </script>
 {% endblock %}
+
+
+
+
+
+
+
 
 
 

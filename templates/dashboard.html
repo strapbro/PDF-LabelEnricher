@@ -16,15 +16,17 @@
 
     <div class="upload-meta-row">
       <div id="pendingCount" class="pending-count">Pending selection: 0 file(s)</div>
-      <label class="inline-check" for="autoPrintAfterProcess">
-        <input id="autoPrintAfterProcess" type="checkbox" name="auto_print_after_process" value="1">
-        Auto-print after processing
-      </label>
     </div>
 
     <div class="upload-quick-actions">
-      <button class="btn btn-lg btn-primary" type="submit" name="quick_action" value="upload_process_open">Upload, Process, + Open Combined PDF</button>
-      <button class="btn btn-lg btn-success" type="submit" name="quick_action" value="upload_only">Upload to incoming/batch</button>
+      <div class="quick-primary-stack">
+        <button class="btn btn-lg btn-quick btn-spotlight" type="submit" name="quick_action" value="upload_process_open">Upload + Process + Open Combined</button>
+        <label class="inline-check quick-inline-check" for="autoPrintAfterProcess">
+          <input id="autoPrintAfterProcess" type="checkbox" name="auto_print_after_process" value="1">
+          Auto-print after processing
+        </label>
+      </div>
+      <button class="btn btn-lg btn-upload" type="submit" name="quick_action" value="upload_only">Upload to incoming/batch</button>
     </div>
   </form>
 </section>
@@ -60,9 +62,24 @@
 <section class="card split-actions">
   <div>
     <h3>Primary Actions</h3>
+    {% if stale_open %}
+    <div class="stale-warning">
+      <strong>Layout settings changed since last batch.</strong> Reprocess before opening so the print file matches current layout.
+      <div class="stale-warning-actions">
+        <form action="/batch/open-combined-latest" method="post">
+          <input type="hidden" name="reprocess_if_stale" value="1">
+          <button class="btn btn-md btn-primary" type="submit">Reprocess + Open (Recommended)</button>
+        </form>
+        <form action="/batch/open-combined-latest" method="post">
+          <input type="hidden" name="force_open" value="1">
+          <button class="btn btn-md btn-outline" type="submit">Open Last Combined Anyway</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
     <div class="actions-grid main-actions">
       <form action="/process" method="post"><button class="btn btn-lg btn-primary" type="submit">Process Batch</button></form>
-      <form action="/batch/open-combined-latest" method="post"><button class="btn btn-lg btn-success" type="submit">Open Combined PDF</button></form>
+      <form action="/batch/open-combined-latest" method="post"><button class="btn btn-lg btn-open" type="submit">Open Combined PDF</button></form>
       <form action="/process/reprocess-latest" method="post" onsubmit="return confirm('Reprocess latest archived batch? This will clear current staged files first.')"><button class="btn btn-md btn-secondary" type="submit">Reprocess Previous Batch</button></form>
       <a class="btn btn-md btn-secondary" href="/reprocess-select">Reprocess Select PDFs (Prev Batch)</a>
     </div>
@@ -77,8 +94,6 @@
       <a class="btn btn-md {% if needs_review_count > 0 %}btn-attn{% else %}btn-secondary{% endif %}" href="/items/review">
         View Items Needing Review {% if needs_review_count > 0 %}({{ needs_review_count }}){% endif %}
       </a>
-      <a class="btn btn-md btn-secondary" href="/items">Item Database</a>
-      <a class="btn btn-md btn-secondary" href="/manual-entry">Manual Entry</a>
       <form action="/open" method="post"><input type="hidden" name="target" value="incoming"><button class="btn btn-sm btn-outline" type="submit">Open Incoming Folder</button></form>
       <form action="/open" method="post"><input type="hidden" name="target" value="processed"><button class="btn btn-sm btn-outline" type="submit">Open Processed Folder</button></form>
     </div>
@@ -99,11 +114,10 @@
 </section>
 
 <section class="card tiny-meta">
-  <strong>Counter meanings:</strong>
-  Unprocessed Queue = labels not matched yet.
-  Item DB Needs Review = rows in <code>items.csv</code> with <code>needs_review=1</code>.
+  <strong>What these counters mean:</strong>
+  Unprocessed Queue = labels that still need a manual match before printing.
+  Items Need Review = products that still need item details checked or updated in the Item Database.
 </section>
-
 <section class="two-col">
   <section class="card">
     <h2>Items Needing Review (Top 15)</h2>
@@ -135,56 +149,64 @@
 </section>
 
 <style>
-.upload-card { border-width: 2px; border-color: #d6e4ff; }
+.upload-card { border-width: 2px; border-color: #b9c7ad; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .section-head h2 { margin: 0; }
-.section-note { font-size: 12px; color: #53627a; font-weight: 600; }
+.section-note { font-size: 12px; color: #4c5f50; font-weight: 600; }
 
 .drop-zone {
-  border: 2px dashed #7d8a99;
+  border: 2px dashed #7b8b72;
   border-radius: 12px;
   padding: 24px;
   text-align: center;
   margin-bottom: 10px;
   cursor: pointer;
-  background: linear-gradient(180deg, #f8fbff, #f2f7ff);
+  background: linear-gradient(180deg, rgba(218, 215, 205, 0.35), rgba(163, 177, 138, 0.22));
 }
-.drop-zone:hover { background: linear-gradient(180deg, #eef6ff, #e8f2ff); }
-.drop-zone.active { background: #e8f2ff; border-color: #2f6fed; }
+.drop-zone:hover { background: linear-gradient(180deg, rgba(218, 215, 205, 0.48), rgba(163, 177, 138, 0.34)); }
+.drop-zone.active { background: rgba(163, 177, 138, 0.3); border-color: #588157; }
 .drop-title { font-weight: 800; font-size: 16px; }
-.drop-sub { color: #4b5563; margin-top: 4px; font-size: 13px; }
+.drop-sub { color: #3e5345; margin-top: 4px; font-size: 13px; }
 .drop-choose {
   display: inline-block;
   margin-top: 10px;
   padding: 8px 14px;
   border-radius: 8px;
-  background: #0b5ed7;
+  background: linear-gradient(135deg, #3a5a40, #344e41);
   color: #fff;
   font-weight: 700;
 }
 
-.upload-meta-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.pending-count { margin: 6px 0; font-size: 13px; color: #334155; font-weight: 700; }
-.inline-check { display:flex; align-items:center; gap:8px; margin: 6px 0; font-size:13px; color:#1e293b; font-weight: 600; }
-.upload-quick-actions { display:grid; grid-template-columns: 1.2fr 1fr; gap:10px; margin-top: 4px; }
+.upload-meta-row { display: flex; justify-content: flex-start; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pending-count { margin: 6px 0 10px; font-size: 18px; line-height: 1.1; color: #233b2f; font-weight: 800; letter-spacing: 0.2px; }
+.inline-check { display:flex; align-items:center; gap:8px; margin: 6px 0; font-size:14px; color:#20392d; font-weight: 700; }
+.inline-check input[type="checkbox"] { width:auto; margin:0; accent-color:#3a5a40; }
+.quick-inline-check { margin-top: 8px; }
+.quick-primary-stack { display:flex; flex-direction:column; align-items:stretch; }
+.upload-quick-actions { display:grid; grid-template-columns: 1.2fr 1fr; gap:10px; margin-top: 4px; align-items: start; }
 .upload-quick-actions .btn { width: 100%; }
 
 .stats-grid { grid-template-columns: repeat(6, minmax(120px, 1fr)); margin-bottom: 12px; }
 .stat-card { margin: 0; padding: 12px; }
-.stat-label { color: #475569; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
-.stat-value { font-size: 24px; font-weight: 900; margin-top: 3px; color: #0f172a; }
-.stat-sub { font-size: 11px; color: #64748b; margin-top: 3px; }
-.stat-ok { border-color: #b6e2cb; background: #f4fcf8; }
-.stat-miss { border-color: #f8d3d3; background: #fff5f5; }
-.stat-alert { border-color: #f9d68a; background: #fff8ea; }
+.stat-label { color: #4a5e4f; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+.stat-value { font-size: 24px; font-weight: 900; margin-top: 3px; color: #22372d; }
+.stat-sub { font-size: 11px; color: #5b6e60; margin-top: 3px; }
+.stat-ok { border-color: #b8c9a2; background: rgba(198, 216, 183, 0.38); }
+.stat-miss { border-color: #d8b9aa; background: rgba(242, 230, 224, 0.7); }
+.stat-alert { border-color: #cfb987; background: rgba(241, 233, 212, 0.76); }
 
-.split-actions h3 { margin: 2px 0 10px; font-size: 15px; color: #1e293b; }
-.split-actions > div + div { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #d7e1ef; }
+.stale-warning { margin: 0 0 10px; padding: 10px 12px; border: 1px solid #cdb684; background: rgba(241, 233, 212, 0.84); border-radius: 10px; color: #4f4730; font-size: 13px; }
+.stale-warning-actions { display: grid; grid-template-columns: 1.2fr 1fr; gap: 8px; margin-top: 8px; }
+.stale-warning-actions form { margin: 0; }
+.stale-warning-actions .btn { width: 100%; }
+
+.split-actions h3 { margin: 2px 0 10px; font-size: 15px; color: #2d4735; }
+.split-actions > div + div { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #c3ceb8; }
 .actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; align-items: stretch; }
 .actions-grid form { margin: 0; width: 100%; }
 .actions-grid .btn, .actions-grid button { width: 100%; min-height: 40px; }
 
-.tiny-meta { font-size: 13px; color: #344256; }
+.tiny-meta { font-size: 13px; color: #3b5645; }
 .two-col { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }
 
 @media (max-width: 1100px) {
@@ -193,6 +215,7 @@
 }
 
 @media (max-width: 900px) {
+  .stale-warning-actions { grid-template-columns: 1fr; }
   .upload-quick-actions { grid-template-columns: 1fr; }
   .actions-grid { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
@@ -248,8 +271,25 @@ document.getElementById('uploadForm').addEventListener('submit', () => {
   }, 0);
 });
 
+
+document.querySelectorAll('.btn-spotlight').forEach((btn) => {
+  btn.addEventListener('mousemove', (e) => {
+    const rect = btn.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    btn.style.setProperty('--x', `${x}px`);
+    btn.style.setProperty('--y', `${y}px`);
+  });
+});
 refreshPending();
 </script>
 {% endblock %}
+
+
+
+
+
+
+
 
 
