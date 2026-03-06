@@ -22,7 +22,18 @@
 
 * { box-sizing: border-box; }
 
+html, body {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+html {
+  background: linear-gradient(180deg, #f2f1eb, #e8e6dc);
+}
+
 body {
+  padding-top: 0 !important;
+  min-height: 100vh;
   font-family: "Segoe UI", Arial, sans-serif;
   margin: 0;
   color: var(--ink);
@@ -34,11 +45,12 @@ body {
 
 header {
   cursor: pointer;
-  position: sticky;
+  position: relative;
   top: 0;
+  margin-top: -8px;
   z-index: 50;
   color: #f2f7ff;
-  padding: 18px 22px;
+  padding: 26px 22px 18px 22px;
   background: linear-gradient(135deg, rgba(52, 78, 65, 0.94), rgba(58, 90, 64, 0.9));
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
   backdrop-filter: blur(12px) saturate(130%);
@@ -358,3 +370,10 @@ pre {
     font-size: 24px;
   }
 }
+
+body > header {
+  margin-top: -8px !important;
+}
+
+
+

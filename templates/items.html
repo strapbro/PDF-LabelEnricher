@@ -2,20 +2,21 @@
 {% block content %}
 <section class="card">
   <h2>Sync From Hot/Live Spreadsheet</h2>
-  <p style="margin-top:4px;color:#555;font-size:13px;">Auto backup is enabled for every save/sync. Current backups: <strong>{{ backups_count or 0 }}</strong></p>
-  <form action="/items/sync" method="post" enctype="multipart/form-data">
-    <input type="file" name="master_csv" accept=".csv,.tsv,.txt" required>
-    <button class="btn btn-secondary items-action-btn" type="submit">Import / Re-sync</button>
-  </form>
-  <div class="items-controls" style="margin-top:8px;">
-    <form action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Create Backup Now</button></form>
-    <form action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Open Backups Folder</button></form>
-    <a class="btn btn-primary items-action-btn" href="/items/export">Download items.csv</a>
+  <div class="items-actions-stack">
+    <form class="items-sync-form" action="/items/sync" method="post" enctype="multipart/form-data">
+      <input type="file" name="master_csv" accept=".csv,.tsv,.txt" required>
+      <button class="btn btn-secondary items-action-btn" type="submit">Import / Re-sync</button>
+      <a class="btn btn-primary items-action-btn" href="/items/export">Download items.csv</a>
+    </form>
+    <div class="items-controls" style="margin-top:8px;">
+      <form id="itemsBackupForm" action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Create Backup Now</button></form>
+      <form action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Open Backups Folder</button></form>
+      <form action="/items/clear-needs-review" method="post" onsubmit="return confirm('Clear all items from Needs Review list?')">
+        <input type="hidden" name="from_page" value="items">
+        <button class="btn btn-secondary items-action-btn" type="submit">Clear Needs Review Flags</button>
+      </form>
+    </div>
   </div>
-  <form action="/items/clear-needs-review" method="post" onsubmit="return confirm('Clear all items from Needs Review list?')" style="margin-top:8px;">
-    <input type="hidden" name="from_page" value="items">
-    <button class="btn btn-secondary items-action-btn" type="submit">Clear Needs Review Flags</button>
-  </form>
 </section>
 
 <section class="card">
@@ -100,10 +101,6 @@
           <option value="{{ t.id_value }}">{{ t.platform }} | {{ t.id_type }} | {{ t.title }}</option>
         {% endfor %}
       </datalist>
-      <div class="items-scroll-controls">
-        <button id="itemsScrollLeft" class="btn btn-secondary items-scroll-btn" type="button">&#x25C0; Scroll Left</button>
-        <button id="itemsScrollRight" class="btn btn-secondary items-scroll-btn" type="button">Scroll Right &#x25B6;</button>
-      </div>
     </div>
     <button id="saveChangesBtn" class="btn btn-secondary save-btn save-passive" type="submit" style="margin-top:10px;">Save Changes</button>
   </form>
@@ -111,16 +108,18 @@
 
 <style>
 .items-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.items-actions-stack { display: flex; flex-direction: column; gap: 8px; }
+.items-sync-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .items-action-btn { min-height: 38px; }
 .items-controls input[type="text"] { min-width: 320px; max-width: 520px; }
-.items-table-wrap { overflow-x: auto; padding-bottom: 8px; }
+.items-table-wrap { max-height: calc(100vh - 300px); overflow: auto; padding-bottom: 8px; }
 .items-table-wrap::-webkit-scrollbar { height: 18px; }
 .items-table-wrap::-webkit-scrollbar-track { background: rgba(180, 190, 180, 0.28); border-radius: 999px; }
 .items-table-wrap::-webkit-scrollbar-thumb { background: rgba(74, 110, 88, 0.58); border-radius: 999px; }
 .items-table { table-layout: fixed; }
 .items-table.mode-compact { min-width: 1950px; }
 .items-table.mode-wide { min-width: 2450px; }
-.items-table th { user-select: none; cursor: pointer; white-space: normal; word-break: break-word; line-height: 1.2; background: #f7f9fb; position: sticky; top: 108px; z-index: 3; font-size: 14px; padding: 10px 8px; }
+.items-table th { user-select: none; cursor: pointer; white-space: nowrap; word-break: normal; line-height: 1.05; background: #f7f9fb; position: sticky; top: 0; z-index: 3; font-size: 14px; padding: 8px 8px; }
 .items-table th.sort-asc::after { content: " \2191"; }
 .items-table th.sort-desc::after { content: " \2193"; }
 .items-table td.center { text-align: center; }
@@ -157,16 +156,14 @@
 .items-table.mode-compact th:nth-child(11), .items-table.mode-compact td:nth-child(11) { width: 320px; }
 .items-table.mode-compact th:nth-child(12), .items-table.mode-compact td:nth-child(12) { width: 230px; }
 .items-table.mode-compact th:nth-child(13), .items-table.mode-compact td:nth-child(13) { width: 95px; }
-.items-table.mode-compact th:nth-child(14), .items-table.mode-compact td:nth-child(14) { width: 125px; }
+.items-table.mode-compact th:nth-child(14), .items-table.mode-compact td:nth-child(14) { width: 170px; }
 
 .items-table.mode-wide th:nth-child(5), .items-table.mode-wide td:nth-child(5) { width: 520px; }
 .items-table.mode-wide th:nth-child(6), .items-table.mode-wide td:nth-child(6) { width: 420px; }
 .items-table.mode-wide th:nth-child(10), .items-table.mode-wide td:nth-child(10) { width: 260px; }
 .items-table.mode-wide th:nth-child(11), .items-table.mode-wide td:nth-child(11) { width: 560px; }
 .items-table.mode-wide th:nth-child(12), .items-table.mode-wide td:nth-child(12) { width: 360px; }
-.items-table.mode-wide th:nth-child(14), .items-table.mode-wide td:nth-child(14) { width: 150px; }
-.items-scroll-controls { position: sticky; right: 0; bottom: 10px; z-index: 6; display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; pointer-events: none; }
-.items-scroll-btn { pointer-events: auto; min-width: 132px; }
+.items-table.mode-wide th:nth-child(14), .items-table.mode-wide td:nth-child(14) { width: 190px; }
 .save-btn { min-width: 150px; }
 .save-passive { opacity: 0.68; filter: saturate(0.72); }
 </style>
@@ -180,9 +177,6 @@
   const filterClearBtn = document.getElementById('itemsFilterClear');
   const widthBtn = document.getElementById('itemsWidthToggle');
   const dataEl = document.getElementById('linkTargetsData');
-  const wrap = document.querySelector('.items-table-wrap');
-  const scrollLeftBtn = document.getElementById('itemsScrollLeft');
-  const scrollRightBtn = document.getElementById('itemsScrollRight');
   const saveBtn = document.getElementById('saveChangesBtn');
   const saveForm = table ? table.closest('form') : null;
   let isDirty = false;
@@ -349,12 +343,6 @@
   filterInput.addEventListener('input', (e) => applyFilter(e.target.value || ''));
   filterClearBtn.addEventListener('click', () => { filterInput.value = ''; applyFilter(''); });
   widthBtn.addEventListener('click', () => applyWidthMode(prefs.widthMode === 'wide' ? 'compact' : 'wide'));
-  if (scrollLeftBtn && wrap) {
-    scrollLeftBtn.addEventListener('click', () => wrap.scrollBy({ left: -420, behavior: 'smooth' }));
-  }
-  if (scrollRightBtn && wrap) {
-    scrollRightBtn.addEventListener('click', () => wrap.scrollBy({ left: 420, behavior: 'smooth' }));
-  }
   if (saveForm) {
     saveForm.addEventListener('input', (e) => {
       if (e.target && e.target.id === 'itemsFilter') return;
@@ -425,6 +413,12 @@
   });
   updateLinkPreviews();
   setSaveDirty(false);
+
+  const urlMsg = new URLSearchParams(window.location.search).get('msg') || '';
+  if (urlMsg.toLowerCase().startsWith('backup created:')) {
+    alert(urlMsg);
+  }
+
   if (prefs.sortCol >= 0) sortBy(prefs.sortCol, true);
 })();
 </script>

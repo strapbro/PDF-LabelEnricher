@@ -9,6 +9,7 @@ from difflib import SequenceMatcher
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 import fitz
 from fastapi import FastAPI, File, Form, Query, Request, UploadFile
@@ -1095,7 +1096,10 @@ def create_app() -> FastAPI:
     @app.post("/items/backup")
     def items_backup_now(from_page: str = Form("items")):
         backup = item_db.create_backup_now()
-        msg = "Backup+created" if backup else "No+backup+created"
+        if backup:
+            msg = quote_plus(f"Backup created: {backup.name} in {backup.parent}")
+        else:
+            msg = "No+backup+created"
         if from_page == "dashboard":
             return RedirectResponse(url=f"/?msg={msg}", status_code=303)
         return RedirectResponse(url=f"/items?msg={msg}", status_code=303)
@@ -1653,72 +1657,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
