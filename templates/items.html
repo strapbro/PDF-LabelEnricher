@@ -8,6 +8,49 @@
       <button class="btn btn-secondary items-action-btn" type="submit">Import / Re-sync</button>
       <a class="btn btn-primary items-action-btn" href="/items/export">Download items.csv</a>
     </form>
+    <form class="items-sync-form" action="/items/sync-stage" method="post" enctype="multipart/form-data">
+      <input type="file" name="master_csv_stage" accept=".csv,.tsv,.txt" required>
+      <button class="btn btn-primary items-action-btn" type="submit">Stage Import (Review First)</button>
+    </form>
+    <div class="items-shared-link">
+      <input id="sharedSheetLink" type="text" placeholder="Paste shared Drive/Sheet link here">
+      <button id="saveSharedSheetLink" class="btn btn-secondary items-action-btn" type="button">Save Link</button>
+      <button id="openSharedSheetLink" class="btn btn-primary items-action-btn" type="button">Open Link</button>
+    </div>
+    {% if staged_sync and staged_sync.entries %}
+    <div class="items-stage-box">
+      <div class="items-stage-head">
+        <strong>Staged Import Ready</strong>
+        <span>Total {{ staged_sync.counts.total or 0 }} | New {{ staged_sync.counts.create or 0 }} | Updates {{ staged_sync.counts.update or 0 }} | No change {{ staged_sync.counts.noop or 0 }}</span>
+      </div>
+      <div class="items-stage-actions">
+        <form action="/items/sync-apply" method="post">
+          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" name="only_add_new" value="1"> Only add new rows (skip updates to existing rows)</label>
+          <button class="btn btn-primary items-action-btn" type="submit">Apply Staged Import</button>
+        </form>
+        <form action="/items/sync-clear" method="post">
+          <button class="btn btn-secondary items-action-btn" type="submit">Clear Staged Import</button>
+        </form>
+      </div>
+      <div class="items-stage-list">
+        <table class="items-stage-table">
+          <thead><tr><th>Action</th><th>Platform</th><th>ID</th><th>Label</th><th>Location</th><th>Fields Changed</th></tr></thead>
+          <tbody>
+          {% for e in staged_sync.entries[:40] %}
+            <tr>
+              <td>{{ e.action }}</td>
+              <td>{{ e.platform }}</td>
+              <td>{{ e.ident }}</td>
+              <td>{{ e.preview_label or e.preview_title or "" }}</td>
+              <td>{{ e.preview_location or "" }}</td>
+              <td>{{ (e.changed_fields or [])|join(", ") }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
     <div class="items-controls" style="margin-top:8px;">
       <form id="itemsBackupForm" action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Create Backup Now</button></form>
       <form action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Open Backups Folder</button></form>
@@ -102,6 +145,9 @@
         {% endfor %}
       </datalist>
     </div>
+    <div id="itemsStickyScrollbar" class="items-sticky-scroll" aria-hidden="true">
+      <div id="itemsStickyScrollbarInner"></div>
+    </div>
     <button id="saveChangesBtn" class="btn btn-secondary save-btn save-passive" type="submit" style="margin-top:10px;">Save Changes</button>
   </form>
 </section>
@@ -110,12 +156,41 @@
 .items-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .items-actions-stack { display: flex; flex-direction: column; gap: 8px; }
 .items-sync-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.items-shared-link { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.items-shared-link input[type="text"] { min-width: 360px; max-width: 780px; width: 100%; }
+.items-stage-box { border: 1px solid rgba(80,100,90,0.22); border-radius: 10px; padding: 10px; background: rgba(248,251,249,0.75); }
+.items-stage-head { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
+.items-stage-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
+.items-stage-actions form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.items-stage-list { max-height: 240px; overflow:auto; }
+.items-stage-table { width:100%; border-collapse: collapse; font-size: 12px; }
+.items-stage-table th, .items-stage-table td { border:1px solid #d8e0d8; padding:6px; text-align:left; vertical-align:top; }
+.items-stage-table th { background:#eef3ef; position: sticky; top: 0; z-index: 1; }
 .items-action-btn { min-height: 38px; }
 .items-controls input[type="text"] { min-width: 320px; max-width: 520px; }
 .items-table-wrap { max-height: calc(100vh - 300px); overflow: auto; padding-bottom: 8px; }
 .items-table-wrap::-webkit-scrollbar { height: 18px; }
 .items-table-wrap::-webkit-scrollbar-track { background: rgba(180, 190, 180, 0.28); border-radius: 999px; }
 .items-table-wrap::-webkit-scrollbar-thumb { background: rgba(74, 110, 88, 0.58); border-radius: 999px; }
+.items-sticky-scroll {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 18px;
+  background: rgba(241, 247, 243, 0.92);
+  border: 1px solid rgba(115, 143, 126, 0.22);
+  border-radius: 999px;
+  margin-top: 6px;
+  display: none;
+  scrollbar-width: auto;
+  scrollbar-color: rgba(74, 110, 88, 0.72) rgba(180, 190, 180, 0.28);
+}
+.items-sticky-scroll::-webkit-scrollbar { height: 18px; }
+.items-sticky-scroll::-webkit-scrollbar-track { background: rgba(180, 190, 180, 0.28); border-radius: 999px; }
+.items-sticky-scroll::-webkit-scrollbar-thumb { background: rgba(74, 110, 88, 0.72); border-radius: 999px; }
+.items-sticky-scroll > div { height: 1px; }
 .items-table { table-layout: fixed; }
 .items-table.mode-compact { min-width: 1950px; }
 .items-table.mode-wide { min-width: 2450px; }
@@ -172,7 +247,14 @@
 <script>
 (function () {
   const STORAGE_KEY = 'label_enricher_items_table_prefs_v1';
+  const SHARED_LINK_KEY = 'label_enricher_shared_sheet_link_v1';
   const table = document.getElementById('itemsTable');
+  const wrap = document.querySelector('.items-table-wrap');
+  const stickyScroll = document.getElementById('itemsStickyScrollbar');
+  const stickyInner = document.getElementById('itemsStickyScrollbarInner');
+  const sharedLinkInput = document.getElementById('sharedSheetLink');
+  const saveSharedLinkBtn = document.getElementById('saveSharedSheetLink');
+  const openSharedLinkBtn = document.getElementById('openSharedSheetLink');
   const filterInput = document.getElementById('itemsFilter');
   const filterClearBtn = document.getElementById('itemsFilterClear');
   const widthBtn = document.getElementById('itemsWidthToggle');
@@ -272,7 +354,6 @@
     prefs.filterText = text || '';
     savePrefs();
   }
-
   function applyWidthMode(mode) {
     const safe = mode === 'wide' ? 'wide' : 'compact';
     table.classList.remove('mode-compact', 'mode-wide');
@@ -280,6 +361,22 @@
     prefs.widthMode = safe;
     widthBtn.textContent = safe === 'wide' ? 'Compact View' : 'Wide View';
     savePrefs();
+    syncStickyScrollbar();
+  }
+
+  let syncingFromWrap = false;
+  let syncingFromSticky = false;
+  function syncStickyScrollbar() {
+    if (!wrap || !stickyScroll || !stickyInner) return;
+    const hasOverflow = wrap.scrollWidth > wrap.clientWidth + 1;
+    if (!hasOverflow) {
+      stickyScroll.style.display = 'none';
+      stickyInner.style.width = '1px';
+      return;
+    }
+    stickyScroll.style.display = '';
+    stickyInner.style.width = `${wrap.scrollWidth}px`;
+    if (!syncingFromWrap) stickyScroll.scrollLeft = wrap.scrollLeft;
   }
 
   function setDefaultTypeForPlatform(platEl, typeEl) {
@@ -413,6 +510,22 @@
   });
   updateLinkPreviews();
   setSaveDirty(false);
+  if (wrap && stickyScroll) {
+    wrap.addEventListener('scroll', () => {
+      if (syncingFromSticky) return;
+      syncingFromWrap = true;
+      stickyScroll.scrollLeft = wrap.scrollLeft;
+      syncingFromWrap = false;
+    });
+    stickyScroll.addEventListener('scroll', () => {
+      if (syncingFromWrap) return;
+      syncingFromSticky = true;
+      wrap.scrollLeft = stickyScroll.scrollLeft;
+      syncingFromSticky = false;
+    });
+  }
+  window.addEventListener('resize', syncStickyScrollbar);
+  syncStickyScrollbar();
 
   const urlMsg = new URLSearchParams(window.location.search).get('msg') || '';
   if (urlMsg.toLowerCase().startsWith('backup created:')) {
@@ -420,6 +533,46 @@
   }
 
   if (prefs.sortCol >= 0) sortBy(prefs.sortCol, true);
+
+  function normalizeLink(raw) {
+    const text = (raw || '').trim();
+    if (!text) return '';
+    if (/^https?:\/\//i.test(text)) return text;
+    return `https://${text}`;
+  }
+
+  if (sharedLinkInput) {
+    try {
+      const saved = localStorage.getItem(SHARED_LINK_KEY) || '';
+      if (saved) sharedLinkInput.value = saved;
+    } catch (e) {}
+  }
+
+  if (saveSharedLinkBtn && sharedLinkInput) {
+    saveSharedLinkBtn.addEventListener('click', () => {
+      const normalized = normalizeLink(sharedLinkInput.value);
+      if (!normalized) {
+        alert('Paste a link first.');
+        return;
+      }
+      sharedLinkInput.value = normalized;
+      try { localStorage.setItem(SHARED_LINK_KEY, normalized); } catch (e) {}
+    });
+  }
+
+  if (openSharedLinkBtn && sharedLinkInput) {
+    openSharedLinkBtn.addEventListener('click', () => {
+      const normalized = normalizeLink(sharedLinkInput.value);
+      if (!normalized) {
+        alert('Paste a link first.');
+        return;
+      }
+      sharedLinkInput.value = normalized;
+      try { localStorage.setItem(SHARED_LINK_KEY, normalized); } catch (e) {}
+      window.open(normalized, '_blank', 'noopener');
+    });
+  }
 })();
 </script>
 {% endblock %}
+

@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import copy
+import json
 import os
 import re
 import shutil
@@ -160,6 +161,34 @@ def _items_backup_count() -> int:
         return len(list(item_db.backups_dir.glob("items_*.csv")))
     except Exception:
         return 0
+
+
+def _items_sync_stage_path() -> Path:
+    settings.logs_folder.mkdir(parents=True, exist_ok=True)
+    return settings.logs_folder / "items_sync_stage.json"
+
+def _load_items_sync_stage() -> dict[str, Any] | None:
+    p = _items_sync_stage_path()
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        return None
+    return None
+
+def _save_items_sync_stage(data: dict[str, Any]) -> None:
+    p = _items_sync_stage_path()
+    p.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
+
+def _clear_items_sync_stage() -> None:
+    p = _items_sync_stage_path()
+    try:
+        p.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 def _row_key(row: dict[str, Any]) -> str:
     parts = [
@@ -1119,8 +1148,8 @@ def create_app() -> FastAPI:
     @app.get("/items", response_class=HTMLResponse)
     def items_page(request: Request, msg: str = ""):
         rows = _rows_with_keys(item_db.load_rows())
-        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "items"})
-
+        staged_sync = _load_items_sync_stage()
+        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "items", "staged_sync": staged_sync})
     @app.get("/items/review", response_class=HTMLResponse)
     def items_review_page(request: Request, msg: str = ""):
         rows = _rows_with_keys([r for r in item_db.load_rows() if str(r.get("needs_review", "0")).strip() == "1"])
@@ -1183,6 +1212,46 @@ def create_app() -> FastAPI:
         except Exception:
             pass
         return RedirectResponse(url=f"/items?msg=Synced+{changed}+updates", status_code=303)
+
+
+    @app.post("/items/sync-stage")
+    async def items_sync_stage(master_csv_stage: UploadFile = File(...)):
+        temp = settings.incoming_batch_folder / f"_sync_stage_{master_csv_stage.filename}"
+        with temp.open("wb") as f:
+            shutil.copyfileobj(master_csv_stage.file, f)
+        try:
+            preview = item_db.preview_sync_from_master_csv(temp)
+            staged = {
+                "source_filename": master_csv_stage.filename or "",
+                "created_at": datetime.now().isoformat(),
+                "counts": preview.get("counts", {}),
+                "entries": preview.get("entries", []),
+            }
+            _save_items_sync_stage(staged)
+            cnt = int((staged.get("counts") or {}).get("total", 0))
+            return RedirectResponse(url=f"/items?msg=Staged+{cnt}+import+row(s)+for+review", status_code=303)
+        finally:
+            try:
+                temp.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    @app.post("/items/sync-apply")
+    def items_sync_apply(only_add_new: str = Form("0")):
+        staged = _load_items_sync_stage()
+        if not staged:
+            return RedirectResponse(url="/items?msg=No+staged+import+found", status_code=303)
+        entries = list(staged.get("entries") or [])
+        only_new = str(only_add_new).strip().lower() in ("1", "on", "true", "yes")
+        result = item_db.apply_staged_sync(entries, only_add_new=only_new)
+        _clear_items_sync_stage()
+        msg = f"Applied+staged+import:+created+{result.get('created',0)},+updated+{result.get('updated',0)},+skipped+{result.get('skipped',0)}"
+        return RedirectResponse(url=f"/items?msg={msg}", status_code=303)
+
+    @app.post("/items/sync-clear")
+    def items_sync_clear():
+        _clear_items_sync_stage()
+        return RedirectResponse(url="/items?msg=Cleared+staged+import", status_code=303)
 
     def _render_manual_entry(request: Request, msg: str = "", prefill: dict[str, Any] | None = None):
         label_options = _manual_label_options()
@@ -1736,3 +1805,4 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
