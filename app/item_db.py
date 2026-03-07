@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import csv
 import json
@@ -609,6 +609,35 @@ class ItemDB:
             return m.group(1).upper()
         return ""
 
+    def _pick_label_column(self, fieldnames: list[str], keymap: dict[str, str]) -> str | None:
+        def pick(*aliases: str) -> str | None:
+            for a in aliases:
+                h = keymap.get(self._norm_key(a))
+                if h is not None:
+                    return h
+            return None
+
+        col = pick(
+            "model",
+            "model number",
+            "part model number",
+            "part number",
+            "internal name/label",
+            "internal label",
+            "custom label",
+            "internal sku",
+            "sku",
+            "item label",
+        )
+        if col is not None:
+            return col
+
+        if fieldnames:
+            first = fieldnames[0]
+            if first is not None:
+                return first
+        return None
+
     def sync_from_master_csv(self, master_csv_path: Path) -> int:
         rows = self.load_rows()
         changed = 0
@@ -630,7 +659,7 @@ class ItemDB:
                         return h
                 return None
 
-            col_label = pick("", "model", "part model number", "internal name/label", "internal label")
+            col_label = self._pick_label_column(fn, keymap)
             col_desc = pick("description", "item title", "title")
             col_location = pick("location", "picking location", "picking location w warehouse r warehouse rack quotes no rack in that position o office p packing room")
             if col_location is None:
@@ -712,6 +741,271 @@ class ItemDB:
         self.save_rows(rows)
         return changed
 
+
+    def _parse_master_csv_candidates(self, master_csv_path: Path) -> list[dict[str, str]]:
+        groups: dict[str, dict[str, str]] = {}
+
+        def _group_key(ebay: str, asin: str, label: str, row_idx: int) -> str:
+            if ebay and asin:
+                return f"pair:{ebay}|{asin}"
+            if label:
+                return f"label:{label.lower()}"
+            if ebay:
+                return f"ebay:{ebay}"
+            if asin:
+                return f"amazon:{asin}"
+            return f"row:{row_idx}"
+
+        def _upsert_group(key: str, ebay: str, asin: str, label: str, title: str, location: str) -> None:
+            current = groups.get(
+                key,
+                {
+                    "ebay_item_number": "",
+                    "amazon_asin": "",
+                    "custom_label": "",
+                    "item_title": "",
+                    "location": "",
+                },
+            )
+            if ebay and not current["ebay_item_number"]:
+                current["ebay_item_number"] = ebay
+            if asin and not current["amazon_asin"]:
+                current["amazon_asin"] = asin
+            if label:
+                current["custom_label"] = label
+            if title and not current["item_title"]:
+                current["item_title"] = title
+            if location:
+                current["location"] = location
+            groups[key] = current
+
+        with master_csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+            sample = f.read(8192)
+            f.seek(0)
+            try:
+                dialect = csv.Sniffer().sniff(sample, delimiters="\t,;")
+            except Exception:
+                dialect = csv.excel_tab if ("\t" in sample and sample.count("\t") >= sample.count(",")) else csv.excel
+            reader = csv.DictReader(f, dialect=dialect)
+            fn = reader.fieldnames or []
+            keymap = {self._norm_key(h or ""): (h or "") for h in fn}
+
+            def pick(*aliases: str) -> str | None:
+                for a in aliases:
+                    h = keymap.get(self._norm_key(a))
+                    if h is not None:
+                        return h
+                return None
+
+            col_label = self._pick_label_column(fn, keymap)
+            col_desc = pick("description", "item title", "title")
+            col_location = pick("location", "picking location", "picking location w warehouse r warehouse rack quotes no rack in that position o office p packing room")
+            if col_location is None:
+                for nk, raw in keymap.items():
+                    if nk.startswith("pickinglocation"):
+                        col_location = raw
+                        break
+            col_ebay_num = pick("ebay item #", "ebay item number", "item number")
+            col_ebay_link = pick("ebay link")
+            col_asin = pick("amazon asin", "amz asin", "asin")
+            col_amz_link = pick("amazon link")
+
+            for row_idx, src in enumerate(reader):
+                label = (src.get(col_label, "") if col_label is not None else "").strip()
+                desc = (src.get(col_desc, "") if col_desc is not None else "").strip()
+                location = (src.get(col_location, "") if col_location is not None else "").strip()
+                ebay = (src.get(col_ebay_num, "") if col_ebay_num is not None else "").strip()
+                if not ebay:
+                    ebay = self._extract_ebay_id(src.get(col_ebay_link, "") if col_ebay_link is not None else "")
+                asin = self._extract_asin_any(src.get(col_asin, "") if col_asin is not None else "", src.get(col_amz_link, "") if col_amz_link is not None else "")
+                if not (ebay or asin):
+                    continue
+
+                key = _group_key(ebay, asin.upper(), label, row_idx)
+                _upsert_group(key, ebay, asin.upper(), label, desc, location)
+
+        out: list[dict[str, str]] = []
+        for g in groups.values():
+            ebay = (g.get("ebay_item_number", "") or "").strip()
+            asin = (g.get("amazon_asin", "") or "").strip().upper()
+            platform = "both" if (ebay and asin) else ("ebay" if ebay else "amazon")
+            ident = f"{ebay}|{asin}" if platform == "both" else (ebay or asin)
+            out.append(
+                {
+                    "platform": platform,
+                    "ident": ident,
+                    "ebay_item_number": ebay,
+                    "amazon_asin": asin,
+                    "custom_label": (g.get("custom_label", "") or "").strip(),
+                    "item_title": (g.get("item_title", "") or "").strip(),
+                    "location": (g.get("location", "") or "").strip(),
+                }
+            )
+        return out
+
+    def _find_row_for_master_entity(
+        self, rows: list[dict[str, str]], ebay_item_number: str = "", amazon_asin: str = "", custom_label: str = ""
+    ) -> dict[str, str] | None:
+        ebay = (ebay_item_number or "").strip()
+        asin = (amazon_asin or "").strip().upper()
+        label = (custom_label or "").strip().lower()
+
+        if ebay:
+            r = self._find_row(rows, "ebay", ebay)
+            if r is not None:
+                return r
+        if asin:
+            r = self._find_row(rows, "amazon", asin)
+            if r is not None:
+                return r
+
+        if label:
+            for row in rows:
+                row_label = (row.get("custom_label", "") or "").strip().lower()
+                if row_label and row_label == label:
+                    return row
+        return None
+    def preview_sync_from_master_csv(self, master_csv_path: Path) -> dict[str, Any]:
+        rows = self.load_rows()
+        candidates = self._parse_master_csv_candidates(master_csv_path)
+        review_reason = "Imported from master CSV; verify mapping and values."
+        entries: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        for c in candidates:
+            ebay = (c.get("ebay_item_number", "") or "").strip()
+            asin = (c.get("amazon_asin", "") or "").strip().upper()
+            platform = (c.get("platform", "") or "").strip().lower()
+            ident = (c.get("ident", "") or "").strip()
+            if not platform or not ident or not (ebay or asin):
+                continue
+            key = (platform, ebay, asin)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            found = self._find_row_for_master_entity(rows, ebay, asin, str(c.get("custom_label", "") or ""))
+            before = dict(found) if found else {}
+
+            if found:
+                after = dict(found)
+            else:
+                after = ItemRecord(
+                    platform="both" if (ebay and asin) else ("ebay" if ebay else "amazon"),
+                    ebay_item_number=ebay,
+                    amazon_asin=asin,
+                    item_id=ebay or asin,
+                    needs_review=1,
+                    needs_review_reason=review_reason,
+                    last_seen=now_iso(),
+                ).as_dict()
+
+            if ebay:
+                after["ebay_item_number"] = ebay
+            if asin:
+                after["amazon_asin"] = asin
+            src_label = (c.get("custom_label", "") or "").strip()
+            src_title = (c.get("item_title", "") or "").strip()
+            src_location = (c.get("location", "") or "").strip()
+            if src_label:
+                after["custom_label"] = src_label
+            elif src_title and not after.get("custom_label"):
+                after["custom_label"] = src_title[:80]
+            if src_title and not after.get("item_title"):
+                after["item_title"] = src_title[:220]
+            if src_location:
+                after["location"] = src_location
+            after["needs_review"] = "1"
+            after["needs_review_reason"] = review_reason
+            after["last_seen"] = now_iso()
+            after = _normalize_row(after)
+
+            changed_fields: list[str] = []
+            for fld in ["platform", "ebay_item_number", "amazon_asin", "custom_label", "item_title", "location", "needs_review", "needs_review_reason", "last_seen"]:
+                if (before.get(fld, "") if before else "") != (after.get(fld, "") or ""):
+                    changed_fields.append(fld)
+            action = "create" if not found else ("update" if changed_fields else "noop")
+
+            entries.append(
+                {
+                    "platform": platform,
+                    "ident": ident,
+                    "action": action,
+                    "changed_fields": changed_fields,
+                    "existing_row_key": self._row_identity(found) if found else "",
+                    "preview_label": after.get("custom_label", "") or "",
+                    "preview_title": after.get("item_title", "") or "",
+                    "preview_location": after.get("location", "") or "",
+                    "apply_fields": {
+                        "platform": after.get("platform", ""),
+                        "ebay_item_number": after.get("ebay_item_number", "") or "",
+                        "amazon_asin": after.get("amazon_asin", "") or "",
+                        "custom_label": after.get("custom_label", "") or "",
+                        "item_title": after.get("item_title", "") or "",
+                        "location": after.get("location", "") or "",
+                        "needs_review": "1",
+                        "needs_review_reason": review_reason,
+                        "last_seen": after.get("last_seen", "") or now_iso(),
+                    },
+                }
+            )
+
+        creates = sum(1 for e in entries if e["action"] == "create")
+        updates = sum(1 for e in entries if e["action"] == "update")
+        noops = sum(1 for e in entries if e["action"] == "noop")
+        return {"entries": entries, "counts": {"total": len(entries), "create": creates, "update": updates, "noop": noops}}
+    def apply_staged_sync(self, staged_entries: list[dict[str, Any]], only_add_new: bool = False) -> dict[str, int]:
+        rows = self.load_rows()
+        created = 0
+        updated = 0
+        skipped = 0
+
+        for entry in staged_entries:
+            fields = dict(entry.get("apply_fields") or {})
+            ebay = str(fields.get("ebay_item_number", "") or "").strip()
+            asin = str(fields.get("amazon_asin", "") or "").strip().upper()
+            custom_label = str(fields.get("custom_label", "") or "").strip()
+            if not (ebay or asin):
+                skipped += 1
+                continue
+            found = self._find_row_for_master_entity(rows, ebay, asin, custom_label)
+            if found is not None:
+                if only_add_new:
+                    skipped += 1
+                    continue
+                before = dict(found)
+                if ebay:
+                    found["ebay_item_number"] = ebay
+                if asin:
+                    found["amazon_asin"] = asin
+                for k in ["custom_label", "item_title", "location", "needs_review", "needs_review_reason", "last_seen"]:
+                    if k in fields and str(fields.get(k, "")).strip():
+                        found[k] = str(fields[k]).strip()
+                found.update(_normalize_row(found))
+                if found != before:
+                    updated += 1
+                else:
+                    skipped += 1
+                continue
+
+            rec = ItemRecord(
+                platform="both" if (ebay and asin) else ("ebay" if ebay else "amazon"),
+                ebay_item_number=ebay,
+                amazon_asin=asin,
+                item_id=ebay or asin,
+                custom_label=custom_label,
+                item_title=str(fields.get("item_title", "") or "").strip(),
+                location=str(fields.get("location", "") or "").strip(),
+                needs_review=1,
+                needs_review_reason=str(fields.get("needs_review_reason", "") or "Imported from master CSV; verify mapping and values.").strip(),
+                last_seen=str(fields.get("last_seen", "") or now_iso()).strip(),
+            ).as_dict()
+            rows.append(rec)
+            created += 1
+
+        if created or updated:
+            self.save_rows(rows, action="sync_staged_apply")
+        return {"created": created, "updated": updated, "skipped": skipped}
     def clear_needs_review(self) -> int:
         rows = self.load_rows()
         cleared = 0
@@ -723,6 +1017,7 @@ class ItemDB:
         if cleared:
             self.save_rows(rows)
         return cleared
+
 
 
 
