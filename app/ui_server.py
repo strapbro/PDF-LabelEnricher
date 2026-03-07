@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import copy
+import csv
 import os
 import re
 import shutil
@@ -160,6 +161,93 @@ def _items_backup_count() -> int:
         return len(list(item_db.backups_dir.glob("items_*.csv")))
     except Exception:
         return 0
+
+
+def _label_hints_path() -> Path:
+    return settings.base_dir / "label_location_hints.csv"
+
+def _norm_hint_header(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").strip().lower())
+
+def _load_label_hints() -> list[dict[str, str]]:
+    p = _label_hints_path()
+    if not p.exists():
+        return []
+    try:
+        with p.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames or []
+            keymap = {_norm_hint_header(h or ""): (h or "") for h in fieldnames}
+
+            def pick(*aliases: str) -> str | None:
+                for a in aliases:
+                    h = keymap.get(_norm_hint_header(a))
+                    if h is not None:
+                        return h
+                return None
+
+            col_label = pick("internal label", "custom label", "label", "model", "item label")
+            col_location = pick("location", "picking location")
+            col_asin = pick("asin", "amazon asin", "amz asin")
+            if col_label is None and fieldnames:
+                col_label = fieldnames[0]
+            if col_location is None and len(fieldnames) >= 2:
+                col_location = fieldnames[1]
+            if col_asin is None and len(fieldnames) >= 3:
+                col_asin = fieldnames[2]
+
+            out_by_label: dict[str, dict[str, str]] = {}
+            for row in reader:
+                label = (row.get(col_label, "") if col_label else "").strip()
+                if not label:
+                    continue
+                location = (row.get(col_location, "") if col_location else "").strip()
+                asin = (row.get(col_asin, "") if col_asin else "").strip().upper()
+                key = label.lower()
+                prev = out_by_label.get(key, {"label": label, "location": "", "asin": ""})
+                if location and not prev.get("location"):
+                    prev["location"] = location
+                if asin and not prev.get("asin"):
+                    prev["asin"] = asin
+                if not prev.get("label"):
+                    prev["label"] = label
+                out_by_label[key] = prev
+            out = list(out_by_label.values())
+            out.sort(key=lambda x: (x.get("label", "") or "").lower())
+            return out
+    except Exception:
+        return []
+
+def _save_label_hints(rows: list[dict[str, str]]) -> int:
+    clean: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for r in rows:
+        label = str(r.get("label", "") or "").strip()
+        if not label:
+            continue
+        key = label.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        clean.append({
+            "label": label,
+            "location": str(r.get("location", "") or "").strip(),
+            "asin": str(r.get("asin", "") or "").strip().upper(),
+        })
+    p = _label_hints_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    with tmp.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["internal_label", "location", "asin"])
+        writer.writeheader()
+        for row in clean:
+            writer.writerow({
+                "internal_label": row["label"],
+                "location": row["location"],
+                "asin": row["asin"],
+            })
+    tmp.replace(p)
+    return len(clean)
 
 def _row_key(row: dict[str, Any]) -> str:
     parts = [
@@ -1119,12 +1207,12 @@ def create_app() -> FastAPI:
     @app.get("/items", response_class=HTMLResponse)
     def items_page(request: Request, msg: str = ""):
         rows = _rows_with_keys(item_db.load_rows())
-        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "items"})
+        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "items", "label_hints": _load_label_hints()})
 
     @app.get("/items/review", response_class=HTMLResponse)
     def items_review_page(request: Request, msg: str = ""):
         rows = _rows_with_keys([r for r in item_db.load_rows() if str(r.get("needs_review", "0")).strip() == "1"])
-        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "review"})
+        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "review", "label_hints": _load_label_hints()})
 
     @app.post("/items/save")
     async def items_save(request: Request):
@@ -1184,6 +1272,61 @@ def create_app() -> FastAPI:
             pass
         return RedirectResponse(url=f"/items?msg=Synced+{changed}+updates", status_code=303)
 
+
+    @app.post("/hints/upload")
+    async def hints_upload(from_page: str = Form("items"), hints_csv: UploadFile = File(...)):
+        temp = settings.incoming_batch_folder / f"_hints_{hints_csv.filename}"
+        with temp.open("wb") as f:
+            shutil.copyfileobj(hints_csv.file, f)
+        count = 0
+        try:
+            with temp.open("r", encoding="utf-8-sig", newline="") as f:
+                reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames or []
+                keymap = {_norm_hint_header(h or ""): (h or "") for h in fieldnames}
+                def pick(*aliases: str) -> str | None:
+                    for a in aliases:
+                        h = keymap.get(_norm_hint_header(a))
+                        if h is not None:
+                            return h
+                    return None
+                col_label = pick("internal label", "custom label", "label", "model", "item label")
+                col_location = pick("location", "picking location")
+                col_asin = pick("asin", "amazon asin", "amz asin")
+                if col_label is None and fieldnames:
+                    col_label = fieldnames[0]
+                if col_location is None and len(fieldnames) >= 2:
+                    col_location = fieldnames[1]
+                if col_asin is None and len(fieldnames) >= 3:
+                    col_asin = fieldnames[2]
+                rows: list[dict[str, str]] = []
+                for r in reader:
+                    rows.append({
+                        "label": (r.get(col_label, "") if col_label else "").strip(),
+                        "location": (r.get(col_location, "") if col_location else "").strip(),
+                        "asin": (r.get(col_asin, "") if col_asin else "").strip().upper(),
+                    })
+                count = _save_label_hints(rows)
+        except Exception:
+            count = 0
+        finally:
+            try:
+                temp.unlink(missing_ok=True)
+            except Exception:
+                pass
+        url = "/items" if from_page == "items" else "/manual-entry"
+        return RedirectResponse(url=f"{url}?msg=Saved+{count}+label/location+hint(s)", status_code=303)
+
+    @app.post("/hints/clear")
+    def hints_clear(from_page: str = Form("items")):
+        try:
+            _label_hints_path().unlink(missing_ok=True)
+            msg = "Cleared+label/location+hints"
+        except Exception:
+            msg = "Could+not+clear+label/location+hints"
+        url = "/items" if from_page == "items" else "/manual-entry"
+        return RedirectResponse(url=f"{url}?msg={msg}", status_code=303)
+
     def _render_manual_entry(request: Request, msg: str = "", prefill: dict[str, Any] | None = None):
         label_options = _manual_label_options()
         first_label = label_options[0].get("path", "") if label_options else ""
@@ -1221,6 +1364,7 @@ def create_app() -> FastAPI:
                 "labels": label_options,
                 "unresolved_count": len(_unresolved()),
                 "prefill": defaults,
+                "label_hints": _load_label_hints(),
             },
         )
     @app.get("/manual-entry", response_class=HTMLResponse)
@@ -1736,3 +1880,4 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
