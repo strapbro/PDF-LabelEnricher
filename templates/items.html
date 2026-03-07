@@ -8,6 +8,21 @@
       <button class="btn btn-secondary items-action-btn" type="submit">Import / Re-sync</button>
       <a class="btn btn-primary items-action-btn" href="/items/export">Download items.csv</a>
     </form>
+    <div class="items-hints-box">
+      <div class="hint-title">Transitional Label/Location Hints (optional)</div>
+      <div class="hint-sub">Use this for onboarding labels that do not yet have SKU/ASIN/item#. This is separate from Import/Re-sync.</div>
+      <div class="items-controls" style="margin-top:6px;">
+        <form action="/hints/upload" method="post" enctype="multipart/form-data">
+          <input type="hidden" name="from_page" value="items">
+          <input type="file" name="hints_csv" accept=".csv,.tsv,.txt" required>
+          <button class="btn btn-secondary items-action-btn" type="submit">Upload Label/Location Hints</button>
+        </form>
+        <form action="/hints/clear" method="post" onsubmit="return confirm('Clear label/location hints file?')">
+          <input type="hidden" name="from_page" value="items">
+          <button class="btn btn-secondary items-action-btn" type="submit">Clear Hints File</button>
+        </form>
+      </div>
+    </div>
     <form class="items-sync-form" action="/items/sync-stage" method="post" enctype="multipart/form-data">
       <input type="file" name="master_csv_stage" accept=".csv,.tsv,.txt" required>
       <button class="btn btn-primary items-action-btn" type="submit">Stage Import (Review First)</button>
@@ -108,7 +123,7 @@
             <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_sku" value="{{ row.amazon_sku or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
             <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_asin" value="{{ row.amazon_asin or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
             <td><div class="copy-field"><input name="row_{{ loop.index0 }}_item_title" value="{{ row.item_title or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}" list="labelHintsList"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
             <td><div class="copy-field"><input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
             <td class="{% if is_merged %}link-locked{% endif %}">
               <select class="link-platform" name="row_{{ loop.index0 }}_linked_platform" {% if is_merged %}disabled{% endif %}>
@@ -167,6 +182,9 @@
 .items-stage-table th, .items-stage-table td { border:1px solid #d8e0d8; padding:6px; text-align:left; vertical-align:top; }
 .items-stage-table th { background:#eef3ef; position: sticky; top: 0; z-index: 1; }
 .items-action-btn { min-height: 38px; }
+.items-hints-box { border: 1px solid rgba(80,100,90,0.2); border-radius: 10px; padding: 10px; background: rgba(247,250,247,0.8); }
+.hint-title { font-weight: 700; }
+.hint-sub { font-size: 12px; color: #4f5b4f; margin-top: 3px; }
 .items-controls input[type="text"] { min-width: 320px; max-width: 520px; }
 .items-table-wrap { max-height: calc(100vh - 300px); overflow: auto; padding-bottom: 8px; }
 .items-table-wrap::-webkit-scrollbar { height: 18px; }
@@ -243,6 +261,12 @@
 .save-passive { opacity: 0.68; filter: saturate(0.72); }
 </style>
 
+<datalist id="labelHintsList">
+{% for h in (label_hints or []) %}
+  <option value="{{ h.label }}">{{ h.label }}{% if h.location %} | LOC {{ h.location }}{% endif %}{% if h.asin %} | ASIN {{ h.asin }}{% endif %}</option>
+{% endfor %}
+</datalist>
+<script id="labelHintsData" type="application/json">{{ (label_hints or [])|tojson }}</script>
 <script id="linkTargetsData" type="application/json">{{ link_targets|tojson }}</script>
 <script>
 (function () {
@@ -259,6 +283,7 @@
   const filterClearBtn = document.getElementById('itemsFilterClear');
   const widthBtn = document.getElementById('itemsWidthToggle');
   const dataEl = document.getElementById('linkTargetsData');
+  const hintsEl = document.getElementById('labelHintsData');
   const saveBtn = document.getElementById('saveChangesBtn');
   const saveForm = table ? table.closest('form') : null;
   let isDirty = false;
@@ -266,6 +291,8 @@
 
   let targets = [];
   try { targets = JSON.parse((dataEl && dataEl.textContent) || '[]'); } catch (e) { targets = []; }
+  let labelHints = [];
+  try { labelHints = JSON.parse((hintsEl && hintsEl.textContent) || '[]'); } catch (e) { labelHints = []; }
 
   const headers = Array.from(table.querySelectorAll('thead th[data-sort]'));
   const tbody = table.querySelector('tbody');
@@ -436,6 +463,40 @@
     });
   }
 
+  function findHint(labelValue) {
+    const text = (labelValue || '').trim().toLowerCase();
+    if (!text) return null;
+    return labelHints.find(h => ((h.label || '').trim().toLowerCase() === text)) || null;
+  }
+
+  function maybeApplyHintToRow(row, labelValue) {
+    if (!row) return;
+    const hint = findHint(labelValue);
+    if (!hint) return;
+    const locInput = row.querySelector('input[name$="_location"]');
+    const asinInput = row.querySelector('input[name$="_amazon_asin"]');
+    if (locInput && (hint.location || '').trim()) {
+      const nextLoc = (hint.location || '').trim();
+      const curLoc = (locInput.value || '').trim();
+      if (!curLoc) {
+        locInput.value = nextLoc;
+      } else if (curLoc.toLowerCase() !== nextLoc.toLowerCase()) {
+        const okLoc = confirm(`Hint conflict for location. Current: "${curLoc}" | Hint: "${nextLoc}". Use hint location?`);
+        if (okLoc) locInput.value = nextLoc;
+      }
+    }
+    if (asinInput && (hint.asin || '').trim()) {
+      const nextAsin = (hint.asin || '').trim().toUpperCase();
+      const curAsin = (asinInput.value || '').trim().toUpperCase();
+      if (!curAsin) {
+        asinInput.value = nextAsin;
+      } else if (curAsin !== nextAsin) {
+        const okAsin = confirm(`Hint conflict for ASIN. Current: "${curAsin}" | Hint: "${nextAsin}". Use hint ASIN?`);
+        if (okAsin) asinInput.value = nextAsin;
+      }
+    }
+  }
+
   headers.forEach((th, index) => th.addEventListener('click', () => sortBy(index, false)));
   filterInput.addEventListener('input', (e) => applyFilter(e.target.value || ''));
   filterClearBtn.addEventListener('click', () => { filterInput.value = ''; applyFilter(''); });
@@ -454,6 +515,10 @@
         setDefaultTypeForPlatform(row ? row.querySelector('.link-platform') : null, row ? row.querySelector('.link-id-type') : null);
       }
       updateLinkPreviews();
+    }
+    if (e.target && e.target.name && e.target.name.endsWith('_custom_label')) {
+      const row = e.target.closest('tr');
+      maybeApplyHintToRow(row, e.target.value || '');
     }
     setSaveDirty(true);
   });
