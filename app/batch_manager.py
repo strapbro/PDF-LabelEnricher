@@ -469,8 +469,9 @@ class BatchManager:
                     report["summary"]["unresolved"] += 1
                     continue
 
+                label_signals = extract_label_signals(label_pdf)
                 out_path = self._render_one_label(label_pdf, order, idx, output_dir)
-                sort_meta = self._sort_meta_for_order(order, idx)
+                sort_meta = self._sort_meta_for_order(order, idx, label_signals.get("carrier", ""))
                 report["results"].append(
                     {
                         "label_pdf": str(label_pdf),
@@ -480,6 +481,7 @@ class BatchManager:
                         "ship_name": m["order"].get("ship_name", ""),
                         "ship_postal": m["order"].get("ship_postal", ""),
                         "tracking_number": m["order"].get("tracking_number", ""),
+                        "carrier": label_signals.get("carrier", ""),
                         "method": m.get("method", ""),
                         "confidence": m.get("confidence", 0),
                         "output_pdf": str(out_path),
@@ -488,6 +490,7 @@ class BatchManager:
                         "sort_qty": sort_meta.get("qty", 0),
                         "sort_item_key": sort_meta.get("item_key", ""),
                         "sort_location": sort_meta.get("location", ""),
+                        "sort_carrier": sort_meta.get("carrier", ""),
                     }
                 )
                 report["summary"]["matched"] += 1
@@ -547,7 +550,7 @@ class BatchManager:
                 return db_title
         return (item.get("title") or "").strip()
 
-    def _sort_meta_for_order(self, order: dict[str, Any], idx: dict[tuple[str, str], dict[str, str]]) -> dict[str, Any]:
+    def _sort_meta_for_order(self, order: dict[str, Any], idx: dict[tuple[str, str], dict[str, str]], carrier: str = "") -> dict[str, Any]:
         items = order.get("items", []) or []
         first = items[0] if items else {}
         platform = str(order.get("platform", "")).lower().strip()
@@ -570,6 +573,7 @@ class BatchManager:
             "qty": qty,
             "item_key": str(item_key or "").strip(),
             "location": str(location or "").strip(),
+            "carrier": str(carrier or "").strip().lower(),
         }
 
     def _output_sort_config(self) -> dict[str, Any]:
@@ -594,12 +598,14 @@ class BatchManager:
                 "qty": bool(enabled.get("qty", False)),
                 "item_key": bool(enabled.get("item_key", False)),
                 "location": bool(enabled.get("location", False)),
+                "carrier": bool(enabled.get("carrier", False)),
             },
             "directions": {
                 "label": "desc" if str(directions.get("label", "asc")).lower() == "desc" else "asc",
                 "qty": "desc" if str(directions.get("qty", "asc")).lower() == "desc" else "asc",
                 "item_key": "desc" if str(directions.get("item_key", "asc")).lower() == "desc" else "asc",
                 "location": "desc" if str(directions.get("location", "asc")).lower() == "desc" else "asc",
+                "carrier": "desc" if str(directions.get("carrier", "asc")).lower() == "desc" else "asc",
             },
         }
 
@@ -614,6 +620,8 @@ class BatchManager:
             return str(entry.get("sort_item_key", "") or "").lower()
         if f == "location":
             return str(entry.get("sort_location", "") or "").lower()
+        if f == "carrier":
+            return str(entry.get("sort_carrier", "") or "").lower()
         return str(entry.get("sort_label", "") or "").lower()
 
     def _sorted_output_pdfs_from_report(self, batch_dir: Path, pdfs: list[Path]) -> list[Path]:
@@ -654,7 +662,7 @@ class BatchManager:
         elif mode == "custom":
             enabled = sort_cfg.get("enabled_fields", {})
             directions = sort_cfg.get("directions", {})
-            priorities = [f for f in sort_cfg.get("priority_fields", []) if str(f) in {"label", "qty", "item_key", "location"}]
+            priorities = [f for f in sort_cfg.get("priority_fields", []) if str(f) in {"label", "qty", "item_key", "location", "carrier"}]
             active = [f for f in priorities if bool(enabled.get(f, False))]
             if active:
                 for f in reversed(active):
@@ -1140,4 +1148,3 @@ class BatchManager:
                 shutil.rmtree(p, ignore_errors=True)
                 removed += 1
         return removed
-

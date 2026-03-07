@@ -1,17 +1,66 @@
 ﻿{% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h2>Sync From Hot/Live Spreadsheet</h2>
-  <div class="items-actions-stack">
-    <form class="items-sync-form" action="/items/sync" method="post" enctype="multipart/form-data">
-      <input type="file" name="master_csv" accept=".csv,.tsv,.txt" required>
-      <button class="btn btn-secondary items-action-btn" type="submit">Import / Re-sync</button>
-      <a class="btn btn-primary items-action-btn" href="/items/export">Download items.csv</a>
-    </form>
-    <div class="items-hints-box">
+  <h2>Items Database Sync + Import</h2>
+  <div class="items-top-grid">
+    <div class="items-flow-box">
+      <div class="flow-step">Step (1)</div>
+      <div class="flow-title">Replace this PC's main items.csv</div>
+      <div class="flow-sub">Use this only for swapping in a newer <strong>items.csv</strong> from another PC or Drive. This is separate from incoming label/PDF batch files.</div>
+      <form id="itemsReplaceForm" class="items-replace-form" action="/items/replace" method="post" enctype="multipart/form-data">
+        <input id="itemsReplaceInput" type="file" name="items_csv_file" accept=".csv,.txt,.tsv" required hidden>
+        <input id="itemsReplaceLastModified" type="hidden" name="uploaded_last_modified" value="">
+        <div id="itemsReplaceDropzone" class="items-replace-dropzone" tabindex="0">
+          <div class="items-replace-title">Drop a replacement items.csv here</div>
+          <div class="items-replace-sub">or click this box to choose a file</div>
+          <div id="itemsReplaceSelected" class="items-replace-selected">Current main file: <strong>{{ items_csv_path }}</strong></div>
+        </div>
+        <div class="items-replace-actions">
+          <button class="btn btn-secondary items-action-btn" type="button" id="itemsReplaceChooseBtn">Choose replacement file</button>
+          <button class="btn btn-primary items-action-btn" type="submit">Replace main items.csv</button>
+          <a class="btn btn-primary items-action-btn" href="/items/export">Download items.csv</a>
+          <button class="btn btn-secondary items-action-btn" type="button" id="openAppRootBtn">Open Label Enricher Folder</button>
+        </div>
+      </form>
+      <form id="openAppRootForm" action="/open" method="post">
+        <input type="hidden" name="target" value="app_root">
+      </form>
+    </div>
+
+    <div class="items-flow-box">
+      <div class="flow-step">Step (2)</div>
+      <div class="flow-title">Open your shared Drive/Sheet link</div>
+      <div class="flow-sub">Open the shared location, sort by most recent if needed, then drag <strong>items.csv</strong> between the two windows.</div>
+      <div class="items-shared-link">
+        <input id="sharedSheetLink" type="text" placeholder="Paste shared Drive/Sheet link here">
+        <button id="saveSharedSheetLink" class="btn btn-secondary items-action-btn" type="button">Save Link</button>
+        <button id="openSharedSheetLink" class="btn btn-primary items-action-btn" type="button">Open Drive Link</button>
+      </div>
+      <ol class="flow-steps-list">
+        <li>If another PC has the newer <strong>items.csv</strong>, open the Drive link there, then bring that file into this PC's Label Enricher folder.</li>
+        <li>After edits on this PC, open the same Drive link and drag this PC's <strong>items.csv</strong> back into Drive so the other PC can use it.</li>
+      </ol>
+    </div>
+
+    <div class="items-flow-box">
+      <div class="flow-title">Import / Review Other Item Data</div>
+      <div class="flow-sub">Use these for spreadsheet imports that should merge into the database, not for replacing the whole items.csv file.</div>
+      <div class="items-actions-stack compact-gap">
+        <form class="items-sync-form" action="/items/sync" method="post" enctype="multipart/form-data">
+          <input type="file" name="master_csv" accept=".csv,.tsv,.txt" required>
+          <button class="btn btn-secondary items-action-btn" type="submit">Import / Re-sync</button>
+        </form>
+        <form class="items-sync-form" action="/items/sync-stage" method="post" enctype="multipart/form-data">
+          <input type="file" name="master_csv_stage" accept=".csv,.tsv,.txt" required>
+          <button class="btn btn-primary items-action-btn" type="submit">Stage Import (Review First)</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="items-flow-box">
       <div class="hint-title">Transitional Label/Location Hints (optional)</div>
-      <div class="hint-sub">Use this for onboarding labels that do not yet have SKU/ASIN/item#. This is separate from Import/Re-sync.</div>
-      <div class="items-controls" style="margin-top:6px;">
+      <div class="hint-sub">Use this for onboarding labels that do not yet have SKU/ASIN/item#. This is separate from Import/Re-sync and from replacing the main items.csv.</div>
+      <div class="items-controls hints-actions" style="margin-top:6px;">
         <form action="/hints/upload" method="post" enctype="multipart/form-data">
           <input type="hidden" name="from_page" value="items">
           <input type="file" name="hints_csv" accept=".csv,.tsv,.txt" required>
@@ -23,61 +72,52 @@
         </form>
       </div>
     </div>
-    <form class="items-sync-form" action="/items/sync-stage" method="post" enctype="multipart/form-data">
-      <input type="file" name="master_csv_stage" accept=".csv,.tsv,.txt" required>
-      <button class="btn btn-primary items-action-btn" type="submit">Stage Import (Review First)</button>
-    </form>
-    <div class="items-shared-link">
-      <input id="sharedSheetLink" type="text" placeholder="Paste shared Drive/Sheet link here">
-      <button id="saveSharedSheetLink" class="btn btn-secondary items-action-btn" type="button">Save Link</button>
-      <button id="openSharedSheetLink" class="btn btn-primary items-action-btn" type="button">Open Link</button>
+  </div>
+
+  {% if staged_sync and staged_sync.entries %}
+  <div class="items-stage-box stage-top-box">
+    <div class="items-stage-head">
+      <strong>Staged Import Ready</strong>
+      <span>Total {{ staged_sync.counts.total or 0 }} | New {{ staged_sync.counts.create or 0 }} | Updates {{ staged_sync.counts.update or 0 }} | No change {{ staged_sync.counts.noop or 0 }}</span>
     </div>
-    {% if staged_sync and staged_sync.entries %}
-    <div class="items-stage-box">
-      <div class="items-stage-head">
-        <strong>Staged Import Ready</strong>
-        <span>Total {{ staged_sync.counts.total or 0 }} | New {{ staged_sync.counts.create or 0 }} | Updates {{ staged_sync.counts.update or 0 }} | No change {{ staged_sync.counts.noop or 0 }}</span>
-      </div>
-      <div class="items-stage-actions">
-        <form action="/items/sync-apply" method="post">
-          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" name="only_add_new" value="1"> Only add new rows (skip updates to existing rows)</label>
-          <button class="btn btn-primary items-action-btn" type="submit">Apply Staged Import</button>
-        </form>
-        <form action="/items/sync-clear" method="post">
-          <button class="btn btn-secondary items-action-btn" type="submit">Clear Staged Import</button>
-        </form>
-      </div>
-      <div class="items-stage-list">
-        <table class="items-stage-table">
-          <thead><tr><th>Action</th><th>Platform</th><th>ID</th><th>Label</th><th>Location</th><th>Fields Changed</th></tr></thead>
-          <tbody>
-          {% for e in staged_sync.entries[:40] %}
-            <tr>
-              <td>{{ e.action }}</td>
-              <td>{{ e.platform }}</td>
-              <td>{{ e.ident }}</td>
-              <td>{{ e.preview_label or e.preview_title or "" }}</td>
-              <td>{{ e.preview_location or "" }}</td>
-              <td>{{ (e.changed_fields or [])|join(", ") }}</td>
-            </tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    {% endif %}
-    <div class="items-controls" style="margin-top:8px;">
-      <form id="itemsBackupForm" action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Create Backup Now</button></form>
-      <form action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Open Backups Folder</button></form>
-      <form action="/items/clear-needs-review" method="post" onsubmit="return confirm('Clear all items from Needs Review list?')">
-        <input type="hidden" name="from_page" value="items">
-        <button class="btn btn-secondary items-action-btn" type="submit">Clear Needs Review Flags</button>
+    <div class="items-stage-actions">
+      <form action="/items/sync-apply" method="post">
+        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" name="only_add_new" value="1"> Only add new rows (skip updates to existing rows)</label>
+        <button class="btn btn-primary items-action-btn" type="submit">Apply Staged Import</button>
+      </form>
+      <form action="/items/sync-clear" method="post">
+        <button class="btn btn-secondary items-action-btn" type="submit">Clear Staged Import</button>
       </form>
     </div>
+    <div class="items-stage-list">
+      <table class="items-stage-table">
+        <thead><tr><th>Action</th><th>Platform</th><th>ID</th><th>Label</th><th>Location</th><th>Fields Changed</th></tr></thead>
+        <tbody>
+        {% for e in staged_sync.entries[:40] %}
+          <tr>
+            <td>{{ e.action }}</td>
+            <td>{{ e.platform }}</td>
+            <td>{{ e.ident }}</td>
+            <td>{{ e.preview_label or e.preview_title or "" }}</td>
+            <td>{{ e.preview_location or "" }}</td>
+            <td>{{ (e.changed_fields or [])|join(", ") }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
-</section>
+  {% endif %}
 
-<section class="card">
+  <div class="items-controls items-utility-actions">
+    <form id="itemsBackupForm" action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Create Backup Now</button></form>
+    <form action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Open Backups Folder</button></form>
+    <form action="/items/clear-needs-review" method="post" onsubmit="return confirm('Clear all items from Needs Review list?')">
+      <input type="hidden" name="from_page" value="items">
+      <button class="btn btn-secondary items-action-btn" type="submit">Clear Items Needing Review</button>
+    </form>
+  </div>
+</section><section class="card">
   <h2>Items</h2>
   <div class="items-controls">
     <input id="itemsFilter" type="text" placeholder="Quick filter (SKU, ASIN, title, label, location)">
@@ -168,10 +208,36 @@
 </section>
 
 <style>
+.items-top-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.items-flow-box { border: 1px solid rgba(88, 129, 87, 0.18); border-radius: 14px; padding: 14px; background: rgba(248, 251, 249, 0.78); }
+.flow-step { font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #486153; margin-bottom: 4px; }
+.flow-title { font-size: 18px; font-weight: 800; color: #243b2c; margin-bottom: 4px; }
+.flow-sub { font-size: 13px; color: #4e6355; line-height: 1.45; margin-bottom: 10px; }
+.flow-steps-list { margin: 8px 0 0 20px; padding: 0; }
+.flow-steps-list li { margin-bottom: 8px; color: #405847; line-height: 1.45; }
+.flow-steps-list li:last-child { margin-bottom: 0; }
+.items-replace-form { display: flex; flex-direction: column; gap: 10px; }
+.items-replace-dropzone { border: 2px dashed rgba(88, 129, 87, 0.38); border-radius: 14px; background: rgba(255,255,255,0.58); padding: 18px; text-align: center; cursor: pointer; transition: border-color 0.2s ease, background 0.2s ease; }
+.items-replace-dropzone:hover, .items-replace-dropzone.drag-over { border-color: rgba(83, 163, 101, 0.78); background: rgba(232, 248, 237, 0.82); }
+.items-replace-title { font-size: 18px; font-weight: 800; color: #294234; }
+.items-replace-sub { font-size: 13px; color: #5b6e61; margin-top: 4px; }
+.items-replace-selected { font-size: 13px; color: #405847; margin-top: 10px; }
+.items-replace-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.compact-gap { gap: 10px; }
+.hints-actions form { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.items-utility-actions { margin-top: 12px; }
+.stage-top-box { margin-bottom: 12px; }
+@media (max-width: 1000px) { .items-top-grid { grid-template-columns: 1fr; } }
+
 .items-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .items-actions-stack { display: flex; flex-direction: column; gap: 8px; }
 .items-sync-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .items-shared-link { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.items-shared-link form { margin: 0; }
+.items-sync-steps { border: 1px solid rgba(88, 129, 87, 0.18); border-radius: 10px; padding: 10px 12px; background: rgba(248, 251, 249, 0.78); }
+.items-sync-steps ol { margin: 8px 0 0 20px; padding: 0; }
+.items-sync-steps li { margin: 0 0 8px; color: #405847; line-height: 1.45; }
+.items-sync-steps li:last-child { margin-bottom: 0; }
 .items-shared-link input[type="text"] { min-width: 360px; max-width: 780px; width: 100%; }
 .items-stage-box { border: 1px solid rgba(80,100,90,0.22); border-radius: 10px; padding: 10px; background: rgba(248,251,249,0.75); }
 .items-stage-head { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
@@ -279,6 +345,14 @@
   const sharedLinkInput = document.getElementById('sharedSheetLink');
   const saveSharedLinkBtn = document.getElementById('saveSharedSheetLink');
   const openSharedLinkBtn = document.getElementById('openSharedSheetLink');
+  const itemsReplaceForm = document.getElementById('itemsReplaceForm');
+  const itemsReplaceInput = document.getElementById('itemsReplaceInput');
+  const itemsReplaceLastModified = document.getElementById('itemsReplaceLastModified');
+  const itemsReplaceDropzone = document.getElementById('itemsReplaceDropzone');
+  const itemsReplaceSelected = document.getElementById('itemsReplaceSelected');
+  const itemsReplaceChooseBtn = document.getElementById('itemsReplaceChooseBtn');
+  const openAppRootBtn = document.getElementById('openAppRootBtn');
+  const openAppRootForm = document.getElementById('openAppRootForm');
   const filterInput = document.getElementById('itemsFilter');
   const filterClearBtn = document.getElementById('itemsFilterClear');
   const widthBtn = document.getElementById('itemsWidthToggle');
@@ -298,6 +372,25 @@
   const tbody = table.querySelector('tbody');
   const prefs = { sortCol: -1, sortDir: 'asc', widthMode: 'compact', filterText: '' };
 
+
+  function formatLocalDate(value) {
+    if (!value) return 'unknown';
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+  }
+
+  function describeReplaceFile(file) {
+    if (!file) {
+      if (itemsReplaceSelected) itemsReplaceSelected.innerHTML = 'Current main file: <strong>{{ items_csv_path }}</strong>';
+      if (itemsReplaceLastModified) itemsReplaceLastModified.value = '';
+      return;
+    }
+    const lastModifiedText = formatLocalDate(file.lastModified);
+    if (itemsReplaceSelected) {
+      itemsReplaceSelected.innerHTML = `Selected replacement: <strong>${file.name}</strong> | Downloaded/modified: <strong>${lastModifiedText}</strong>`;
+    }
+    if (itemsReplaceLastModified) itemsReplaceLastModified.value = String(file.lastModified || '');
+  }
   function loadPrefs() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -613,6 +706,53 @@
     } catch (e) {}
   }
 
+
+  if (itemsReplaceChooseBtn && itemsReplaceInput) {
+    itemsReplaceChooseBtn.addEventListener('click', () => itemsReplaceInput.click());
+  }
+  if (itemsReplaceDropzone && itemsReplaceInput) {
+    itemsReplaceDropzone.addEventListener('click', () => itemsReplaceInput.click());
+    itemsReplaceDropzone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        itemsReplaceInput.click();
+      }
+    });
+    itemsReplaceDropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      itemsReplaceDropzone.classList.add('drag-over');
+    });
+    itemsReplaceDropzone.addEventListener('dragleave', () => itemsReplaceDropzone.classList.remove('drag-over'));
+    itemsReplaceDropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      itemsReplaceDropzone.classList.remove('drag-over');
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      itemsReplaceInput.files = files;
+      describeReplaceFile(files[0]);
+    });
+  }
+  if (itemsReplaceInput) {
+    itemsReplaceInput.addEventListener('change', () => describeReplaceFile(itemsReplaceInput.files && itemsReplaceInput.files[0]));
+    describeReplaceFile(itemsReplaceInput.files && itemsReplaceInput.files[0]);
+  }
+  if (itemsReplaceForm && itemsReplaceInput) {
+    itemsReplaceForm.addEventListener('submit', (e) => {
+      const file = itemsReplaceInput.files && itemsReplaceInput.files[0];
+      if (!file) {
+        e.preventDefault();
+        alert('Choose an items.csv replacement file first.');
+        return;
+      }
+      const incomingTime = formatLocalDate(file.lastModified);
+      const currentTime = formatLocalDate('{{ items_csv_mtime_iso }}');
+      const ok = confirm(`Replace this PC's main items.csv?\n\nIncoming file: ${file.name}\nIncoming modified/downloaded: ${incomingTime}\nCurrent main items.csv modified: ${currentTime}\n\nThis will overwrite the main items.csv and create a backup first.`);
+      if (!ok) e.preventDefault();
+    });
+  }
+  if (openAppRootBtn && openAppRootForm) {
+    openAppRootBtn.addEventListener('click', () => openAppRootForm.submit());
+  }
   if (saveSharedLinkBtn && sharedLinkInput) {
     saveSharedLinkBtn.addEventListener('click', () => {
       const normalized = normalizeLink(sharedLinkInput.value);
@@ -640,4 +780,11 @@
 })();
 </script>
 {% endblock %}
+
+
+
+
+
+
+
 

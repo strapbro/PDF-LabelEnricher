@@ -1,14 +1,19 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h2>Layout + Formatting (Live Preview)</h2>
-  <p style="font-size:13px;color:#555;">Pick a line layout mode first. Use Custom only if you want manual field/inline control.</p>
+  <h2>Layout + Live Preview</h2>
+  <p class="settings-intro">Build the printed lines the same way they should appear on paper. Drag fields into each line, reorder them, and the preview updates live.</p>
 
   <div class="settings-split">
     <div class="settings-left">
       <form id="layoutForm" action="/settings/save" method="post">
-        <div class="grid" style="grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px;">
-          <div>
+        <input type="hidden" name="field_order_csv" id="field_order_csv" value="{{ ui.field_order_csv }}">
+        <input type="hidden" name="inline_fields_csv" id="inline_fields_csv" value="{{ ui.inline_fields_csv }}">
+        <input type="hidden" name="line_groups_csv" id="line_groups_csv" value="{{ ui.line_groups_csv }}">
+
+        <div class="settings-grid">
+          <div class="settings-box">
+            <div class="box-title">Placement</div>
             <label>Text goes on which two margins?
               <select name="margin_direction" id="margin_direction">
                 <option value="top_bottom" {% if ui.margin_direction == 'top_bottom' %}selected{% endif %}>Top + Bottom margins</option>
@@ -23,39 +28,6 @@
               </select>
             </label>
 
-            <label>Line layout mode
-              <select name="line_layout_mode" id="line_layout_mode">
-                <option value="qty_label_loc_inline" {% if ui.line_layout_mode == 'qty_label_loc_inline' %}selected{% endif %}>Qty + Label + Loc inline</option>
-                <option value="label_qty_total_inline" {% if ui.line_layout_mode == 'label_qty_total_inline' %}selected{% endif %}>Label + Qty + Total inline</option>
-                <option value="location_label_qty_total_inline" {% if ui.line_layout_mode == 'location_label_qty_total_inline' %}selected{% endif %}>Location + Label + Qty + Total inline</option>
-                <option value="qty_label_then_total_loc" {% if ui.line_layout_mode == 'qty_label_then_total_loc' %}selected{% endif %}>Line1: Qty + Label, Line2: Total + Loc</option>
-                <option value="stacked" {% if ui.line_layout_mode == 'stacked' %}selected{% endif %}>Stacked lines (no inline)</option>
-                <option value="custom" {% if ui.line_layout_mode == 'custom' %}selected{% endif %}>Custom</option>
-              </select>
-            </label>
-
-            <label>Field order (custom)
-              <select name="field_order_csv" id="field_order_csv">
-                <option value="label,qty,total,location,title" {% if ui.field_order_csv == 'label,qty,total,location,title' %}selected{% endif %}>Label, Qty, Total, Location, Title</option>
-                <option value="location,label,qty,total,title" {% if ui.field_order_csv == 'location,label,qty,total,title' %}selected{% endif %}>Location, Label, Qty, Total, Title</option>
-                <option value="location,label,total,qty,title" {% if ui.field_order_csv == 'location,label,total,qty,title' %}selected{% endif %}>Location, Label, Total, Qty, Title</option>
-                <option value="label,total,qty,title,location" {% if ui.field_order_csv == 'label,total,qty,title,location' %}selected{% endif %}>Label, Total, Qty, Title, Location</option>
-              </select>
-            </label>
-
-            <label>Inline fields (custom)
-              <select name="inline_fields_csv" id="inline_fields_csv">
-                <option value="" {% if not ui.inline_fields_csv %}selected{% endif %}>None</option>
-                <option value="label,qty,total" {% if ui.inline_fields_csv == 'label,qty,total' %}selected{% endif %}>Label + Qty + Total</option>
-                <option value="location,label,qty,total" {% if ui.inline_fields_csv == 'location,label,qty,total' %}selected{% endif %}>Location + Label + Qty + Total</option>
-                <option value="label,qty" {% if ui.inline_fields_csv == 'label,qty' %}selected{% endif %}>Label + Qty</option>
-              </select>
-            </label>
-
-            <label>Inline separator (custom)
-              <input type="text" name="inline_separator" id="inline_separator" value="{{ ui.inline_separator or ' | ' }}">
-            </label>
-
             <label>Page mode
               <select name="page_mode" id="page_mode">
                 <option value="half_sheet_top" {% if ui.page_mode == 'half_sheet_top' %}selected{% endif %}>Top half-sheet labels</option>
@@ -63,9 +35,21 @@
                 <option value="full_page" {% if ui.page_mode == 'full_page' %}selected{% endif %}>Full-page labels</option>
               </select>
             </label>
+
+            <label>Quick layout preset
+              <select name="line_layout_mode" id="line_layout_mode">
+                <option value="qty_label_loc_inline" {% if ui.line_layout_mode == 'qty_label_loc_inline' %}selected{% endif %}>Line 1: QTY | LABEL | LOC</option>
+                <option value="label_qty_total_inline" {% if ui.line_layout_mode == 'label_qty_total_inline' %}selected{% endif %}>Line 1: LABEL | QTY | TOTAL</option>
+                <option value="location_label_qty_total_inline" {% if ui.line_layout_mode == 'location_label_qty_total_inline' %}selected{% endif %}>Line 1: LOC | LABEL | QTY | TOTAL</option>
+                <option value="qty_label_then_total_loc" {% if ui.line_layout_mode == 'qty_label_then_total_loc' %}selected{% endif %}>Line 1: QTY | LABEL, Line 2: TOTAL | LOC</option>
+                <option value="stacked" {% if ui.line_layout_mode == 'stacked' %}selected{% endif %}>Stacked lines</option>
+                <option value="custom" {% if ui.line_layout_mode == 'custom' %}selected{% endif %}>Custom line builder</option>
+              </select>
+            </label>
           </div>
 
-          <div>
+          <div class="settings-box">
+            <div class="box-title">Text Box</div>
             <label>Margin strip thickness (points)
               <input type="number" name="strip_thickness" id="strip_thickness" value="{{ ui.strip_thickness }}" min="16" max="180">
             </label>
@@ -78,20 +62,23 @@
               <input type="number" name="side_padding" id="side_padding" value="{{ ui.side_padding }}" min="-80" max="120">
             </label>
 
-            <label>Font size
-              <input type="number" name="font_size" id="font_size" value="{{ ui.font_size }}" min="8" max="32">
-            </label>
-
-            <label>Line spacing
-              <input type="number" name="line_spacing" id="line_spacing" value="{{ ui.line_spacing }}" min="10" max="40">
-            </label>
-
             <label>Text alignment
               <select name="text_align" id="text_align">
                 <option value="left" {% if ui.text_align == 'left' %}selected{% endif %}>Left</option>
                 <option value="center" {% if ui.text_align == 'center' %}selected{% endif %}>Center</option>
                 <option value="right" {% if ui.text_align == 'right' %}selected{% endif %}>Right</option>
               </select>
+            </label>
+          </div>
+
+          <div class="settings-box">
+            <div class="box-title">Font + Wrapping</div>
+            <label>Font size
+              <input type="number" name="font_size" id="font_size" value="{{ ui.font_size }}" min="8" max="32">
+            </label>
+
+            <label>Line spacing
+              <input type="number" name="line_spacing" id="line_spacing" value="{{ ui.line_spacing }}" min="10" max="40">
             </label>
 
             <label>Wrapping style
@@ -102,13 +89,15 @@
               </select>
             </label>
 
-            <label><input type="checkbox" name="show_field_labels" id="show_field_labels" {% if ui.show_field_labels %}checked{% endif %}> Show labels like "QTY" and "TOTAL"</label>
-
-            <label>Archive retention days
-              <input type="number" name="archive_retention_days" value="{{ ui.archive_retention_days }}" min="1" max="365">
+            <label>Inline separator
+              <input type="text" name="inline_separator" id="inline_separator" value="{{ ui.inline_separator or ' | ' }}">
             </label>
 
-            <hr style="border:none;border-top:1px solid #d9dfd0;margin:10px 0;">
+            <label><input type="checkbox" name="show_field_labels" id="show_field_labels" {% if ui.show_field_labels %}checked{% endif %}> Show labels like "QTY" and "TOTAL"</label>
+          </div>
+
+          <div class="settings-box">
+            <div class="box-title">Batch Output Sorting</div>
             <label>Combined PDF sort mode
               <select name="output_sort_mode">
                 <option value="processed" {% if ui.output_sort_mode == 'processed' %}selected{% endif %}>Processed order (exact)</option>
@@ -117,69 +106,100 @@
               </select>
             </label>
 
-            <label>Priority 1
-              <select name="sort_priority_1">
-                <option value="label" {% if ui.sort_priority_1 == 'label' %}selected{% endif %}>Internal Label</option>
-                <option value="qty" {% if ui.sort_priority_1 == 'qty' %}selected{% endif %}>Quantity</option>
-                <option value="item_key" {% if ui.sort_priority_1 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
-                <option value="location" {% if ui.sort_priority_1 == 'location' %}selected{% endif %}>Location</option>
-              </select>
-            </label>
-            <label>Priority 2
-              <select name="sort_priority_2">
-                <option value="label" {% if ui.sort_priority_2 == 'label' %}selected{% endif %}>Internal Label</option>
-                <option value="qty" {% if ui.sort_priority_2 == 'qty' %}selected{% endif %}>Quantity</option>
-                <option value="item_key" {% if ui.sort_priority_2 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
-                <option value="location" {% if ui.sort_priority_2 == 'location' %}selected{% endif %}>Location</option>
-              </select>
-            </label>
-            <label>Priority 3
-              <select name="sort_priority_3">
-                <option value="label" {% if ui.sort_priority_3 == 'label' %}selected{% endif %}>Internal Label</option>
-                <option value="qty" {% if ui.sort_priority_3 == 'qty' %}selected{% endif %}>Quantity</option>
-                <option value="item_key" {% if ui.sort_priority_3 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
-                <option value="location" {% if ui.sort_priority_3 == 'location' %}selected{% endif %}>Location</option>
-              </select>
-            </label>
-            <label>Priority 4
-              <select name="sort_priority_4">
-                <option value="label" {% if ui.sort_priority_4 == 'label' %}selected{% endif %}>Internal Label</option>
-                <option value="qty" {% if ui.sort_priority_4 == 'qty' %}selected{% endif %}>Quantity</option>
-                <option value="item_key" {% if ui.sort_priority_4 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
-                <option value="location" {% if ui.sort_priority_4 == 'location' %}selected{% endif %}>Location</option>
-              </select>
-            </label>
+            <div class="sort-grid">
+              <label>Priority 1
+                <select name="sort_priority_1">
+                  <option value="label" {% if ui.sort_priority_1 == 'label' %}selected{% endif %}>Internal Label</option>
+                  <option value="qty" {% if ui.sort_priority_1 == 'qty' %}selected{% endif %}>Quantity</option>
+                  <option value="item_key" {% if ui.sort_priority_1 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
+                  <option value="location" {% if ui.sort_priority_1 == 'location' %}selected{% endif %}>Location</option>
+                  <option value="carrier" {% if ui.sort_priority_1 == 'carrier' %}selected{% endif %}>Carrier (UPS / FedEx / USPS)</option>
+                </select>
+              </label>
+              <label>Priority 2
+                <select name="sort_priority_2">
+                  <option value="label" {% if ui.sort_priority_2 == 'label' %}selected{% endif %}>Internal Label</option>
+                  <option value="qty" {% if ui.sort_priority_2 == 'qty' %}selected{% endif %}>Quantity</option>
+                  <option value="item_key" {% if ui.sort_priority_2 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
+                  <option value="location" {% if ui.sort_priority_2 == 'location' %}selected{% endif %}>Location</option>
+                  <option value="carrier" {% if ui.sort_priority_2 == 'carrier' %}selected{% endif %}>Carrier (UPS / FedEx / USPS)</option>
+                </select>
+              </label>
+              <label>Priority 3
+                <select name="sort_priority_3">
+                  <option value="label" {% if ui.sort_priority_3 == 'label' %}selected{% endif %}>Internal Label</option>
+                  <option value="qty" {% if ui.sort_priority_3 == 'qty' %}selected{% endif %}>Quantity</option>
+                  <option value="item_key" {% if ui.sort_priority_3 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
+                  <option value="location" {% if ui.sort_priority_3 == 'location' %}selected{% endif %}>Location</option>
+                  <option value="carrier" {% if ui.sort_priority_3 == 'carrier' %}selected{% endif %}>Carrier (UPS / FedEx / USPS)</option>
+                </select>
+              </label>
+              <label>Priority 4
+                <select name="sort_priority_4">
+                  <option value="label" {% if ui.sort_priority_4 == 'label' %}selected{% endif %}>Internal Label</option>
+                  <option value="qty" {% if ui.sort_priority_4 == 'qty' %}selected{% endif %}>Quantity</option>
+                  <option value="item_key" {% if ui.sort_priority_4 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
+                  <option value="location" {% if ui.sort_priority_4 == 'location' %}selected{% endif %}>Location</option>
+                  <option value="carrier" {% if ui.sort_priority_4 == 'carrier' %}selected{% endif %}>Carrier (UPS / FedEx / USPS)</option>
+                </select>
+              </label>
+            </div>
 
-            <label><input type="checkbox" name="sort_enable_label" {% if ui.sort_enable_label %}checked{% endif %}> Use Label in custom sort</label>
-            <label><input type="checkbox" name="sort_enable_qty" {% if ui.sort_enable_qty %}checked{% endif %}> Use Quantity in custom sort</label>
-            <label><input type="checkbox" name="sort_enable_item_key" {% if ui.sort_enable_item_key %}checked{% endif %}> Use SKU / Item # in custom sort</label>
-            <label><input type="checkbox" name="sort_enable_location" {% if ui.sort_enable_location %}checked{% endif %}> Use Location in custom sort</label>
+            <div class="sort-grid compact">
+              <label><input type="checkbox" name="sort_enable_label" {% if ui.sort_enable_label %}checked{% endif %}> Use Label</label>
+              <label><input type="checkbox" name="sort_enable_qty" {% if ui.sort_enable_qty %}checked{% endif %}> Use Quantity</label>
+              <label><input type="checkbox" name="sort_enable_item_key" {% if ui.sort_enable_item_key %}checked{% endif %}> Use SKU / Item #</label>
+              <label><input type="checkbox" name="sort_enable_location" {% if ui.sort_enable_location %}checked{% endif %}> Use Location</label>
+              <label><input type="checkbox" name="sort_enable_carrier" {% if ui.sort_enable_carrier %}checked{% endif %}> Use Carrier</label>
+            </div>
 
-            <label>Label direction
-              <select name="sort_dir_label">
-                <option value="asc" {% if ui.sort_dir_label == 'asc' %}selected{% endif %}>A -> Z</option>
-                <option value="desc" {% if ui.sort_dir_label == 'desc' %}selected{% endif %}>Z -> A</option>
-              </select>
-            </label>
-            <label>Quantity direction
-              <select name="sort_dir_qty">
-                <option value="asc" {% if ui.sort_dir_qty == 'asc' %}selected{% endif %}>Low -> High</option>
-                <option value="desc" {% if ui.sort_dir_qty == 'desc' %}selected{% endif %}>High -> Low</option>
-              </select>
-            </label>
-            <label>SKU / Item # direction
-              <select name="sort_dir_item_key">
-                <option value="asc" {% if ui.sort_dir_item_key == 'asc' %}selected{% endif %}>A -> Z</option>
-                <option value="desc" {% if ui.sort_dir_item_key == 'desc' %}selected{% endif %}>Z -> A</option>
-              </select>
-            </label>
-            <label>Location direction
-              <select name="sort_dir_location">
-                <option value="asc" {% if ui.sort_dir_location == 'asc' %}selected{% endif %}>A -> Z</option>
-                <option value="desc" {% if ui.sort_dir_location == 'desc' %}selected{% endif %}>Z -> A</option>
-              </select>
+            <div class="sort-grid">
+              <label>Label direction
+                <select name="sort_dir_label">
+                  <option value="asc" {% if ui.sort_dir_label == 'asc' %}selected{% endif %}>A -> Z</option>
+                  <option value="desc" {% if ui.sort_dir_label == 'desc' %}selected{% endif %}>Z -> A</option>
+                </select>
+              </label>
+              <label>Quantity direction
+                <select name="sort_dir_qty">
+                  <option value="asc" {% if ui.sort_dir_qty == 'asc' %}selected{% endif %}>Low -> High</option>
+                  <option value="desc" {% if ui.sort_dir_qty == 'desc' %}selected{% endif %}>High -> Low</option>
+                </select>
+              </label>
+              <label>SKU / Item # direction
+                <select name="sort_dir_item_key">
+                  <option value="asc" {% if ui.sort_dir_item_key == 'asc' %}selected{% endif %}>A -> Z</option>
+                  <option value="desc" {% if ui.sort_dir_item_key == 'desc' %}selected{% endif %}>Z -> A</option>
+                </select>
+              </label>
+              <label>Location direction
+                <select name="sort_dir_location">
+                  <option value="asc" {% if ui.sort_dir_location == 'asc' %}selected{% endif %}>A -> Z</option>
+                  <option value="desc" {% if ui.sort_dir_location == 'desc' %}selected{% endif %}>Z -> A</option>
+                </select>
+              </label>
+              <label>Carrier direction
+                <select name="sort_dir_carrier">
+                  <option value="asc" {% if ui.sort_dir_carrier == 'asc' %}selected{% endif %}>A -> Z</option>
+                  <option value="desc" {% if ui.sort_dir_carrier == 'desc' %}selected{% endif %}>Z -> A</option>
+                </select>
+              </label>
+            </div>
+
+            <label>Archive retention days
+              <input type="number" name="archive_retention_days" value="{{ ui.archive_retention_days }}" min="1" max="365">
             </label>
           </div>
+        </div>
+
+        <div class="settings-box line-builder-box">
+          <div class="box-title">Line Builder</div>
+          <p class="builder-help">Drag the field chips into the lines below. Whatever is on Line 1 prints first, then Line 2, and so on. Fields left in the pool get auto-appended after your placed lines.</p>
+          <div class="builder-pool-wrap">
+            <div class="builder-label">Available / auto-append fields</div>
+            <div id="fieldPool" class="line-dropzone field-pool"></div>
+          </div>
+          <div id="lineBuilder" class="line-builder"></div>
         </div>
 
         <button id="saveSettingsBtn" class="btn btn-secondary save-btn save-passive" type="submit">Save</button>
@@ -196,9 +216,9 @@
           {% endfor %}
         </select>
       </label>
-      <p style="font-size:13px;color:#555;">Red boxes show safe text areas (primary + secondary). Preview does not save until you click <strong>Save</strong>.</p>
-      <div style="border:1px solid #ddd;background:#fafafa;padding:8px;overflow:auto;">
-        <img id="livePreviewImg" alt="Live preview" style="max-width:100%;height:auto;display:block;">
+      <p class="preview-help">Red boxes show the text-safe areas. Preview updates live and does not save until you click <strong>Save</strong>.</p>
+      <div class="preview-frame">
+        <img id="livePreviewImg" alt="Live preview" class="preview-image">
       </div>
       {% else %}
       <p>No label PDFs found. Upload a label PDF/ZIP in Dashboard first, then come back.</p>
@@ -208,13 +228,40 @@
 </section>
 
 <style>
-.settings-split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.settings-intro { font-size: 13px; color: #55665a; margin-top: 4px; }
+.settings-split { display: grid; grid-template-columns: minmax(0, 1fr) 560px; gap: 18px; align-items: start; }
 .settings-right { position: sticky; top: 12px; }
-.save-btn { min-width: 150px; margin-top: 8px; }
+.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 12px; }
+.settings-box { border: 1px solid rgba(88, 129, 87, 0.16); border-radius: 16px; background: rgba(255,255,255,0.54); padding: 14px; }
+.box-title { font-size: 14px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; color: #335244; margin-bottom: 10px; }
+.line-builder-box { margin-top: 12px; }
+.builder-help, .preview-help { font-size: 13px; color: #56675a; margin: 0 0 10px; }
+.builder-pool-wrap { margin-bottom: 12px; }
+.builder-label { font-weight: 700; font-size: 12px; color: #44624f; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+.line-builder { display: grid; gap: 10px; }
+.line-row { border: 1px dashed rgba(88, 129, 87, 0.34); border-radius: 14px; background: rgba(244, 249, 245, 0.72); padding: 10px; }
+.line-row-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.line-row-title { font-weight: 700; color: #2f4d3d; }
+.line-dropzone { min-height: 50px; border: 1px dashed rgba(88, 129, 87, 0.26); border-radius: 12px; background: rgba(255,255,255,0.58); padding: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.line-dropzone.drag-over { border-color: rgba(53, 166, 103, 0.7); background: rgba(210, 246, 221, 0.55); }
+.field-pill { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 8px 12px; border: 1px solid rgba(72, 111, 87, 0.22); background: linear-gradient(180deg, rgba(255,255,255,0.88), rgba(232, 243, 235, 0.92)); color: #274032; font-weight: 700; cursor: grab; user-select: none; }
+.field-pill small { font-size: 11px; font-weight: 700; color: #5a6c60; }
+.field-pill button { border: 0; background: transparent; color: #5c6e61; font-weight: 700; cursor: pointer; padding: 0; }
+.empty-hint { color: #809084; font-size: 13px; }
+.clear-line-btn { border: 0; border-radius: 999px; background: rgba(58, 90, 64, 0.12); color: #365040; padding: 6px 12px; font-weight: 700; cursor: pointer; }
+.sort-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.sort-grid.compact { margin: 8px 0; }
+.preview-frame { border: 1px solid #d8dfd1; background: rgba(250,250,250,0.88); padding: 10px; border-radius: 16px; overflow: auto; }
+.preview-image { max-width: 100%; height: auto; display: block; }
+.save-btn { min-width: 160px; margin-top: 12px; }
 .save-passive { opacity: 0.68; filter: saturate(0.72); }
-@media (max-width: 1100px) {
+@media (max-width: 1400px) {
   .settings-split { grid-template-columns: 1fr; }
   .settings-right { position: static; }
+}
+@media (max-width: 900px) {
+  .settings-grid { grid-template-columns: 1fr; }
+  .sort-grid { grid-template-columns: 1fr; }
 }
 </style>
 
@@ -225,11 +272,34 @@
   const labelSel = document.getElementById('preview_label_pdf');
   const modeSel = document.getElementById('line_layout_mode');
   const saveBtn = document.getElementById('saveSettingsBtn');
-  const customIds = ['field_order_csv', 'inline_fields_csv', 'inline_separator'];
-  if (!form || !modeSel || !saveBtn) return;
+  const fieldOrderInput = document.getElementById('field_order_csv');
+  const inlineFieldsInput = document.getElementById('inline_fields_csv');
+  const lineGroupsInput = document.getElementById('line_groups_csv');
+  const fieldPool = document.getElementById('fieldPool');
+  const lineBuilder = document.getElementById('lineBuilder');
+  if (!form || !modeSel || !saveBtn || !fieldPool || !lineBuilder) return;
+
+  const FIELD_META = {
+    qty: { title: 'QTY', hint: 'units ordered' },
+    label: { title: 'LABEL', hint: 'internal label' },
+    total: { title: 'TOTAL', hint: 'buyer total' },
+    location: { title: 'LOC', hint: 'pick location' },
+    title: { title: 'TITLE', hint: 'support title' },
+  };
+  const ALL_FIELDS = Object.keys(FIELD_META);
+  const PRESETS = {
+    qty_label_loc_inline: [['qty', 'label', 'location'], ['total'], ['title']],
+    label_qty_total_inline: [['label', 'qty', 'total'], ['location'], ['title']],
+    location_label_qty_total_inline: [['location', 'label', 'qty', 'total'], ['title']],
+    qty_label_then_total_loc: [['qty', 'label'], ['total', 'location'], ['title']],
+    stacked: [['label'], ['qty'], ['total'], ['location'], ['title']],
+  };
+  const LINE_COUNT = 5;
 
   let timer = null;
   let isDirty = false;
+  let dragField = '';
+  let assignedLines = [];
 
   function setSaveDirty(dirty) {
     isDirty = !!dirty;
@@ -238,20 +308,180 @@
     saveBtn.classList.toggle('btn-primary', isDirty);
   }
 
-  function applyCustomEnabled() {
-    const isCustom = (modeSel.value || '') === 'custom';
-    customIds.forEach(id => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.disabled = !isCustom;
-      el.style.opacity = isCustom ? '1' : '0.6';
+  function normalizeLines(lines) {
+    const seen = new Set();
+    const out = [];
+    (lines || []).forEach((line) => {
+      const clean = [];
+      (line || []).forEach((field) => {
+        const key = String(field || '').trim().toLowerCase();
+        if (!FIELD_META[key] || seen.has(key)) return;
+        seen.add(key);
+        clean.push(key);
+      });
+      out.push(clean);
+    });
+    while (out.length < LINE_COUNT) out.push([]);
+    return out.slice(0, LINE_COUNT);
+  }
+
+  function parseCurrentLines() {
+    const grouped = String(lineGroupsInput.value || '').trim().toLowerCase();
+    if (grouped) {
+      const parsed = grouped.split(';').map(part => part.split(',').map(x => x.trim()).filter(Boolean));
+      const lines = normalizeLines(parsed);
+      const used = new Set(lines.flat());
+      const fieldOrder = String(fieldOrderInput.value || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+      const leftovers = fieldOrder.filter(f => FIELD_META[f] && !used.has(f));
+      leftovers.forEach((field, idx) => {
+        const slot = lines.findIndex(line => line.length === 0);
+        if (slot >= 0) lines[slot] = [field];
+        else lines[lines.length - 1].push(field);
+      });
+      return normalizeLines(lines);
+    }
+    const preset = PRESETS[String(modeSel.value || '').trim()] || null;
+    if (preset) return normalizeLines(preset);
+    const fallback = String(fieldOrderInput.value || 'label,qty,total,location,title').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+    return normalizeLines(fallback.map(f => [f]));
+  }
+
+  function serializeLayout() {
+    const used = [];
+    const groups = [];
+    assignedLines.forEach((line) => {
+      if (!line.length) return;
+      groups.push(line.join(','));
+      line.forEach((field) => {
+        if (!used.includes(field)) used.push(field);
+      });
+    });
+    ALL_FIELDS.forEach((field) => {
+      if (!used.includes(field)) used.push(field);
+    });
+    fieldOrderInput.value = used.join(',');
+    inlineFieldsInput.value = '';
+    lineGroupsInput.value = groups.join(';');
+  }
+
+  function renderFieldPill(field, withRemove) {
+    const meta = FIELD_META[field];
+    const pill = document.createElement('div');
+    pill.className = 'field-pill';
+    pill.draggable = true;
+    pill.dataset.field = field;
+    pill.innerHTML = `<span>${meta.title}</span><small>${meta.hint}</small>${withRemove ? '<button type="button" title="Remove from line">x</button>' : ''}`;
+    pill.addEventListener('dragstart', () => { dragField = field; });
+    pill.addEventListener('dragend', () => { dragField = ''; });
+    if (withRemove) {
+      pill.querySelector('button').addEventListener('click', () => {
+        assignedLines = assignedLines.map(line => line.filter(f => f !== field));
+        modeSel.value = 'custom';
+        syncBuilder(true);
+      });
+    } else {
+      pill.addEventListener('click', () => {
+        const idx = assignedLines.findIndex(line => line.length === 0);
+        if (idx >= 0) {
+          assignedLines[idx].push(field);
+        } else {
+          assignedLines[assignedLines.length - 1].push(field);
+        }
+        modeSel.value = 'custom';
+        syncBuilder(true);
+      });
+    }
+    return pill;
+  }
+
+  function makeDropzone(targetLineIndex) {
+    const zone = document.createElement('div');
+    zone.className = 'line-dropzone';
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      const field = dragField || e.dataTransfer.getData('text/plain');
+      if (!FIELD_META[field]) return;
+      assignedLines = assignedLines.map(line => line.filter(f => f !== field));
+      const next = Array.from(assignedLines[targetLineIndex] || []);
+      next.push(field);
+      assignedLines[targetLineIndex] = next;
+      modeSel.value = 'custom';
+      syncBuilder(true);
+    });
+    return zone;
+  }
+
+  function buildLineRows() {
+    lineBuilder.innerHTML = '';
+    assignedLines.forEach((line, idx) => {
+      const row = document.createElement('div');
+      row.className = 'line-row';
+      const header = document.createElement('div');
+      header.className = 'line-row-header';
+      header.innerHTML = `<div class="line-row-title">Line ${idx + 1}</div>`;
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'clear-line-btn';
+      clearBtn.textContent = 'Clear line';
+      clearBtn.addEventListener('click', () => {
+        assignedLines[idx] = [];
+        modeSel.value = 'custom';
+        syncBuilder(true);
+      });
+      header.appendChild(clearBtn);
+      row.appendChild(header);
+
+      const zone = makeDropzone(idx);
+      if (!line.length) {
+        const hint = document.createElement('div');
+        hint.className = 'empty-hint';
+        hint.textContent = 'Drop fields here';
+        zone.appendChild(hint);
+      } else {
+        line.forEach(field => zone.appendChild(renderFieldPill(field, true)));
+      }
+      row.appendChild(zone);
+      lineBuilder.appendChild(row);
     });
   }
 
+  function buildFieldPool() {
+    fieldPool.innerHTML = '';
+    const used = new Set(assignedLines.flat());
+    const available = ALL_FIELDS.filter(field => !used.has(field));
+    if (!available.length) {
+      const hint = document.createElement('div');
+      hint.className = 'empty-hint';
+      hint.textContent = 'All fields are placed into lines.';
+      fieldPool.appendChild(hint);
+      return;
+    }
+    available.forEach(field => fieldPool.appendChild(renderFieldPill(field, false)));
+  }
+
+  function syncBuilder(markDirty) {
+    assignedLines = normalizeLines(assignedLines);
+    buildFieldPool();
+    buildLineRows();
+    serializeLayout();
+    if (markDirty) setSaveDirty(true);
+    queueRefresh();
+  }
+
+  function loadPresetOrCurrent(forcePreset) {
+    const presetKey = String(modeSel.value || '').trim();
+    assignedLines = normalizeLines(forcePreset && PRESETS[presetKey] ? PRESETS[presetKey] : parseCurrentLines());
+    syncBuilder(false);
+  }
+
   function queryFromForm() {
+    serializeLayout();
     const fd = new FormData(form);
     const q = new URLSearchParams();
-    q.set('label_pdf', labelSel.value || '');
+    q.set('label_pdf', labelSel ? (labelSel.value || '') : '');
     q.set('margin_direction', fd.get('margin_direction') || 'top_bottom');
     q.set('margin_mode', fd.get('margin_mode') || 'both');
     q.set('font_size', fd.get('font_size') || '14');
@@ -261,9 +491,10 @@
     q.set('side_padding', fd.get('side_padding') || '8');
     q.set('text_align', fd.get('text_align') || 'left');
     q.set('wrap_mode', fd.get('wrap_mode') || 'word');
-    q.set('line_layout_mode', fd.get('line_layout_mode') || 'qty_label_loc_inline');
-    q.set('field_order_csv', fd.get('field_order_csv') || 'label,qty,total,location,title');
-    q.set('inline_fields_csv', fd.get('inline_fields_csv') || 'qty,label,location');
+    q.set('line_layout_mode', fd.get('line_layout_mode') || 'custom');
+    q.set('field_order_csv', fieldOrderInput.value || 'label,qty,total,location,title');
+    q.set('inline_fields_csv', inlineFieldsInput.value || '');
+    q.set('line_groups_csv', lineGroupsInput.value || '');
     q.set('inline_separator', fd.get('inline_separator') || ' | ');
     q.set('show_field_labels', fd.get('show_field_labels') ? '1' : '0');
     q.set('page_mode', fd.get('page_mode') || 'half_sheet_top');
@@ -275,16 +506,40 @@
     if (!img || !labelSel) return;
     img.src = '/settings/live-preview.png?' + queryFromForm();
   }
-  function queueRefresh() { if (timer) clearTimeout(timer); timer = setTimeout(refreshPreview, 180); }
 
-  modeSel.addEventListener('change', () => { applyCustomEnabled(); queueRefresh(); });
-  form.addEventListener('input', () => { setSaveDirty(true); queueRefresh(); });
-  form.addEventListener('change', () => { setSaveDirty(true); queueRefresh(); });
+  function queueRefresh() {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(refreshPreview, 180);
+  }
+
+  modeSel.addEventListener('change', () => {
+    const presetKey = String(modeSel.value || '').trim();
+    if (PRESETS[presetKey]) {
+      assignedLines = normalizeLines(PRESETS[presetKey]);
+    }
+    syncBuilder(true);
+  });
+
+  form.addEventListener('input', (e) => {
+    if (e.target === modeSel) return;
+    setSaveDirty(true);
+    queueRefresh();
+  });
+  form.addEventListener('change', (e) => {
+    if (e.target === modeSel) return;
+    setSaveDirty(true);
+    queueRefresh();
+  });
+  form.addEventListener('submit', () => {
+    serializeLayout();
+    setSaveDirty(false);
+  });
   if (labelSel) labelSel.addEventListener('change', queueRefresh);
 
-  applyCustomEnabled();
+  loadPresetOrCurrent(false);
   setSaveDirty(false);
   refreshPreview();
 })();
 </script>
 {% endblock %}
+
