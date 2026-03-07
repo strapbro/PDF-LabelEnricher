@@ -226,7 +226,7 @@
   const modeSel = document.getElementById('line_layout_mode');
   const saveBtn = document.getElementById('saveSettingsBtn');
   const customIds = ['field_order_csv', 'inline_fields_csv', 'inline_separator'];
-  if (!form || !img || !labelSel || !modeSel || !saveBtn) return;
+  if (!form || !modeSel || !saveBtn) return;
 
   let timer = null;
   let isDirty = false;
@@ -271,15 +271,19 @@
     return q.toString();
   }
 
-  function refreshPreview() { img.src = '/settings/live-preview.png?' + queryFromForm(); }
+  function refreshPreview() {
+    if (!img || !labelSel) return;
+    img.src = '/settings/live-preview.png?' + queryFromForm();
+  }
   function queueRefresh() { if (timer) clearTimeout(timer); timer = setTimeout(refreshPreview, 180); }
 
   modeSel.addEventListener('change', () => { applyCustomEnabled(); queueRefresh(); });
   form.addEventListener('input', () => { setSaveDirty(true); queueRefresh(); });
   form.addEventListener('change', () => { setSaveDirty(true); queueRefresh(); });
-  labelSel.addEventListener('change', queueRefresh);
+  if (labelSel) labelSel.addEventListener('change', queueRefresh);
 
   applyCustomEnabled();
+  setSaveDirty(false);
   refreshPreview();
 })();
 </script>
