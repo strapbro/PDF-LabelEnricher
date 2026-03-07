@@ -22,7 +22,18 @@
 
 * { box-sizing: border-box; }
 
+html, body {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+html {
+  background: linear-gradient(180deg, #f2f1eb, #e8e6dc);
+}
+
 body {
+  padding-top: 0 !important;
+  min-height: 100vh;
   font-family: "Segoe UI", Arial, sans-serif;
   margin: 0;
   color: var(--ink);
@@ -34,11 +45,12 @@ body {
 
 header {
   cursor: pointer;
-  position: sticky;
+  position: relative;
   top: 0;
+  margin-top: -8px;
   z-index: 50;
   color: #f2f7ff;
-  padding: 14px 18px;
+  padding: 26px 22px 18px 22px;
   background: linear-gradient(135deg, rgba(52, 78, 65, 0.94), rgba(58, 90, 64, 0.9));
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
   backdrop-filter: blur(12px) saturate(130%);
@@ -46,8 +58,8 @@ header {
 }
 
 header h1 {
-  margin: 0 0 8px;
-  font-size: 22px;
+  margin: 0 0 10px;
+  font-size: 26px;
   font-weight: 800;
   letter-spacing: 0.24px;
 }
@@ -63,18 +75,18 @@ nav,
 .nav-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 
 nav a,
 .nav-links a {
   color: #f5fbff;
   text-decoration: none;
-  padding: 10px 14px;
+  padding: 12px 18px;
   border-radius: 12px;
   background: rgba(188, 206, 219, 0.22);
   border: 1px solid rgba(222, 231, 238, 0.4);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   box-shadow: 0 6px 14px rgba(22, 34, 40, 0.18);
   transition: transform 0.12s ease, background 0.16s ease, box-shadow 0.16s ease;
@@ -95,7 +107,7 @@ nav a:hover,
 .nav-close .btn {
   min-height: 42px;
   min-width: 116px;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 main {
@@ -318,7 +330,7 @@ pre {
 }
 
 .time-greeting {
-  font-size: 30px;
+  font-size: 36px;
   font-weight: 900;
   line-height: 1.05;
   margin: 2px 0 10px;
@@ -359,13 +371,9 @@ pre {
   }
 }
 
-
-
-
-
-
-
-
+body > header {
+  margin-top: -8px !important;
+}
 
 
 

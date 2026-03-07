@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <section class="card">
   <h2>Layout + Formatting (Live Preview)</h2>
@@ -107,10 +107,82 @@
             <label>Archive retention days
               <input type="number" name="archive_retention_days" value="{{ ui.archive_retention_days }}" min="1" max="365">
             </label>
+
+            <hr style="border:none;border-top:1px solid #d9dfd0;margin:10px 0;">
+            <label>Combined PDF sort mode
+              <select name="output_sort_mode">
+                <option value="processed" {% if ui.output_sort_mode == 'processed' %}selected{% endif %}>Processed order (exact)</option>
+                <option value="processed_reverse" {% if ui.output_sort_mode == 'processed_reverse' %}selected{% endif %}>Processed order (reverse)</option>
+                <option value="custom" {% if ui.output_sort_mode == 'custom' %}selected{% endif %}>Custom sort (fields below)</option>
+              </select>
+            </label>
+
+            <label>Priority 1
+              <select name="sort_priority_1">
+                <option value="label" {% if ui.sort_priority_1 == 'label' %}selected{% endif %}>Internal Label</option>
+                <option value="qty" {% if ui.sort_priority_1 == 'qty' %}selected{% endif %}>Quantity</option>
+                <option value="item_key" {% if ui.sort_priority_1 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
+                <option value="location" {% if ui.sort_priority_1 == 'location' %}selected{% endif %}>Location</option>
+              </select>
+            </label>
+            <label>Priority 2
+              <select name="sort_priority_2">
+                <option value="label" {% if ui.sort_priority_2 == 'label' %}selected{% endif %}>Internal Label</option>
+                <option value="qty" {% if ui.sort_priority_2 == 'qty' %}selected{% endif %}>Quantity</option>
+                <option value="item_key" {% if ui.sort_priority_2 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
+                <option value="location" {% if ui.sort_priority_2 == 'location' %}selected{% endif %}>Location</option>
+              </select>
+            </label>
+            <label>Priority 3
+              <select name="sort_priority_3">
+                <option value="label" {% if ui.sort_priority_3 == 'label' %}selected{% endif %}>Internal Label</option>
+                <option value="qty" {% if ui.sort_priority_3 == 'qty' %}selected{% endif %}>Quantity</option>
+                <option value="item_key" {% if ui.sort_priority_3 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
+                <option value="location" {% if ui.sort_priority_3 == 'location' %}selected{% endif %}>Location</option>
+              </select>
+            </label>
+            <label>Priority 4
+              <select name="sort_priority_4">
+                <option value="label" {% if ui.sort_priority_4 == 'label' %}selected{% endif %}>Internal Label</option>
+                <option value="qty" {% if ui.sort_priority_4 == 'qty' %}selected{% endif %}>Quantity</option>
+                <option value="item_key" {% if ui.sort_priority_4 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
+                <option value="location" {% if ui.sort_priority_4 == 'location' %}selected{% endif %}>Location</option>
+              </select>
+            </label>
+
+            <label><input type="checkbox" name="sort_enable_label" {% if ui.sort_enable_label %}checked{% endif %}> Use Label in custom sort</label>
+            <label><input type="checkbox" name="sort_enable_qty" {% if ui.sort_enable_qty %}checked{% endif %}> Use Quantity in custom sort</label>
+            <label><input type="checkbox" name="sort_enable_item_key" {% if ui.sort_enable_item_key %}checked{% endif %}> Use SKU / Item # in custom sort</label>
+            <label><input type="checkbox" name="sort_enable_location" {% if ui.sort_enable_location %}checked{% endif %}> Use Location in custom sort</label>
+
+            <label>Label direction
+              <select name="sort_dir_label">
+                <option value="asc" {% if ui.sort_dir_label == 'asc' %}selected{% endif %}>A -> Z</option>
+                <option value="desc" {% if ui.sort_dir_label == 'desc' %}selected{% endif %}>Z -> A</option>
+              </select>
+            </label>
+            <label>Quantity direction
+              <select name="sort_dir_qty">
+                <option value="asc" {% if ui.sort_dir_qty == 'asc' %}selected{% endif %}>Low -> High</option>
+                <option value="desc" {% if ui.sort_dir_qty == 'desc' %}selected{% endif %}>High -> Low</option>
+              </select>
+            </label>
+            <label>SKU / Item # direction
+              <select name="sort_dir_item_key">
+                <option value="asc" {% if ui.sort_dir_item_key == 'asc' %}selected{% endif %}>A -> Z</option>
+                <option value="desc" {% if ui.sort_dir_item_key == 'desc' %}selected{% endif %}>Z -> A</option>
+              </select>
+            </label>
+            <label>Location direction
+              <select name="sort_dir_location">
+                <option value="asc" {% if ui.sort_dir_location == 'asc' %}selected{% endif %}>A -> Z</option>
+                <option value="desc" {% if ui.sort_dir_location == 'desc' %}selected{% endif %}>Z -> A</option>
+              </select>
+            </label>
           </div>
         </div>
 
-        <button type="submit">Save</button>
+        <button id="saveSettingsBtn" class="btn btn-secondary save-btn save-passive" type="submit">Save</button>
       </form>
     </div>
 
@@ -138,6 +210,8 @@
 <style>
 .settings-split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
 .settings-right { position: sticky; top: 12px; }
+.save-btn { min-width: 150px; margin-top: 8px; }
+.save-passive { opacity: 0.68; filter: saturate(0.72); }
 @media (max-width: 1100px) {
   .settings-split { grid-template-columns: 1fr; }
   .settings-right { position: static; }
@@ -150,10 +224,19 @@
   const img = document.getElementById('livePreviewImg');
   const labelSel = document.getElementById('preview_label_pdf');
   const modeSel = document.getElementById('line_layout_mode');
+  const saveBtn = document.getElementById('saveSettingsBtn');
   const customIds = ['field_order_csv', 'inline_fields_csv', 'inline_separator'];
-  if (!form || !img || !labelSel || !modeSel) return;
+  if (!form || !modeSel || !saveBtn) return;
 
   let timer = null;
+  let isDirty = false;
+
+  function setSaveDirty(dirty) {
+    isDirty = !!dirty;
+    saveBtn.classList.toggle('save-passive', !isDirty);
+    saveBtn.classList.toggle('btn-secondary', !isDirty);
+    saveBtn.classList.toggle('btn-primary', isDirty);
+  }
 
   function applyCustomEnabled() {
     const isCustom = (modeSel.value || '') === 'custom';
@@ -188,19 +271,20 @@
     return q.toString();
   }
 
-  function refreshPreview() { img.src = '/settings/live-preview.png?' + queryFromForm(); }
+  function refreshPreview() {
+    if (!img || !labelSel) return;
+    img.src = '/settings/live-preview.png?' + queryFromForm();
+  }
   function queueRefresh() { if (timer) clearTimeout(timer); timer = setTimeout(refreshPreview, 180); }
 
   modeSel.addEventListener('change', () => { applyCustomEnabled(); queueRefresh(); });
-  form.addEventListener('input', queueRefresh);
-  form.addEventListener('change', queueRefresh);
-  labelSel.addEventListener('change', queueRefresh);
+  form.addEventListener('input', () => { setSaveDirty(true); queueRefresh(); });
+  form.addEventListener('change', () => { setSaveDirty(true); queueRefresh(); });
+  if (labelSel) labelSel.addEventListener('change', queueRefresh);
 
   applyCustomEnabled();
+  setSaveDirty(false);
   refreshPreview();
 })();
 </script>
 {% endblock %}
-
-
-

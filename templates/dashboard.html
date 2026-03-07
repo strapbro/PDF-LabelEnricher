@@ -43,18 +43,18 @@
   </div>
   <div class="card stat-card {{ 'stat-ok' if status.ebay_csv_found else 'stat-miss' }}">
     <div class="stat-label">eBay CSV</div>
-    <div class="stat-value">{{ 'Yes' if status.ebay_csv_found else 'No' }}</div>
+    <div class="stat-value">{{ 'Yes' if status.ebay_csv_found else 'None' }}</div>
   </div>
   <div class="card stat-card {{ 'stat-ok' if status.amazon_txt_found else 'stat-miss' }}">
     <div class="stat-label">Amazon TXT</div>
-    <div class="stat-value">{{ 'Yes' if status.amazon_txt_found else 'No' }}</div>
+    <div class="stat-value">{{ 'Yes' if status.amazon_txt_found else 'None' }}</div>
   </div>
   <div class="card stat-card {{ 'stat-alert' if status.unresolved_count > 0 else '' }}">
     <div class="stat-label">Unprocessed Queue</div>
     <div class="stat-value">{{ status.unresolved_count }}</div>
   </div>
   <div class="card stat-card {{ 'stat-alert' if needs_review_count > 0 else '' }}">
-    <div class="stat-label">Items Need Review</div>
+    <div class="stat-label">Items Needing Review</div>
     <div class="stat-value">{{ needs_review_count }}</div>
   </div>
 </section>
@@ -104,7 +104,7 @@
     <div class="actions-grid helper-actions">
       <form action="/staged/clear" method="post" onsubmit="return confirm('Clear all staged files in incoming/batch?')"><button class="btn btn-sm btn-outline" type="submit">Clear Staged Files</button></form>
       <form action="/resolve/clear" method="post" onsubmit="return confirm('Clear all unresolved queue items?')"><input type="hidden" name="from_page" value="dashboard"><button class="btn btn-sm btn-outline" type="submit">Clear Unprocessed Queue</button></form>
-      <form action="/items/clear-needs-review" method="post" onsubmit="return confirm('Clear all items from Needs Review list?')"><input type="hidden" name="from_page" value="dashboard"><button class="btn btn-sm btn-outline" type="submit">Clear Item Needs Review</button></form>
+      <form action="/items/clear-needs-review" method="post" onsubmit="return confirm('Clear all items from Needs Review list?')"><input type="hidden" name="from_page" value="dashboard"><button class="btn btn-sm btn-outline" type="submit">Clear Items Needing Review</button></form>
     </div>
   </div>
 </section>
@@ -116,7 +116,7 @@
 <section class="card tiny-meta">
   <strong>What these counters mean:</strong>
   Unprocessed Queue = labels that still need a manual match before printing.
-  Items Need Review = products that still need item details checked or updated in the Item Database.
+  Items Needing Review = products that still need item details checked or updated in the Item Database.
 </section>
 <section class="two-col">
   <section class="card">
@@ -284,12 +284,3 @@ document.querySelectorAll('.btn-spotlight').forEach((btn) => {
 refreshPending();
 </script>
 {% endblock %}
-
-
-
-
-
-
-
-
-

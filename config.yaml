@@ -56,3 +56,20 @@ admin:
 csv_mapping_cache:
   enable: true
   mapping_file: csv_mapping.json
+output_sort:
+  mode: processed
+  priority_fields:
+  - label
+  - location
+  - qty
+  - item_key
+  enabled_fields:
+    label: true
+    qty: false
+    item_key: false
+    location: false
+  directions:
+    label: asc
+    qty: asc
+    item_key: asc
+    location: asc
