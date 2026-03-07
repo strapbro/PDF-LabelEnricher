@@ -80,6 +80,26 @@ def _extract_tracking(full_text: str) -> str:
     return ""
 
 
+def _detect_carrier(full_text: str, tracking_number: str) -> str:
+    text = (full_text or "").lower()
+    tracking = re.sub(r"[^A-Za-z0-9]", "", (tracking_number or "").upper())
+
+    if tracking.startswith("1Z"):
+        return "ups"
+    if tracking.startswith(("92", "93", "94", "95", "96")) and len(tracking) >= 20:
+        return "usps"
+    if tracking.isdigit() and len(tracking) in {12, 15, 20, 22}:
+        return "fedex"
+
+    if "ups" in text or "united parcel service" in text:
+        return "ups"
+    if "fedex" in text or "federal express" in text:
+        return "fedex"
+    if "usps" in text or "united states postal service" in text or "priority mail" in text:
+        return "usps"
+    return ""
+
+
 def _candidate_lines(text: str, words_text: str) -> list[str]:
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if words_text:
@@ -223,6 +243,7 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
     postal = _pick_zip(shipto_block, search_text)
     recipient = _pick_recipient(shipto_block, lines, postal)
     tracking = _extract_tracking(search_text)
+    carrier = _detect_carrier(search_text, tracking)
 
     amz_match = AMZ_ORDER_RE.search(search_text)
     ebay_match = EBAY_ORDER_RE.search(search_text)
@@ -238,8 +259,8 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
         "platform_hint": platform_hint,
         "ship_postal": postal,
         "tracking_number": tracking,
+        "carrier": carrier,
         "order_id_amazon": amz_match.group(0) if amz_match else "",
         "order_id_ebay": ebay_match.group(0) if ebay_match else "",
         "recipient_name": recipient,
     }
-

@@ -74,12 +74,14 @@ DEFAULT_CONFIG = {
             "qty": False,
             "item_key": False,
             "location": False,
+            "carrier": False,
         },
         "directions": {
             "label": "asc",
             "qty": "asc",
             "item_key": "asc",
             "location": "asc",
+            "carrier": "asc",
         },
     },
 }

@@ -42,9 +42,9 @@ print_layout:
   - total
   - location
   - title
-  inline_fields_csv: ''
+  inline_fields_csv: qty,label,location
   inline_separator: ' | '
-  line_groups_csv: qty,label;total,location
+  line_groups_csv: qty,label;total,location;title
 new_item_defaults:
   show_location: true
   show_label: true
@@ -57,19 +57,21 @@ csv_mapping_cache:
   enable: true
   mapping_file: csv_mapping.json
 output_sort:
-  mode: processed
+  mode: custom
   priority_fields:
-  - label
+  - carrier
   - location
+  - label
   - qty
-  - item_key
   enabled_fields:
     label: true
-    qty: false
+    qty: true
     item_key: false
-    location: false
+    location: true
+    carrier: true
   directions:
     label: asc
-    qty: asc
+    qty: desc
     item_key: asc
     location: asc
+    carrier: asc

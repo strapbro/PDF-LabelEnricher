@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <section class="card upload-card">
   <div class="section-head">
@@ -178,7 +178,8 @@
 }
 
 .upload-meta-row { display: flex; justify-content: flex-start; align-items: center; gap: 12px; flex-wrap: wrap; }
-.pending-count { margin: 6px 0 10px; font-size: 18px; line-height: 1.1; color: #233b2f; font-weight: 800; letter-spacing: 0.2px; }
+.pending-count { margin: 6px 0 10px; font-size: 18px; line-height: 1.1; color: #233b2f; font-weight: 800; letter-spacing: 0.2px; transition: color 0.18s ease, text-shadow 0.18s ease; }
+.pending-count.pending-active { color: #3a7b4f; text-shadow: 0 0 18px rgba(88, 129, 87, 0.18); }
 .inline-check { display:flex; align-items:center; gap:8px; margin: 6px 0; font-size:14px; color:#20392d; font-weight: 700; }
 .inline-check input[type="checkbox"] { width:auto; margin:0; accent-color:#3a5a40; }
 .quick-inline-check { margin-top: 8px; }
@@ -231,6 +232,7 @@ let dt = new DataTransfer();
 
 function refreshPending() {
   pendingCount.textContent = `Pending selection: ${dt.files.length} file(s)`;
+  pendingCount.classList.toggle("pending-active", dt.files.length > 0);
 }
 
 function addFiles(fileList) {

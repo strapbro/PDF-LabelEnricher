@@ -134,6 +134,12 @@ def _settings_changed_since_latest_batch() -> bool:
         return False
 
 
+def _safe_items_mtime_iso() -> str:
+    try:
+        return datetime.fromtimestamp(settings.items_csv_path.stat().st_mtime).isoformat()
+    except Exception:
+        return ""
+
 def _items_link_targets(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
@@ -716,8 +722,14 @@ def _detect_line_layout_mode(field_order_csv: str, inline_fields_csv: str, line_
     fo = (field_order_csv or "").replace(" ", "").lower()
     inf = (inline_fields_csv or "").replace(" ", "").lower()
     lg = (line_groups_csv or "").replace(" ", "").lower()
+    if lg == "qty,label,location":
+        return "qty_label_loc_inline"
     if lg == "qty,label;total,location":
         return "qty_label_then_total_loc"
+    if lg == "label,qty,total":
+        return "label_qty_total_inline"
+    if lg == "location,label,qty,total":
+        return "location_label_qty_total_inline"
     if fo == "label,qty,total,location,title" and inf == "label,qty,total":
         return "label_qty_total_inline"
     if fo == "location,label,qty,total,title" and inf == "location,label,qty,total":
@@ -727,17 +739,27 @@ def _detect_line_layout_mode(field_order_csv: str, inline_fields_csv: str, line_
     return "custom"
 
 
+
 def _line_groups_for_mode(mode: str) -> str:
     m = (mode or "").strip().lower()
+    if m == "qty_label_loc_inline":
+        return "qty,label,location"
     if m == "qty_label_then_total_loc":
         return "qty,label;total,location"
+    if m == "label_qty_total_inline":
+        return "label,qty,total"
+    if m == "location_label_qty_total_inline":
+        return "location,label,qty,total"
     return ""
+
 
 
 def _apply_line_layout_mode(line_layout_mode: str, field_order_csv: str, inline_fields_csv: str) -> tuple[str, str]:
     mode = (line_layout_mode or "custom").strip().lower()
     if mode == "stacked":
         return "label,qty,total,location,title", ""
+    if mode == "qty_label_loc_inline":
+        return "qty,label,location,total,title", ""
     if mode == "label_qty_total_inline":
         return "label,qty,total,location,title", "label,qty,total"
     if mode == "location_label_qty_total_inline":
@@ -745,6 +767,7 @@ def _apply_line_layout_mode(line_layout_mode: str, field_order_csv: str, inline_
     if mode == "qty_label_then_total_loc":
         return "qty,label,total,location,title", ""
     return field_order_csv, inline_fields_csv
+
 
 
 def _layout_ui_defaults() -> dict[str, Any]:
@@ -766,6 +789,12 @@ def _layout_ui_defaults() -> dict[str, Any]:
     if margin_direction == "left_right":
         strip_thickness = int(layout.get("margin_box_width", strip_thickness))
 
+    output_sort = settings.config.get("output_sort", {})
+    enabled_fields = output_sort.get("enabled_fields", {}) if isinstance(output_sort.get("enabled_fields", {}), dict) else {}
+    directions = output_sort.get("directions", {}) if isinstance(output_sort.get("directions", {}), dict) else {}
+    priorities = output_sort.get("priority_fields", ["label", "location", "qty", "item_key"])
+    priorities = priorities if isinstance(priorities, list) else ["label", "location", "qty", "item_key"]
+
     return {
         "margin_direction": margin_direction,
         "margin_mode": "both" if str(layout.get("overflow_mode", "backside")) == "secondary_margin" else "single",
@@ -779,23 +808,26 @@ def _layout_ui_defaults() -> dict[str, Any]:
         "line_layout_mode": _detect_line_layout_mode(field_order_csv, inline_fields_csv, line_groups_csv),
         "field_order_csv": field_order_csv,
         "inline_fields_csv": inline_fields_csv,
+        "line_groups_csv": line_groups_csv,
         "inline_separator": str(layout.get("inline_separator", " | ")),
         "show_field_labels": bool(layout.get("show_field_labels", True)),
         "page_mode": str(layout.get("page_mode", "half_sheet_top")),
         "archive_retention_days": int(settings.config.get("admin", {}).get("archive_retention_days", 14)),
-        "output_sort_mode": str(settings.config.get("output_sort", {}).get("mode", "processed")),
-        "sort_priority_1": str((settings.config.get("output_sort", {}).get("priority_fields", ["label", "location", "qty", "item_key"]) + ["", "", "", ""])[0]),
-        "sort_priority_2": str((settings.config.get("output_sort", {}).get("priority_fields", ["label", "location", "qty", "item_key"]) + ["", "", "", ""])[1]),
-        "sort_priority_3": str((settings.config.get("output_sort", {}).get("priority_fields", ["label", "location", "qty", "item_key"]) + ["", "", "", ""])[2]),
-        "sort_priority_4": str((settings.config.get("output_sort", {}).get("priority_fields", ["label", "location", "qty", "item_key"]) + ["", "", "", ""])[3]),
-        "sort_enable_label": bool(settings.config.get("output_sort", {}).get("enabled_fields", {}).get("label", True)),
-        "sort_enable_qty": bool(settings.config.get("output_sort", {}).get("enabled_fields", {}).get("qty", False)),
-        "sort_enable_item_key": bool(settings.config.get("output_sort", {}).get("enabled_fields", {}).get("item_key", False)),
-        "sort_enable_location": bool(settings.config.get("output_sort", {}).get("enabled_fields", {}).get("location", False)),
-        "sort_dir_label": str(settings.config.get("output_sort", {}).get("directions", {}).get("label", "asc")),
-        "sort_dir_qty": str(settings.config.get("output_sort", {}).get("directions", {}).get("qty", "asc")),
-        "sort_dir_item_key": str(settings.config.get("output_sort", {}).get("directions", {}).get("item_key", "asc")),
-        "sort_dir_location": str(settings.config.get("output_sort", {}).get("directions", {}).get("location", "asc")),
+        "output_sort_mode": str(output_sort.get("mode", "processed")),
+        "sort_priority_1": str((priorities + ["", "", "", ""])[0]),
+        "sort_priority_2": str((priorities + ["", "", "", ""])[1]),
+        "sort_priority_3": str((priorities + ["", "", "", ""])[2]),
+        "sort_priority_4": str((priorities + ["", "", "", ""])[3]),
+        "sort_enable_label": bool(enabled_fields.get("label", True)),
+        "sort_enable_qty": bool(enabled_fields.get("qty", False)),
+        "sort_enable_item_key": bool(enabled_fields.get("item_key", False)),
+        "sort_enable_location": bool(enabled_fields.get("location", False)),
+        "sort_enable_carrier": bool(enabled_fields.get("carrier", False)),
+        "sort_dir_label": str(directions.get("label", "asc")),
+        "sort_dir_qty": str(directions.get("qty", "asc")),
+        "sort_dir_item_key": str(directions.get("item_key", "asc")),
+        "sort_dir_location": str(directions.get("location", "asc")),
+        "sort_dir_carrier": str(directions.get("carrier", "asc")),
     }
 
 
@@ -812,6 +844,7 @@ def _build_preview_config(
     line_layout_mode: str,
     field_order_csv: str,
     inline_fields_csv: str,
+    line_groups_csv: str,
     inline_separator: str,
     show_field_labels: bool,
     page_mode: str,
@@ -824,10 +857,12 @@ def _build_preview_config(
     sort_enable_qty: bool = False,
     sort_enable_item_key: bool = False,
     sort_enable_location: bool = False,
+    sort_enable_carrier: bool = False,
     sort_dir_label: str = "asc",
     sort_dir_qty: str = "asc",
     sort_dir_item_key: str = "asc",
     sort_dir_location: str = "asc",
+    sort_dir_carrier: str = "asc",
 ) -> dict[str, Any]:
     cfg = copy.deepcopy(settings.config)
     layout = cfg.setdefault("print_layout", {})
@@ -854,12 +889,13 @@ def _build_preview_config(
         layout["margin_box_height"] = int(strip_thickness)
 
     field_order_csv, inline_fields_csv = _apply_line_layout_mode(line_layout_mode, field_order_csv, inline_fields_csv)
+    effective_line_groups = (line_groups_csv or "").strip() if (line_layout_mode or "").strip().lower() == "custom" else _line_groups_for_mode(line_layout_mode)
     layout["field_order"] = [x.strip() for x in (field_order_csv or "").split(",") if x.strip()]
     layout["inline_fields_csv"] = inline_fields_csv
-    layout["line_groups_csv"] = _line_groups_for_mode(line_layout_mode)
+    layout["line_groups_csv"] = effective_line_groups
     layout["overflow_mode"] = "secondary_margin" if margin_mode == "both" else "backside"
 
-    allowed = {"label", "qty", "item_key", "location"}
+    allowed = {"label", "qty", "item_key", "location", "carrier"}
     raw_priorities = [sort_priority_1, sort_priority_2, sort_priority_3, sort_priority_4]
     priorities: list[str] = []
     for f in raw_priorities:
@@ -877,12 +913,14 @@ def _build_preview_config(
             "qty": bool(sort_enable_qty),
             "item_key": bool(sort_enable_item_key),
             "location": bool(sort_enable_location),
+            "carrier": bool(sort_enable_carrier),
         },
         "directions": {
             "label": "desc" if str(sort_dir_label).lower() == "desc" else "asc",
             "qty": "desc" if str(sort_dir_qty).lower() == "desc" else "asc",
             "item_key": "desc" if str(sort_dir_item_key).lower() == "desc" else "asc",
             "location": "desc" if str(sort_dir_location).lower() == "desc" else "asc",
+            "carrier": "desc" if str(sort_dir_carrier).lower() == "desc" else "asc",
         },
     }
     return cfg
@@ -1126,6 +1164,8 @@ def create_app() -> FastAPI:
             snap = batch_manager.latest_batch_snapshot()
             latest = Path(snap["batch_dir"]) if isinstance(snap, dict) and snap.get("batch_dir") else settings.processed_root_folder
             ok = settings.open_folder(latest)
+        elif target == "app_root":
+            ok = settings.open_folder(settings.base_dir)
 
         if ok:
             return RedirectResponse(url="/?msg=Opened+folder", status_code=303)
@@ -1165,6 +1205,7 @@ def create_app() -> FastAPI:
         line_layout_mode: str = Query("qty_label_loc_inline"),
         field_order_csv: str = Query("label,qty,total,location,title"),
         inline_fields_csv: str = Query("qty,label,location"),
+        line_groups_csv: str = Query(""),
         inline_separator: str = Query(" | "),
         show_field_labels: str | None = Query("1"),
         page_mode: str = Query("half_sheet_top"),
@@ -1186,13 +1227,15 @@ def create_app() -> FastAPI:
             line_layout_mode=line_layout_mode,
             field_order_csv=field_order_csv,
             inline_fields_csv=inline_fields_csv,
+            line_groups_csv=line_groups_csv,
             inline_separator=inline_separator,
             show_field_labels=_parse_bool(show_field_labels, True),
             page_mode=page_mode,
         )
 
         field_order_csv, inline_fields_csv = _apply_line_layout_mode(line_layout_mode, field_order_csv, inline_fields_csv)
-        lines = _sample_lines_for_order(field_order_csv, inline_fields_csv, _parse_bool(show_field_labels, True), inline_separator, _line_groups_for_mode(line_layout_mode))
+        effective_line_groups = (line_groups_csv or "").strip() if (line_layout_mode or "").strip().lower() == "custom" else _line_groups_for_mode(line_layout_mode)
+        lines = _sample_lines_for_order(field_order_csv, inline_fields_csv, _parse_bool(show_field_labels, True), inline_separator, effective_line_groups)
         out_pdf = settings.processed_root_folder / "_live_preview.pdf"
 
         try:
@@ -1237,11 +1280,11 @@ def create_app() -> FastAPI:
     def items_page(request: Request, msg: str = ""):
         rows = _rows_with_keys(item_db.load_rows())
         staged_sync = _load_items_sync_stage()
-        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "items", "label_hints": _load_label_hints(), "staged_sync": staged_sync})
+        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "items", "label_hints": _load_label_hints(), "staged_sync": staged_sync, "app_root_path": str(settings.base_dir), "items_csv_mtime_iso": _safe_items_mtime_iso(), "items_csv_path": str(settings.items_csv_path)})
     @app.get("/items/review", response_class=HTMLResponse)
     def items_review_page(request: Request, msg: str = ""):
         rows = _rows_with_keys([r for r in item_db.load_rows() if str(r.get("needs_review", "0")).strip() == "1"])
-        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "review", "label_hints": _load_label_hints()})
+        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "review", "label_hints": _load_label_hints(), "app_root_path": str(settings.base_dir), "items_csv_mtime_iso": _safe_items_mtime_iso(), "items_csv_path": str(settings.items_csv_path)})
 
     @app.post("/items/save")
     async def items_save(request: Request):
@@ -1289,6 +1332,35 @@ def create_app() -> FastAPI:
             return RedirectResponse(url=f"/items?msg=Cleared+{cleared}+needs-review+item(s)", status_code=303)
         return RedirectResponse(url=f"/?msg=Cleared+{cleared}+needs-review+item(s)", status_code=303)
 
+    @app.post("/items/replace")
+    async def items_replace_items_csv(items_csv_file: UploadFile = File(...)):
+        filename = Path(str(items_csv_file.filename or "items.csv")).name
+        suffix = Path(filename).suffix.lower()
+        if suffix not in (".csv", ".txt", ".tsv"):
+            return RedirectResponse(url="/items?msg=Upload+a+CSV/TXT/TSV+file+to+replace+items.csv", status_code=303)
+
+        temp = settings.incoming_batch_folder / f"_items_replace_{filename}"
+        with temp.open("wb") as f:
+            shutil.copyfileobj(items_csv_file.file, f)
+
+        backup = item_db.create_backup_now()
+        try:
+            shutil.copyfile(temp, settings.items_csv_path)
+            item_db.load_rows()
+            backup_name = backup.name if backup else "no backup"
+            msg = quote_plus(f"Replaced items.csv with {filename}. Previous file backed up as {backup_name}.")
+        except PermissionError:
+            msg = "Could+not+replace+items.csv.+Please+close+items.csv+in+Excel+and+try+again"
+        except OSError as exc:
+            msg = quote_plus(f"Could not replace items.csv: {type(exc).__name__}")
+        except Exception as exc:
+            msg = quote_plus(f"Could not replace items.csv: {type(exc).__name__}")
+        finally:
+            try:
+                temp.unlink(missing_ok=True)
+            except Exception:
+                pass
+        return RedirectResponse(url=f"/items?msg={msg}", status_code=303)
     @app.post("/items/sync")
     async def items_sync(master_csv: UploadFile = File(...)):
         temp = settings.incoming_batch_folder / f"_sync_{master_csv.filename}"
@@ -1858,6 +1930,7 @@ def create_app() -> FastAPI:
         line_layout_mode: str = Form("qty_label_loc_inline"),
         field_order_csv: str = Form("label,qty,total,location,title"),
         inline_fields_csv: str = Form("qty,label,location"),
+        line_groups_csv: str = Form(""),
         inline_separator: str = Form(" | "),
         show_field_labels: str | None = Form(None),
         page_mode: str = Form("half_sheet_top"),
@@ -1871,10 +1944,12 @@ def create_app() -> FastAPI:
         sort_enable_qty: str | None = Form(None),
         sort_enable_item_key: str | None = Form(None),
         sort_enable_location: str | None = Form(None),
+        sort_enable_carrier: str | None = Form(None),
         sort_dir_label: str = Form("asc"),
         sort_dir_qty: str = Form("asc"),
         sort_dir_item_key: str = Form("asc"),
         sort_dir_location: str = Form("asc"),
+        sort_dir_carrier: str = Form("asc"),
     ):
         cfg = _build_preview_config(
             margin_direction=margin_direction,
@@ -1889,6 +1964,7 @@ def create_app() -> FastAPI:
             line_layout_mode=line_layout_mode,
             field_order_csv=field_order_csv,
             inline_fields_csv=inline_fields_csv,
+            line_groups_csv=line_groups_csv,
             inline_separator=inline_separator,
             show_field_labels=bool(show_field_labels),
             page_mode=page_mode,
@@ -1901,10 +1977,12 @@ def create_app() -> FastAPI:
             sort_enable_qty=bool(sort_enable_qty),
             sort_enable_item_key=bool(sort_enable_item_key),
             sort_enable_location=bool(sort_enable_location),
+            sort_enable_carrier=bool(sort_enable_carrier),
             sort_dir_label=sort_dir_label,
             sort_dir_qty=sort_dir_qty,
             sort_dir_item_key=sort_dir_item_key,
             sort_dir_location=sort_dir_location,
+            sort_dir_carrier=sort_dir_carrier,
         )
         cfg["admin"]["archive_retention_days"] = int(archive_retention_days)
         settings.save(cfg)
@@ -1948,5 +2026,11 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+
+
+
+
 
 

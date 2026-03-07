@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <section class="card">
   <h2>Manual Entry (One-Off or Small Batch)</h2>
@@ -206,7 +206,8 @@
   color: #fff;
   font-weight: 600;
 }
-.pending-count { margin: 8px 0; font-size: 13px; color: #444; }
+.pending-count { margin: 8px 0; font-size: 13px; color: #444; transition: color 0.18s ease, text-shadow 0.18s ease; }
+.pending-count.pending-active { color: #3a7b4f; text-shadow: 0 0 18px rgba(88, 129, 87, 0.18); }
 .manual-paste {
   width: 100%;
   min-height: 260px;
@@ -234,6 +235,7 @@
 
   function refreshPending() {
     pendingCount.textContent = `Pending selection: ${dt.files.length} file(s)`;
+    pendingCount.classList.toggle("pending-active", dt.files.length > 0);
   }
 
   function addFiles(fileList) {
@@ -314,6 +316,3 @@
 })();
 </script>
 {% endblock %}
-
-
-
