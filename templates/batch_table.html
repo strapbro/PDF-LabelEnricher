@@ -1,0 +1,168 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>{{ tr("Batch Spot Check Table") }}</h2>
+  <div class="batch-top-row">
+    <form action="/batch-table" method="get" class="batch-picker">
+      <label>{{ tr("Batch") }}
+        <select name="batch" onchange="this.form.submit()">
+          {% for b in batch_options %}
+          <option value="{{ b.name }}" {% if b.name == selected_batch %}selected{% endif %}>{{ b.name }} ({{ b.timestamp }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <noscript><button class="btn btn-secondary" type="submit">{{ tr("Load") }}</button></noscript>
+    </form>
+    <div class="batch-actions">
+      <input id="batchFilter" type="text" placeholder="{{ tr('Filter order/name/item/tracking') }}">
+      <button id="openOrderTabsBtn" class="btn btn-primary" type="button">{{ tr("Open Order Tabs (Current Sort)") }}</button>
+    </div>
+  </div>
+
+  <div class="batch-summary">
+    <span><strong>{{ tr("Matched:") }}</strong> {{ summary.matched or 0 }}</span>
+    <span><strong>{{ tr("Unprocessed:") }}</strong> {{ summary.unresolved or 0 }}</span>
+    <span><strong>{{ tr("Errors:") }}</strong> {{ summary.errors or 0 }}</span>
+    <span><strong>{{ tr("Default View:") }}</strong> {{ tr("Processed order") }}</span>
+  </div>
+</section>
+
+<section class="card">
+  <div class="items-table-wrap">
+    <table id="batchTable" class="items-table mode-compact">
+      <thead>
+        <tr>
+          <th data-sort="text">{{ tr("Order #") }}</th>
+          <th data-sort="num">{{ tr("Processed #") }}</th>
+          <th data-sort="text">{{ tr("Platform") }}</th>
+          <th data-sort="text">{{ tr("Name") }}</th>
+          <th data-sort="text">{{ tr("ZIP") }}</th>
+          <th data-sort="text">{{ tr("Tracking") }}</th>
+          <th data-sort="text">{{ tr("Carrier") }}</th>
+          <th data-sort="num">{{ tr("Qty") }}</th>
+          <th data-sort="num">{{ tr("Total") }}</th>
+          <th data-sort="text">{{ tr("SKU / Item # / ASIN") }}</th>
+          <th data-sort="text">{{ tr("Item Title(s)") }}</th>
+          <th data-sort="text">{{ tr("Open Order") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr data-order-link="{{ r.order_link }}">
+          <td>{{ r.order_id }}</td>
+          <td>{{ r.process_index }}</td>
+          <td>{{ r.platform }}</td>
+          <td>{{ r.name }}</td>
+          <td>{{ r.zip }}</td>
+          <td>{{ r.tracking }}</td>
+          <td>{{ r.carrier }}</td>
+          <td>{{ r.qty }}</td>
+          <td>{% if r.total_paid %}${{ r.total_paid }}{% endif %}</td>
+          <td>{{ r.item_keys }}</td>
+          <td>{{ r.item_titles }}</td>
+          <td>{% if r.order_link %}<a href="{{ r.order_link }}" target="_blank" rel="noopener">{{ tr("Open") }}</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<style>
+.batch-top-row { display:flex; justify-content:space-between; gap:12px; align-items:end; flex-wrap:wrap; }
+.batch-picker label { font-weight:700; color:#2e4637; display:flex; flex-direction:column; gap:6px; }
+.batch-picker select { min-width: 340px; }
+.batch-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.batch-actions input { min-width: 280px; }
+.batch-summary { margin-top: 10px; display:flex; gap:16px; flex-wrap:wrap; color:#385244; font-size:13px; }
+</style>
+
+<script>
+(function(){
+  const table = document.getElementById('batchTable');
+  const filter = document.getElementById('batchFilter');
+  const openBtn = document.getElementById('openOrderTabsBtn');
+  const T = {
+    noLinks: {{ tr("No order links available in current view.")|tojson }},
+    blocked: {{ tr("Opened {opened}/{total}. Your browser blocked some popups.", opened="__OPENED__", total="__TOTAL__")|tojson }},
+  };
+  function fmt(template, vars) {
+    let out = String(template || '');
+    Object.keys(vars || {}).forEach((key) => {
+      out = out.replaceAll(`__${key.toUpperCase()}__`, vars[key]);
+    });
+    return out;
+  }
+  if (!table) return;
+
+  const tbody = table.querySelector('tbody');
+  const headers = Array.from(table.querySelectorAll('thead th'));
+  let sortCol = 1;
+  let sortAsc = true;
+
+  function textValue(td){ return (td.textContent || '').trim().toLowerCase(); }
+  function numValue(td){
+    const raw = (td.textContent || '').replace(/[^0-9.\-]/g, '');
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function sortTable(col, asc){
+    const type = headers[col].dataset.sort || 'text';
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort((a,b)=>{
+      const av = a.children[col];
+      const bv = b.children[col];
+      let cmp = 0;
+      if (type === 'num') cmp = numValue(av) - numValue(bv);
+      else cmp = textValue(av).localeCompare(textValue(bv));
+      return asc ? cmp : -cmp;
+    });
+    rows.forEach(r=>tbody.appendChild(r));
+  }
+
+  headers.forEach((th, idx)=>{
+    th.style.cursor = 'pointer';
+    th.addEventListener('click', ()=>{
+      if (sortCol === idx) sortAsc = !sortAsc;
+      else { sortCol = idx; sortAsc = true; }
+      sortTable(sortCol, sortAsc);
+    });
+  });
+
+  function applyFilter(){
+    const q = (filter?.value || '').trim().toLowerCase();
+    Array.from(tbody.querySelectorAll('tr')).forEach((tr)=>{
+      const txt = (tr.textContent || '').toLowerCase();
+      tr.style.display = (!q || txt.includes(q)) ? '' : 'none';
+    });
+  }
+
+  filter?.addEventListener('input', applyFilter);
+
+  openBtn?.addEventListener('click', ()=>{
+    const links = Array.from(tbody.querySelectorAll('tr'))
+      .filter(tr => tr.style.display !== 'none')
+      .map(tr => tr.getAttribute('data-order-link') || '')
+      .filter(Boolean);
+
+    if (!links.length) {
+      showAppAlert(T.noLinks);
+      return;
+    }
+
+    let opened = 0;
+    links.forEach((url)=>{
+      const w = window.open(url, '_blank', 'noopener');
+      if (w) opened += 1;
+    });
+
+    if (opened < links.length) {
+      showAppAlert(fmt(T.blocked, { opened: String(opened), total: String(links.length) }));
+    }
+  });
+
+  sortTable(sortCol, sortAsc);
+})();
+</script>
+{% endblock %}

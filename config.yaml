@@ -1,5 +1,10 @@
+ui:
+  comic_mode: false
+  language_mode: en
+  font_mode: default
 paths:
   incoming_batch_folder: incoming/batch
+  manual_incoming_folder: incoming/manual
   processed_root_folder: processed
   items_csv_path: items.csv
   logs_folder: logs
@@ -26,8 +31,11 @@ print_layout:
   rotated_primary_preset: left_margin
   rotated_secondary_preset: right_margin
   font_name: Helvetica-Bold
-  font_size: 10
-  line_spacing: 10
+  comic_mode: false
+  font_size: 8
+  backside_font_size: 20
+  line_spacing: 8
+  backside_line_spacing: 24
   max_lines: 24
   max_title_length: 120
   show_field_labels: true
@@ -42,9 +50,9 @@ print_layout:
   - total
   - location
   - title
-  inline_fields_csv: qty,label,location
+  inline_fields_csv: ''
   inline_separator: ' | '
-  line_groups_csv: qty,label;total,location;title
+  line_groups_csv: qty,label;total,location
 new_item_defaults:
   show_location: true
   show_label: true
@@ -57,21 +65,21 @@ csv_mapping_cache:
   enable: true
   mapping_file: csv_mapping.json
 output_sort:
-  mode: custom
+  mode: processed
   priority_fields:
-  - carrier
-  - location
   - label
+  - location
   - qty
+  - item_key
   enabled_fields:
-    label: true
-    qty: true
+    label: false
+    qty: false
     item_key: false
-    location: true
-    carrier: true
+    location: false
+    carrier: false
   directions:
     label: asc
-    qty: desc
+    qty: asc
     item_key: asc
     location: asc
     carrier: asc

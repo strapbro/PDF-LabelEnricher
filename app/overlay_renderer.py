@@ -1,15 +1,50 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import io
+import os
 from pathlib import Path
 from typing import Any
 
 from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from pypdf import PdfReader
 
 
 INLINE_LOCK_PREFIX = "@@INLINE@@ "
+
+_COMIC_FONT_NAME = "ComicSansMS"
+_COMIC_FONT_TRIED = False
+_COMIC_FONT_OK = False
+
+def _ensure_comic_font_registered() -> bool:
+    global _COMIC_FONT_TRIED, _COMIC_FONT_OK
+    if _COMIC_FONT_TRIED:
+        return _COMIC_FONT_OK
+    _COMIC_FONT_TRIED = True
+    candidates = [
+        Path(os.environ.get("WINDIR", "C:\\Windows")) / "Fonts" / "comic.ttf",
+        Path(os.environ.get("WINDIR", "C:\\Windows")) / "Fonts" / "Comic Sans MS.ttf",
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            pdfmetrics.registerFont(TTFont(_COMIC_FONT_NAME, str(path)))
+            _COMIC_FONT_OK = True
+            return True
+        except Exception:
+            continue
+    _COMIC_FONT_OK = False
+    return False
+
+def _resolve_font_name(layout: dict[str, Any]) -> str:
+    requested = str(layout.get("font_name", "Helvetica-Bold"))
+    if not bool(layout.get("comic_mode", False)):
+        return requested
+    if _ensure_comic_font_registered():
+        return _COMIC_FONT_NAME
+    return requested
 
 
 def _strip_emph_markers(text: str) -> tuple[str, bool]:
@@ -360,9 +395,7 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
             if grp_parts:
                 lines.append(INLINE_LOCK_PREFIX + inline_sep.join(grp_parts))
 
-        remainder = [chunks[i] for i in range(len(chunks)) if i not in used_idx]
-        if remainder:
-            _emit_with_inline(remainder)
+        # In custom line-builder mode, fields not placed into a line are intentionally omitted.
 
     for idx, item in enumerate(items, start=1):
         title = (item.get("title") or "").strip()
@@ -460,7 +493,7 @@ def create_overlay_pdf(
     c = canvas.Canvas(buf, pagesize=(page_w, page_h))
 
     layout = config["print_layout"]
-    font_name = str(layout.get("font_name", "Helvetica-Bold"))
+    font_name = _resolve_font_name(layout)
     font_size = int(layout.get("font_size", 16))
     line_spacing = int(layout.get("line_spacing", 20))
     wrap_mode = str(layout.get("wrap_mode", "truncate"))
@@ -515,14 +548,67 @@ def create_overlay_pdf(
     return buf.getvalue(), wrapped_lines[len(drawn) :]
 
 
+def create_info_panel_overlay_pdf(
+    page_w: float,
+    page_h: float,
+    lines: list[str],
+    config: dict[str, Any],
+    draw_rect: bool = False,
+) -> tuple[bytes, list[str]]:
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+
+    layout = config["print_layout"]
+    font_name = _resolve_font_name(layout)
+    font_size = int(layout.get("backside_font_size", layout.get("font_size", 16)))
+    line_spacing = int(layout.get("backside_line_spacing", layout.get("line_spacing", 20)))
+    wrap_mode = str(layout.get("wrap_mode", "truncate"))
+    text_align = str(layout.get("text_align", "left"))
+    edge_x = float(layout.get("edge_inset_x", 8))
+    edge_y = float(layout.get("edge_inset_y", 24))
+    page_mode = str(layout.get("page_mode", "half_sheet_top"))
+
+    if page_mode == "half_sheet_top":
+        region_y0 = 0.0
+        region_y1 = page_h / 2.0
+    elif page_mode == "half_sheet_bottom":
+        region_y0 = page_h / 2.0
+        region_y1 = page_h
+    else:
+        region_y0 = 0.0
+        region_y1 = page_h
+
+    x = edge_x
+    y = region_y0 + edge_y
+    w = max(80.0, page_w - (2 * edge_x))
+    h = max(24.0, (region_y1 - region_y0) - (2 * edge_y))
+
+    if draw_rect:
+        c.setStrokeColorRGB(1, 0, 0)
+        c.rect(x, y, w, h, stroke=1, fill=0)
+
+    wrapped_lines = _expand_lines(lines, font_name, font_size, w, wrap_mode)
+    c.setFont(font_name, font_size)
+    cap_by_height = max(1, int(h // max(1, line_spacing)))
+    drawn = wrapped_lines[:cap_by_height]
+    current_y = y + h - font_size
+    for line in drawn:
+        _draw_text_line(c, x, current_y, w, line, text_align, font_name, font_size)
+        current_y -= line_spacing
+        if current_y < y:
+            break
+
+    c.save()
+    return buf.getvalue(), wrapped_lines[len(drawn):]
+
 def create_backside_pdf(page_w: float, page_h: float, lines: list[str], config: dict[str, Any]) -> bytes:
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(page_w, page_h))
 
     layout = config["print_layout"]
-    font_name = str(layout.get("font_name", "Helvetica-Bold"))
-    font_size = int(layout.get("font_size", 16))
-    line_spacing = int(layout.get("line_spacing", 20))
+    font_name = _resolve_font_name(layout)
+    font_size = int(layout.get("backside_font_size", layout.get("font_size", 16)))
+    line_spacing = int(layout.get("backside_line_spacing", layout.get("line_spacing", 20)))
     wrap_mode = str(layout.get("wrap_mode", "word"))
     text_align = str(layout.get("text_align", "left"))
     orientation = str(layout.get("orientation_mode", "normal"))
@@ -576,6 +662,8 @@ def get_page_size(pdf_path: Path) -> tuple[float, float]:
     reader = PdfReader(str(pdf_path))
     page = reader.pages[0]
     return float(page.mediabox.width), float(page.mediabox.height)
+
+
 
 
 

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import csv
 import json
@@ -25,6 +25,7 @@ FIELDS = [
     "item_id",  # legacy compatibility column
     "item_title",
     "custom_label",
+    "variation_options",
     "location",
     "linked_platform",
     "linked_id_type",
@@ -49,6 +50,7 @@ class ItemRecord:
     item_id: str = ""
     item_title: str = ""
     custom_label: str = ""
+    variation_options: str = ""
     location: str = ""
     linked_platform: str = ""
     linked_id_type: str = ""
@@ -72,6 +74,7 @@ class ItemRecord:
                 "item_id": self.item_id,
                 "item_title": self.item_title,
                 "custom_label": self.custom_label,
+                "variation_options": self.variation_options,
                 "location": self.location,
                 "linked_platform": self.linked_platform,
                 "linked_id_type": self.linked_id_type,
@@ -120,6 +123,7 @@ def _normalize_row(row: dict[str, str]) -> dict[str, str]:
                 clean["amazon_sku"] = legacy_id
 
     clean["amazon_asin"] = clean.get("amazon_asin", "").upper()
+    clean["variation_options"] = (clean.get("variation_options", "") or "").strip()
 
     lp = (clean.get("linked_platform", "") or "").strip().lower()
     if lp not in ("", "amazon", "ebay"):
@@ -180,6 +184,8 @@ def _merge_two_rows(base: dict[str, str], other: dict[str, str]) -> dict[str, st
     for key in ["custom_label", "location", "linked_platform", "linked_id_type", "linked_id_value", "needs_review_reason"]:
         if not out.get(key) and other.get(key):
             out[key] = other[key]
+    if not out.get("variation_options") and other.get("variation_options"):
+        out["variation_options"] = other["variation_options"]
 
     # Prefer Amazon title if either row has Amazon IDs.
     out_has_amz = bool(out.get("amazon_sku") or out.get("amazon_asin"))
@@ -535,6 +541,7 @@ class ItemDB:
                 row["amazon_asin"] = form.get(prefix + "_amazon_asin", row.get("amazon_asin", "")).strip().upper()
                 row["item_title"] = form.get(prefix + "_item_title", row.get("item_title", "")).strip()
                 row["custom_label"] = form.get(prefix + "_custom_label", row.get("custom_label", "")).strip()
+                row["variation_options"] = form.get(prefix + "_variation_options", row.get("variation_options", "")).strip()
                 row["location"] = form.get(prefix + "_location", row.get("location", "")).strip()
                 row["linked_platform"] = form.get(prefix + "_linked_platform", row.get("linked_platform", "")).strip().lower()
                 row["linked_id_type"] = form.get(prefix + "_linked_id_type", row.get("linked_id_type", "")).strip().lower()
@@ -568,6 +575,7 @@ class ItemDB:
                 row["amazon_asin"] = form.get(prefix + "amazon_asin", row.get("amazon_asin", "")).strip().upper()
                 row["item_title"] = form.get(prefix + "item_title", row.get("item_title", "")).strip()
                 row["custom_label"] = form.get(prefix + "custom_label", row.get("custom_label", "")).strip()
+                row["variation_options"] = form.get(prefix + "variation_options", row.get("variation_options", "")).strip()
                 row["location"] = form.get(prefix + "location", row.get("location", "")).strip()
                 row["linked_platform"] = form.get(prefix + "linked_platform", row.get("linked_platform", "")).strip().lower()
                 row["linked_id_type"] = form.get(prefix + "linked_id_type", row.get("linked_id_type", "")).strip().lower()
@@ -1018,6 +1026,35 @@ class ItemDB:
             self.save_rows(rows)
         return cleared
 
+    def _is_auto_added_review_row(self, row: dict[str, str]) -> bool:
+        reason = str(row.get("needs_review_reason", "") or "").strip().lower()
+        return reason.startswith("auto-added from batch")
+
+    def auto_added_review_count(self) -> int:
+        return sum(1 for row in self.load_rows() if str(row.get("needs_review", "0")).strip() == "1" and self._is_auto_added_review_row(row))
+
+    def clear_needs_review_with_mode(self, mode: str = "clear_flags") -> dict[str, int]:
+        rows = self.load_rows()
+        cleared = 0
+        deleted = 0
+        kept: list[dict[str, str]] = []
+        delete_auto = str(mode or "").strip().lower() == "delete_auto_added"
+
+        for row in rows:
+            if str(row.get("needs_review", "0")).strip() != "1":
+                kept.append(row)
+                continue
+            if delete_auto and self._is_auto_added_review_row(row):
+                deleted += 1
+                continue
+            row["needs_review"] = "0"
+            row["needs_review_reason"] = ""
+            cleared += 1
+            kept.append(row)
+
+        if cleared or deleted:
+            self.save_rows(kept, action=("clear_needs_review_delete_auto" if delete_auto else "clear_needs_review_flags"))
+        return {"cleared": cleared, "deleted": deleted}
 
 
 

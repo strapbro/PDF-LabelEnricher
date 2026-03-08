@@ -1,25 +1,25 @@
 ﻿{% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h2>Items Database Sync + Import</h2>
+  <h2>{{ tr("Items Database Sync + Import") }}</h2>
   <div class="items-top-grid">
     <div class="items-flow-box">
-      <div class="flow-step">Step (1)</div>
-      <div class="flow-title">Replace this PC's main items.csv</div>
-      <div class="flow-sub">Use this only for swapping in a newer <strong>items.csv</strong> from another PC or Drive. This is separate from incoming label/PDF batch files.</div>
+      <div class="flow-step">{{ tr("Step (1)") }}</div>
+      <div class="flow-title">{{ tr("Replace this PC's main items.csv") }}</div>
+      <div class="flow-sub">{{ tr("Use this only for swapping in a newer items.csv from another PC or Drive. This is separate from incoming label/PDF batch files.") }}</div>
       <form id="itemsReplaceForm" class="items-replace-form" action="/items/replace" method="post" enctype="multipart/form-data">
         <input id="itemsReplaceInput" type="file" name="items_csv_file" accept=".csv,.txt,.tsv" required hidden>
         <input id="itemsReplaceLastModified" type="hidden" name="uploaded_last_modified" value="">
         <div id="itemsReplaceDropzone" class="items-replace-dropzone" tabindex="0">
-          <div class="items-replace-title">Drop a replacement items.csv here</div>
-          <div class="items-replace-sub">or click this box to choose a file</div>
-          <div id="itemsReplaceSelected" class="items-replace-selected">Current main file: <strong>{{ items_csv_path }}</strong></div>
+          <div class="items-replace-title">{{ tr("Drop a replacement items.csv here") }}</div>
+          <div class="items-replace-sub">{{ tr("or click this box to choose a file") }}</div>
+          <div id="itemsReplaceSelected" class="items-replace-selected">{{ tr("Current main file: {path}", path=items_csv_path) }}</div>
         </div>
         <div class="items-replace-actions">
-          <button class="btn btn-secondary items-action-btn" type="button" id="itemsReplaceChooseBtn">Choose replacement file</button>
-          <button class="btn btn-primary items-action-btn" type="submit">Replace main items.csv</button>
-          <a class="btn btn-primary items-action-btn" href="/items/export">Download items.csv</a>
-          <button class="btn btn-secondary items-action-btn" type="button" id="openAppRootBtn">Open Label Enricher Folder</button>
+          <button class="btn btn-secondary items-action-btn" type="button" id="itemsReplaceChooseBtn">{{ tr("Choose replacement file") }}</button>
+          <button class="btn btn-primary items-action-btn" type="submit">{{ tr("Replace main items.csv") }}</button>
+          <a class="btn btn-primary items-action-btn" href="/items/export">{{ tr("Download items.csv") }}</a>
+          <button class="btn btn-secondary items-action-btn" type="button" id="openAppRootBtn">{{ tr("Open Label Enricher Folder") }}</button>
         </div>
       </form>
       <form id="openAppRootForm" action="/open" method="post">
@@ -28,47 +28,47 @@
     </div>
 
     <div class="items-flow-box">
-      <div class="flow-step">Step (2)</div>
-      <div class="flow-title">Open your shared Drive/Sheet link</div>
-      <div class="flow-sub">Open the shared location, sort by most recent if needed, then drag <strong>items.csv</strong> between the two windows.</div>
+      <div class="flow-step">{{ tr("Step (2)") }}</div>
+      <div class="flow-title">{{ tr("Open your shared Drive/Sheet link") }}</div>
+      <div class="flow-sub">{{ tr("Open the shared location, sort by most recent if needed, then drag items.csv between the two windows.") }}</div>
       <div class="items-shared-link">
-        <input id="sharedSheetLink" type="text" placeholder="Paste shared Drive/Sheet link here">
-        <button id="saveSharedSheetLink" class="btn btn-secondary items-action-btn" type="button">Save Link</button>
-        <button id="openSharedSheetLink" class="btn btn-primary items-action-btn" type="button">Open Drive Link</button>
+        <input id="sharedSheetLink" type="text" placeholder="{{ tr('Paste shared Drive/Sheet link here') }}">
+        <button id="saveSharedSheetLink" class="btn btn-secondary items-action-btn" type="button">{{ tr("Save Link") }}</button>
+        <button id="openSharedSheetLink" class="btn btn-primary items-action-btn" type="button">{{ tr("Open Drive Link") }}</button>
       </div>
       <ol class="flow-steps-list">
-        <li>If another PC has the newer <strong>items.csv</strong>, open the Drive link there, then bring that file into this PC's Label Enricher folder.</li>
-        <li>After edits on this PC, open the same Drive link and drag this PC's <strong>items.csv</strong> back into Drive so the other PC can use it.</li>
+        <li>{{ tr("If another PC has the newer items.csv, open the Drive link there, then bring that file into this PC's Label Enricher folder.") }}</li>
+        <li>{{ tr("After edits on this PC, open the same Drive link and drag this PC's items.csv back into Drive so the other PC can use it.") }}</li>
       </ol>
     </div>
 
     <div class="items-flow-box">
-      <div class="flow-title">Import / Review Other Item Data</div>
-      <div class="flow-sub">Use these for spreadsheet imports that should merge into the database, not for replacing the whole items.csv file.</div>
+      <div class="flow-title">{{ tr("Stage Import (Review First)") }}</div>
+      <div class="flow-sub">{{ tr("Append/merge extra product info into items.csv safely: stage it, review the diff, then apply.") }}</div>
       <div class="items-actions-stack compact-gap">
-        <form class="items-sync-form" action="/items/sync" method="post" enctype="multipart/form-data">
-          <input type="file" name="master_csv" accept=".csv,.tsv,.txt" required>
-          <button class="btn btn-secondary items-action-btn" type="submit">Import / Re-sync</button>
-        </form>
-        <form class="items-sync-form" action="/items/sync-stage" method="post" enctype="multipart/form-data">
-          <input type="file" name="master_csv_stage" accept=".csv,.tsv,.txt" required>
-          <button class="btn btn-primary items-action-btn" type="submit">Stage Import (Review First)</button>
+        <form id="stageImportForm" class="items-sync-form" action="/items/sync-stage" method="post" enctype="multipart/form-data">
+          <input id="stageImportInput" type="file" name="master_csv_stage" accept=".csv,.tsv,.txt" required hidden>
+          <button class="btn btn-secondary items-action-btn" type="button" id="stageImportChooseBtn">{{ tr("Choose stage import file") }}</button>
+          <span id="stageImportName">{{ tr("No stage import file selected") }}</span>
+          <button class="btn btn-primary items-action-btn" type="submit">{{ tr("Stage Import (Review First)") }}</button>
         </form>
       </div>
     </div>
 
     <div class="items-flow-box">
-      <div class="hint-title">Transitional Label/Location Hints (optional)</div>
-      <div class="hint-sub">Use this for onboarding labels that do not yet have SKU/ASIN/item#. This is separate from Import/Re-sync and from replacing the main items.csv.</div>
+      <div class="hint-title">{{ tr("Transitional Label/Location Hints (optional)") }}</div>
+      <div class="hint-sub">{{ tr("Use this for onboarding labels that do not yet have SKU/ASIN/item#. This is separate from replacing the main items.csv.") }}</div>
       <div class="items-controls hints-actions" style="margin-top:6px;">
-        <form action="/hints/upload" method="post" enctype="multipart/form-data">
+        <form id="itemsHintsForm" action="/hints/upload" method="post" enctype="multipart/form-data">
           <input type="hidden" name="from_page" value="items">
-          <input type="file" name="hints_csv" accept=".csv,.tsv,.txt" required>
-          <button class="btn btn-secondary items-action-btn" type="submit">Upload Label/Location Hints</button>
+          <input id="itemsHintsInput" type="file" name="hints_csv" accept=".csv,.tsv,.txt" required hidden>
+          <button class="btn btn-secondary items-action-btn" type="button" id="itemsHintsChooseBtn">{{ tr("Choose hints file") }}</button>
+          <span id="itemsHintsName">{{ tr("No hints file selected") }}</span>
+          <button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Upload Label/Location Hints") }}</button>
         </form>
-        <form action="/hints/clear" method="post" onsubmit="return confirm('Clear label/location hints file?')">
+        <form action="/hints/clear" method="post" data-confirm="{{ tr('Clear label/location hints file?') }}">
           <input type="hidden" name="from_page" value="items">
-          <button class="btn btn-secondary items-action-btn" type="submit">Clear Hints File</button>
+          <button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Clear Hints File") }}</button>
         </form>
       </div>
     </div>
@@ -77,21 +77,21 @@
   {% if staged_sync and staged_sync.entries %}
   <div class="items-stage-box stage-top-box">
     <div class="items-stage-head">
-      <strong>Staged Import Ready</strong>
-      <span>Total {{ staged_sync.counts.total or 0 }} | New {{ staged_sync.counts.create or 0 }} | Updates {{ staged_sync.counts.update or 0 }} | No change {{ staged_sync.counts.noop or 0 }}</span>
+      <strong>{{ tr("Staged Import Ready") }}</strong>
+      <span>{{ tr("Total {total} | New {new} | Updates {updates} | No change {noop}", total=staged_sync.counts.total or 0, new=staged_sync.counts.create or 0, updates=staged_sync.counts.update or 0, noop=staged_sync.counts.noop or 0) }}</span>
     </div>
     <div class="items-stage-actions">
       <form action="/items/sync-apply" method="post">
-        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" name="only_add_new" value="1"> Only add new rows (skip updates to existing rows)</label>
-        <button class="btn btn-primary items-action-btn" type="submit">Apply Staged Import</button>
+        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" name="only_add_new" value="1"> {{ tr("Only add new rows (skip updates to existing rows)") }}</label>
+        <button class="btn btn-primary items-action-btn" type="submit">{{ tr("Apply Staged Import") }}</button>
       </form>
       <form action="/items/sync-clear" method="post">
-        <button class="btn btn-secondary items-action-btn" type="submit">Clear Staged Import</button>
+        <button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Clear Staged Import") }}</button>
       </form>
     </div>
     <div class="items-stage-list">
       <table class="items-stage-table">
-        <thead><tr><th>Action</th><th>Platform</th><th>ID</th><th>Label</th><th>Location</th><th>Fields Changed</th></tr></thead>
+        <thead><tr><th>{{ tr("Action") }}</th><th>{{ tr("Platform") }}</th><th>{{ tr("ID") }}</th><th>{{ tr("Label") }}</th><th>{{ tr("Location") }}</th><th>{{ tr("Fields Changed") }}</th></tr></thead>
         <tbody>
         {% for e in staged_sync.entries[:40] %}
           <tr>
@@ -108,24 +108,25 @@
     </div>
   </div>
   {% endif %}
-
-  <div class="items-controls items-utility-actions">
-    <form id="itemsBackupForm" action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Create Backup Now</button></form>
-    <form action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">Open Backups Folder</button></form>
-    <form action="/items/clear-needs-review" method="post" onsubmit="return confirm('Clear all items from Needs Review list?')">
+  <div class="items-controls items-utility-actions"> 
+    <form id="itemsBackupForm" action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Create Backup Now") }}</button></form>
+    <form action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Open Backups Folder") }}</button></form>
+    <form action="/items/clear-needs-review" method="post">
       <input type="hidden" name="from_page" value="items">
-      <button class="btn btn-secondary items-action-btn" type="submit">Clear Items Needing Review</button>
+      <input type="hidden" name="mode" value="clear_flags">
+      <button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Clear Items Needing Review") }}</button>
+      {% if auto_added_review_count and auto_added_review_count > 0 %}<div class="flow-sub" style="margin:6px 0 0 0;">{{ tr("Auto-added review rows currently in DB: {count}. Clear can either remove flags or delete those auto-added rows.", count=auto_added_review_count) }}</div>{% endif %}
     </form>
   </div>
 </section><section class="card">
-  <h2>Items</h2>
+  <h2>{{ tr("Items") }}</h2>
   <div class="items-controls">
-    <input id="itemsFilter" type="text" placeholder="Quick filter (SKU, ASIN, title, label, location)">
-    <button id="itemsWidthToggle" class="btn btn-secondary items-action-btn" type="button">Wide View</button>
-    <button id="itemsFilterClear" class="btn btn-secondary items-action-btn" type="button">Clear Filter</button>
+    <input id="itemsFilter" type="text" placeholder="{{ tr('Quick filter (SKU, ASIN, title, label, location)') }}">
+    <button id="itemsWidthToggle" class="btn btn-secondary items-action-btn" type="button">{{ tr("Wide View") }}</button>
+    <button id="itemsFilterClear" class="btn btn-secondary items-action-btn" type="button">{{ tr("Clear Filter") }}</button>
   </div>
-  <p style="margin-top:8px;color:#555;font-size:13px;">Tip: click column headers to sort. Click again to reverse.</p>
-  <p style="margin-top:4px;color:#555;font-size:13px;">Needs Review is a system status for items that require human attention. Use <strong>Clear Needs Review Flags</strong> after you verify/fix them.</p>
+  <p style="margin-top:8px;color:#555;font-size:13px;">{{ tr("Tip: click column headers to sort. Click again to reverse.") }}</p>
+  <p style="margin-top:4px;color:#555;font-size:13px;">{{ tr("Needs Review is a system status for items that require human attention. Use Clear Needs Review Flags after you verify/fix them.") }}</p>
 
   <form action="/items/save" method="post">
     <input type="hidden" name="source_page" value="{{ page_mode or 'items' }}">
@@ -133,20 +134,21 @@
       <table id="itemsTable" class="items-table mode-compact">
         <thead>
           <tr>
-            <th data-sort="text">Platform</th>
-            <th data-sort="text">eBay Item #</th>
-            <th data-sort="text">Amazon SKU</th>
-            <th data-sort="text">Amazon ASIN</th>
-            <th data-sort="text">Item Title</th>
-            <th data-sort="text">Custom Label</th>
-            <th data-sort="text">Location</th>
-            <th data-sort="text">Link Platform</th>
-            <th data-sort="text">Link ID Type</th>
-            <th data-sort="text">Link ID Value</th>
-            <th data-sort="text">Link Preview</th>
-            <th data-sort="text">Status</th>
-            <th data-sort="bool">Show Title</th>
-            <th data-sort="text">Delete Row/Item</th>
+            <th data-sort="text">{{ tr("Platform") }}</th>
+            <th data-sort="text">{{ tr("eBay Item #") }}</th>
+            <th data-sort="text">{{ tr("Amazon SKU") }}</th>
+            <th data-sort="text">{{ tr("Amazon ASIN") }}</th>
+            <th data-sort="text">{{ tr("Item Title") }}</th>
+            <th data-sort="text">{{ tr("Custom Label") }}</th>
+            <th data-sort="text">{{ tr("Variation Options") }}</th>
+            <th data-sort="text">{{ tr("Location") }}</th>
+            <th data-sort="text">{{ tr("Link Platform") }}</th>
+            <th data-sort="text">{{ tr("Link ID Type") }}</th>
+            <th data-sort="text">{{ tr("Link ID Value") }}</th>
+            <th data-sort="text">{{ tr("Link Preview") }}</th>
+            <th data-sort="text">{{ tr("Status") }}</th>
+            <th data-sort="bool">{{ tr("Show Title") }}</th>
+            <th data-sort="text">{{ tr("Delete Row/Item") }}</th>
           </tr>
         </thead>
         <tbody>
@@ -157,38 +159,38 @@
           {% set default_link_platform = row.linked_platform or ('amazon' if has_ebay and not has_amazon else ('ebay' if has_amazon and not has_ebay else '')) %}
           {% set default_link_id_type = row.linked_id_type or ('amazon_sku' if default_link_platform == 'amazon' else ('ebay_item_number' if default_link_platform == 'ebay' else '')) %}
           <tr class="{% if row.needs_review == '1' %}needs-review-row{% endif %}">
-            <input type="hidden" name="row_{{ loop.index0 }}_row_key" value="{{ row._row_key or '' }}">
-            <td>{{ row.platform }}</td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_ebay_item_number" value="{{ row.ebay_item_number or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_sku" value="{{ row.amazon_sku or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_asin" value="{{ row.amazon_asin or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_item_title" value="{{ row.item_title or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}" list="labelHintsList"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"><button type="button" class="copy-btn" title="Copy" aria-label="Copy to clipboard"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><input type="hidden" name="row_{{ loop.index0 }}_row_key" value="{{ row._row_key or '' }}">{% if row.platform == 'amazon' %}{{ tr("Amazon") }}{% elif row.platform == 'ebay' %}{{ tr("eBay") }}{% elif row.platform == 'both' %}{{ tr("Both") }}{% else %}{{ row.platform }}{% endif %}</td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_ebay_item_number" value="{{ row.ebay_item_number or '' }}"><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_sku" value="{{ row.amazon_sku or '' }}"><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_asin" value="{{ row.amazon_asin or '' }}"><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_item_title" value="{{ row.item_title or '' }}"><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}" list="labelHintsList"><button type="button" class="clear-cell-btn" title="{{ tr("Clear label") }}" aria-label="{{ tr("Clear custom label") }}">X</button><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><input name="row_{{ loop.index0 }}_variation_options" value="{{ row.variation_options or '' }}" placeholder="{{ tr('Option A | Option B | Option C') }}"></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
             <td class="{% if is_merged %}link-locked{% endif %}">
               <select class="link-platform" name="row_{{ loop.index0 }}_linked_platform" {% if is_merged %}disabled{% endif %}>
                 <option value="" {% if not default_link_platform %}selected{% endif %}></option>
-                <option value="amazon" {% if default_link_platform == 'amazon' %}selected{% endif %}>amazon</option>
-                <option value="ebay" {% if default_link_platform == 'ebay' %}selected{% endif %}>ebay</option>
+                <option value="amazon" {% if default_link_platform == 'amazon' %}selected{% endif %}>{{ tr("Amazon") }}</option>
+                <option value="ebay" {% if default_link_platform == 'ebay' %}selected{% endif %}>{{ tr("eBay") }}</option>
               </select>
             </td>
             <td class="{% if is_merged %}link-locked{% endif %}">
               <select class="link-id-type" name="row_{{ loop.index0 }}_linked_id_type" {% if is_merged %}disabled{% endif %}>
                 <option value="" {% if not default_link_id_type %}selected{% endif %}></option>
-                <option value="amazon_sku" {% if default_link_id_type == 'amazon_sku' %}selected{% endif %}>amazon_sku</option>
-                <option value="amazon_asin" {% if default_link_id_type == 'amazon_asin' %}selected{% endif %}>amazon_asin</option>
-                <option value="ebay_item_number" {% if default_link_id_type == 'ebay_item_number' %}selected{% endif %}>ebay_item_number</option>
-                <option value="item_id" {% if default_link_id_type == 'item_id' %}selected{% endif %}>item_id</option>
+                <option value="amazon_sku" {% if default_link_id_type == 'amazon_sku' %}selected{% endif %}>{{ tr("Amazon SKU") }}</option>
+                <option value="amazon_asin" {% if default_link_id_type == 'amazon_asin' %}selected{% endif %}>{{ tr("Amazon ASIN") }}</option>
+                <option value="ebay_item_number" {% if default_link_id_type == 'ebay_item_number' %}selected{% endif %}>{{ tr("eBay Item #") }}</option>
+                <option value="item_id" {% if default_link_id_type == 'item_id' %}selected{% endif %}>{{ tr("Item ID") }}</option>
               </select>
             </td>
             <td class="{% if is_merged %}link-locked{% endif %}"><input class="link-id-value" name="row_{{ loop.index0 }}_linked_id_value" value="{{ row.linked_id_value or '' }}" list="linkTargetsList" {% if is_merged %}disabled{% endif %}></td>
-            <td class="link-preview-cell">{% if is_merged %}Merged row{% endif %}</td>
-            <td class="status-cell">{% if row.needs_review == '1' %}<span class="status-review">{{ row.needs_review_reason or 'Needs human review' }}</span>{% else %}<span class="status-ok">OK</span>{% endif %}</td>
+            <td class="link-preview-cell">{% if is_merged %}{{ tr("Merged row") }}{% endif %}</td>
+            <td class="status-cell">{% if row.needs_review == '1' %}<span class="status-review">{{ row.needs_review_reason or tr("Needs human review") }}</span>{% else %}<span class="status-ok">{{ tr("OK") }}</span>{% endif %}</td>
             <td class="center"><input type="checkbox" name="row_{{ loop.index0 }}_show_title" {% if row.show_title == '1' %}checked{% endif %}></td>
             <td class="center">
               <input type="hidden" class="delete-flag" name="row_{{ loop.index0 }}_delete_row" value="">
-              <button type="button" class="delete-row-btn" title="Delete row">X</button>
-              <button type="button" class="undo-row-btn" style="display:none;">Undo</button>
+              <button type="button" class="delete-row-btn" title="{{ tr("Delete row") }}">X</button>
+              <button type="button" class="undo-row-btn" style="display:none;">{{ tr("Undo") }}</button>
             </td>
           </tr>
         {% endfor %}
@@ -196,14 +198,14 @@
       </table>
       <datalist id="linkTargetsList">
         {% for t in link_targets %}
-          <option value="{{ t.id_value }}">{{ t.platform }} | {{ t.id_type }} | {{ t.title }}</option>
+          <option value="{{ t.id_value }}">{% if t.platform == 'amazon' %}{{ tr("Amazon") }}{% elif t.platform == 'ebay' %}{{ tr("eBay") }}{% else %}{{ t.platform }}{% endif %} | {% if t.id_type == 'amazon_sku' %}{{ tr("Amazon SKU") }}{% elif t.id_type == 'amazon_asin' %}{{ tr("Amazon ASIN") }}{% elif t.id_type == 'ebay_item_number' %}{{ tr("eBay Item #") }}{% elif t.id_type == 'item_id' %}{{ tr("Item ID") }}{% else %}{{ t.id_type }}{% endif %} | {{ t.title }}</option>
         {% endfor %}
       </datalist>
     </div>
     <div id="itemsStickyScrollbar" class="items-sticky-scroll" aria-hidden="true">
       <div id="itemsStickyScrollbarInner"></div>
     </div>
-    <button id="saveChangesBtn" class="btn btn-secondary save-btn save-passive" type="submit" style="margin-top:10px;">Save Changes</button>
+    <button id="saveChangesBtn" class="btn btn-secondary save-btn save-passive" type="submit" style="margin-top:10px;">{{ tr("Save Changes") }}</button>
   </form>
 </section>
 
@@ -276,8 +278,8 @@
 .items-sticky-scroll::-webkit-scrollbar-thumb { background: rgba(74, 110, 88, 0.72); border-radius: 999px; }
 .items-sticky-scroll > div { height: 1px; }
 .items-table { table-layout: fixed; }
-.items-table.mode-compact { min-width: 1950px; }
-.items-table.mode-wide { min-width: 2450px; }
+.items-table.mode-compact { min-width: 2140px; }
+.items-table.mode-wide { min-width: 3160px; table-layout: auto; }
 .items-table th { user-select: none; cursor: pointer; white-space: nowrap; word-break: normal; line-height: 1.05; background: #f7f9fb; position: sticky; top: 0; z-index: 3; font-size: 14px; padding: 8px 8px; }
 .items-table th.sort-asc::after { content: " \2191"; }
 .items-table th.sort-desc::after { content: " \2193"; }
@@ -298,6 +300,8 @@
 .undo-row-btn { margin-left:6px; background:#6c757d; color:#fff; border:0; border-radius:6px; padding:4px 8px; cursor:pointer; }
 .copy-field { display:flex; gap:4px; align-items:center; }
 .copy-field input { flex: 1 1 auto; }
+.clear-cell-btn { flex:0 0 auto; width:30px; height:30px; padding:0; border:1px solid #dfc4c4; background:#fff3f1; color:#7b2f2f; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-weight:800; text-transform:uppercase; }
+.clear-cell-btn:hover { background:#ffe7e2; }
 .copy-btn { flex:0 0 auto; width:30px; height:30px; padding:0; border:1px solid #c9d4e3; background:#f8fbff; color:#234; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
 .copy-btn:hover { background:#eaf2ff; }
 .copy-btn svg { width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
@@ -317,11 +321,19 @@
 .items-table.mode-compact th:nth-child(13), .items-table.mode-compact td:nth-child(13) { width: 95px; }
 .items-table.mode-compact th:nth-child(14), .items-table.mode-compact td:nth-child(14) { width: 170px; }
 
+.items-table.mode-wide th:nth-child(1), .items-table.mode-wide td:nth-child(1) { width: 110px; }
+.items-table.mode-wide th:nth-child(2), .items-table.mode-wide td:nth-child(2) { width: 200px; }
+.items-table.mode-wide th:nth-child(3), .items-table.mode-wide td:nth-child(3) { width: 220px; }
+.items-table.mode-wide th:nth-child(4), .items-table.mode-wide td:nth-child(4) { width: 180px; }
 .items-table.mode-wide th:nth-child(5), .items-table.mode-wide td:nth-child(5) { width: 520px; }
 .items-table.mode-wide th:nth-child(6), .items-table.mode-wide td:nth-child(6) { width: 420px; }
+.items-table.mode-wide th:nth-child(7), .items-table.mode-wide td:nth-child(7) { width: 180px; }
+.items-table.mode-wide th:nth-child(8), .items-table.mode-wide td:nth-child(8) { width: 160px; }
+.items-table.mode-wide th:nth-child(9), .items-table.mode-wide td:nth-child(9) { width: 200px; }
 .items-table.mode-wide th:nth-child(10), .items-table.mode-wide td:nth-child(10) { width: 260px; }
 .items-table.mode-wide th:nth-child(11), .items-table.mode-wide td:nth-child(11) { width: 560px; }
 .items-table.mode-wide th:nth-child(12), .items-table.mode-wide td:nth-child(12) { width: 360px; }
+.items-table.mode-wide th:nth-child(13), .items-table.mode-wide td:nth-child(13) { width: 120px; }
 .items-table.mode-wide th:nth-child(14), .items-table.mode-wide td:nth-child(14) { width: 190px; }
 .save-btn { min-width: 150px; }
 .save-passive { opacity: 0.68; filter: saturate(0.72); }
@@ -329,7 +341,7 @@
 
 <datalist id="labelHintsList">
 {% for h in (label_hints or []) %}
-  <option value="{{ h.label }}">{{ h.label }}{% if h.location %} | LOC {{ h.location }}{% endif %}{% if h.asin %} | ASIN {{ h.asin }}{% endif %}</option>
+  <option value="{{ h.label }}">{{ h.label }}{% if h.location %} | {{ tr("LOC") }} {{ h.location }}{% endif %}{% if h.asin %} | {{ tr("ASIN") }} {{ h.asin }}{% endif %}</option>
 {% endfor %}
 </datalist>
 <script id="labelHintsData" type="application/json">{{ (label_hints or [])|tojson }}</script>
@@ -353,6 +365,12 @@
   const itemsReplaceChooseBtn = document.getElementById('itemsReplaceChooseBtn');
   const openAppRootBtn = document.getElementById('openAppRootBtn');
   const openAppRootForm = document.getElementById('openAppRootForm');
+  const stageImportInput = document.getElementById('stageImportInput');
+  const stageImportChooseBtn = document.getElementById('stageImportChooseBtn');
+  const stageImportName = document.getElementById('stageImportName');
+  const itemsHintsInput = document.getElementById('itemsHintsInput');
+  const itemsHintsChooseBtn = document.getElementById('itemsHintsChooseBtn');
+  const itemsHintsName = document.getElementById('itemsHintsName');
   const filterInput = document.getElementById('itemsFilter');
   const filterClearBtn = document.getElementById('itemsFilterClear');
   const widthBtn = document.getElementById('itemsWidthToggle');
@@ -360,8 +378,41 @@
   const hintsEl = document.getElementById('labelHintsData');
   const saveBtn = document.getElementById('saveChangesBtn');
   const saveForm = table ? table.closest('form') : null;
+  const currentItemsCsvPath = {{ items_csv_path|tojson }};
+  const currentItemsCsvModified = {{ items_csv_mtime_iso|tojson }};
+  const rawPageMessage = {{ (message or '')|tojson }};
+  const translatedPageMessage = {{ (tr(message) if message else '')|tojson }};
   let isDirty = false;
   if (!table) return;
+
+  const T = {
+    currentMainFile: {{ tr("Current main file: {path}", path="__PATH__")|tojson }},
+    selectedReplacement: {{ tr("Selected replacement: {name} | Downloaded/modified: {modified}", name="__NAME__", modified="__MODIFIED__")|tojson }},
+    noStageImport: {{ tr("No stage import file selected")|tojson }},
+    noHints: {{ tr("No hints file selected")|tojson }},
+    compactView: {{ tr("Compact View")|tojson }},
+    wideView: {{ tr("Wide View")|tojson }},
+    mergedRow: {{ tr("Merged row")|tojson }},
+    noTargetFound: {{ tr("No target found")|tojson }},
+    hintConflictLocation: {{ tr('Hint conflict for location. Current: "{current}" | Hint: "{hint}". Use hint location?', current='__CURRENT__', hint='__HINT__')|tojson }},
+    hintConflictAsin: {{ tr('Hint conflict for ASIN. Current: "{current}" | Hint: "{hint}". Use hint ASIN?', current='__CURRENT__', hint='__HINT__')|tojson }},
+    confirmDeleteRow: {{ tr("Mark this row for deletion when you save?")|tojson }},
+    chooseReplacementFirst: {{ tr("Choose an items.csv replacement file first.")|tojson }},
+    replaceMainConfirm: {{ tr("Replace this PC's main items.csv?\n\nIncoming file: {name}\nIncoming modified/downloaded: {incoming}\nCurrent main items.csv modified: {current}\n\nThis will overwrite the main items.csv and create a backup first.", name='__NAME__', incoming='__INCOMING__', current='__CURRENT__')|tojson }},
+    pasteLinkFirst: {{ tr("Paste a link first.")|tojson }},
+    clearReviewProceed: {{ tr("Proceed with clearing review rows?")|tojson }},
+    deleteAutoAdded: {{ tr("Also delete auto-added rows from items.csv? Click Cancel to keep rows and only clear flags.")|tojson }},
+    unknown: {{ tr("Unknown")|tojson }},
+  };
+
+  function fmt(template, vars) {
+    let out = String(template || '');
+    Object.keys(vars || {}).forEach((key) => {
+      out = out.replaceAll(`__${key.toUpperCase()}__`, vars[key]);
+      out = out.replaceAll(`{${key}}`, vars[key]);
+    });
+    return out;
+  }
 
   let targets = [];
   try { targets = JSON.parse((dataEl && dataEl.textContent) || '[]'); } catch (e) { targets = []; }
@@ -372,25 +423,36 @@
   const tbody = table.querySelector('tbody');
   const prefs = { sortCol: -1, sortDir: 'asc', widthMode: 'compact', filterText: '' };
 
-
   function formatLocalDate(value) {
-    if (!value) return 'unknown';
+    if (!value) return T.unknown;
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
   }
 
+  function bindFriendlyFileInput(input, chooseBtn, nameEl, emptyText) {
+    if (!input || !chooseBtn || !nameEl) return;
+    const update = () => {
+      const file = input.files && input.files[0];
+      nameEl.textContent = file ? file.name : emptyText;
+    };
+    chooseBtn.addEventListener('click', () => input.click());
+    input.addEventListener('change', update);
+    update();
+  }
+
   function describeReplaceFile(file) {
     if (!file) {
-      if (itemsReplaceSelected) itemsReplaceSelected.innerHTML = 'Current main file: <strong>{{ items_csv_path }}</strong>';
+      if (itemsReplaceSelected) itemsReplaceSelected.textContent = fmt(T.currentMainFile, { path: currentItemsCsvPath });
       if (itemsReplaceLastModified) itemsReplaceLastModified.value = '';
       return;
     }
     const lastModifiedText = formatLocalDate(file.lastModified);
     if (itemsReplaceSelected) {
-      itemsReplaceSelected.innerHTML = `Selected replacement: <strong>${file.name}</strong> | Downloaded/modified: <strong>${lastModifiedText}</strong>`;
+      itemsReplaceSelected.textContent = fmt(T.selectedReplacement, { name: file.name, modified: lastModifiedText });
     }
     if (itemsReplaceLastModified) itemsReplaceLastModified.value = String(file.lastModified || '');
   }
+
   function loadPrefs() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -416,7 +478,10 @@
   }
 
   function clearHeaderIndicators() {
-    headers.forEach(h => { h.classList.remove('sort-asc'); h.classList.remove('sort-desc'); });
+    headers.forEach((h) => {
+      h.classList.remove('sort-asc');
+      h.classList.remove('sort-desc');
+    });
   }
 
   function cellValue(row, colIndex, sortType) {
@@ -451,7 +516,7 @@
       if (av > bv) return prefs.sortDir === 'asc' ? 1 : -1;
       return 0;
     });
-    rows.forEach(r => tbody.appendChild(r));
+    rows.forEach((r) => tbody.appendChild(r));
 
     clearHeaderIndicators();
     th.classList.add(prefs.sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
@@ -460,26 +525,26 @@
 
   function rowText(row) {
     const inputs = Array.from(row.querySelectorAll('input[type="text"], input:not([type]), textarea, select'));
-    const parts = inputs.map(i => (i.value || '').toLowerCase());
+    const parts = inputs.map((i) => (i.value || '').toLowerCase());
     parts.push((row.textContent || '').toLowerCase());
     return parts.join(' ');
   }
 
   function applyFilter(text) {
     const needle = (text || '').toLowerCase().trim();
-    const rows = Array.from(tbody.querySelectorAll('tr'));
-    rows.forEach(row => {
+    Array.from(tbody.querySelectorAll('tr')).forEach((row) => {
       row.style.display = (!needle || rowText(row).includes(needle)) ? '' : 'none';
     });
     prefs.filterText = text || '';
     savePrefs();
   }
+
   function applyWidthMode(mode) {
     const safe = mode === 'wide' ? 'wide' : 'compact';
     table.classList.remove('mode-compact', 'mode-wide');
     table.classList.add(safe === 'wide' ? 'mode-wide' : 'mode-compact');
     prefs.widthMode = safe;
-    widthBtn.textContent = safe === 'wide' ? 'Compact View' : 'Wide View';
+    if (widthBtn) widthBtn.textContent = safe === 'wide' ? T.compactView : T.wideView;
     savePrefs();
     syncStickyScrollbar();
   }
@@ -527,15 +592,14 @@
   }
 
   function updateLinkPreviews() {
-    const rows = Array.from(tbody.querySelectorAll('tr'));
-    rows.forEach(row => {
+    Array.from(tbody.querySelectorAll('tr')).forEach((row) => {
       const platEl = row.querySelector('.link-platform');
       const typeEl = row.querySelector('.link-id-type');
       const valEl = row.querySelector('.link-id-value');
       const prevEl = row.querySelector('.link-preview-cell');
       if (!platEl || !typeEl || !valEl || !prevEl) return;
       if (platEl.disabled || typeEl.disabled || valEl.disabled) {
-        prevEl.textContent = 'Merged row';
+        prevEl.textContent = T.mergedRow;
         return;
       }
 
@@ -547,22 +611,22 @@
         return;
       }
       const key = (plat === 'amazon' && (typ === 'amazon_asin' || typ === 'item_id')) ? raw.toUpperCase() : raw;
-      const hit = targets.find(t =>
+      const hit = targets.find((t) =>
         (t.platform || '').toLowerCase() === plat &&
         (t.id_value || '') === key &&
         (!typ || (t.id_type || '').toLowerCase() === typ)
       );
-      prevEl.textContent = hit ? `${hit.platform} | ${hit.id_type} | ${hit.title || ''}` : 'No target found';
+      prevEl.textContent = hit ? `${hit.platform} | ${hit.id_type} | ${hit.title || ''}` : T.noTargetFound;
     });
   }
 
   function findHint(labelValue) {
     const text = (labelValue || '').trim().toLowerCase();
     if (!text) return null;
-    return labelHints.find(h => ((h.label || '').trim().toLowerCase() === text)) || null;
+    return labelHints.find((h) => ((h.label || '').trim().toLowerCase() === text)) || null;
   }
 
-  function maybeApplyHintToRow(row, labelValue) {
+  async function maybeApplyHintToRow(row, labelValue) {
     if (!row) return;
     const hint = findHint(labelValue);
     if (!hint) return;
@@ -574,7 +638,7 @@
       if (!curLoc) {
         locInput.value = nextLoc;
       } else if (curLoc.toLowerCase() !== nextLoc.toLowerCase()) {
-        const okLoc = confirm(`Hint conflict for location. Current: "${curLoc}" | Hint: "${nextLoc}". Use hint location?`);
+        const okLoc = await showAppConfirm(fmt(T.hintConflictLocation, { current: curLoc, hint: nextLoc }));
         if (okLoc) locInput.value = nextLoc;
       }
     }
@@ -584,16 +648,19 @@
       if (!curAsin) {
         asinInput.value = nextAsin;
       } else if (curAsin !== nextAsin) {
-        const okAsin = confirm(`Hint conflict for ASIN. Current: "${curAsin}" | Hint: "${nextAsin}". Use hint ASIN?`);
+        const okAsin = await showAppConfirm(fmt(T.hintConflictAsin, { current: curAsin, hint: nextAsin }));
         if (okAsin) asinInput.value = nextAsin;
       }
     }
   }
 
   headers.forEach((th, index) => th.addEventListener('click', () => sortBy(index, false)));
-  filterInput.addEventListener('input', (e) => applyFilter(e.target.value || ''));
-  filterClearBtn.addEventListener('click', () => { filterInput.value = ''; applyFilter(''); });
-  widthBtn.addEventListener('click', () => applyWidthMode(prefs.widthMode === 'wide' ? 'compact' : 'wide'));
+  if (filterInput) filterInput.addEventListener('input', (e) => applyFilter(e.target.value || ''));
+  if (filterClearBtn) filterClearBtn.addEventListener('click', () => {
+    if (filterInput) filterInput.value = '';
+    applyFilter('');
+  });
+  if (widthBtn) widthBtn.addEventListener('click', () => applyWidthMode(prefs.widthMode === 'wide' ? 'compact' : 'wide'));
   if (saveForm) {
     saveForm.addEventListener('input', (e) => {
       if (e.target && e.target.id === 'itemsFilter') return;
@@ -601,6 +668,7 @@
     });
     saveForm.addEventListener('change', () => setSaveDirty(true));
   }
+
   tbody.addEventListener('input', (e) => {
     if (e.target.classList && (e.target.classList.contains('link-platform') || e.target.classList.contains('link-id-type') || e.target.classList.contains('link-id-value'))) {
       if (e.target.classList.contains('link-platform')) {
@@ -611,47 +679,59 @@
     }
     if (e.target && e.target.name && e.target.name.endsWith('_custom_label')) {
       const row = e.target.closest('tr');
-      maybeApplyHintToRow(row, e.target.value || '');
+      void maybeApplyHintToRow(row, e.target.value || '');
     }
     setSaveDirty(true);
   });
 
-
   async function copyTextSafe(text) {
-    const val = (text || "").trim();
+    const val = (text || '').trim();
     if (!val) return;
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(val);
       } else {
-        const ta = document.createElement("textarea");
+        const ta = document.createElement('textarea');
         ta.value = val;
         document.body.appendChild(ta);
         ta.select();
-        document.execCommand("copy");
+        document.execCommand('copy');
         ta.remove();
       }
     } catch (err) {}
   }
 
-  tbody.addEventListener('click', (e) => {
+  tbody.addEventListener('click', async (e) => {
+    const clearBtn = e.target.closest('.clear-cell-btn');
+    if (clearBtn) {
+      const field = clearBtn.closest('.copy-field');
+      const input = field ? field.querySelector('input,textarea') : null;
+      if (input) {
+        input.value = '';
+        input.focus();
+        setSaveDirty(true);
+      }
+      return;
+    }
+
     const copyBtn = e.target.closest('.copy-btn');
     if (copyBtn) {
       const field = copyBtn.closest('.copy-field');
       const input = field ? field.querySelector('input,textarea') : null;
-      copyTextSafe(input ? input.value : '');
+      await copyTextSafe(input ? input.value : '');
       return;
     }
 
     const delBtn = e.target.closest('.delete-row-btn');
     if (delBtn) {
       const row = delBtn.closest('tr');
-      if (confirm('Mark this row for deletion when you save?')) {
+      if (await showAppConfirm(T.confirmDeleteRow)) {
         toggleDeleteRow(row, true);
         setSaveDirty(true);
       }
       return;
     }
+
     const undoBtn = e.target.closest('.undo-row-btn');
     if (undoBtn) {
       const row = undoBtn.closest('tr');
@@ -659,15 +739,17 @@
       setSaveDirty(true);
     }
   });
+
   loadPrefs();
   applyWidthMode(prefs.widthMode);
-  filterInput.value = prefs.filterText;
+  if (filterInput) filterInput.value = prefs.filterText;
   applyFilter(prefs.filterText);
-  Array.from(tbody.querySelectorAll('tr')).forEach(row => {
+  Array.from(tbody.querySelectorAll('tr')).forEach((row) => {
     setDefaultTypeForPlatform(row.querySelector('.link-platform'), row.querySelector('.link-id-type'));
   });
   updateLinkPreviews();
   setSaveDirty(false);
+
   if (wrap && stickyScroll) {
     wrap.addEventListener('scroll', () => {
       if (syncingFromSticky) return;
@@ -685,9 +767,8 @@
   window.addEventListener('resize', syncStickyScrollbar);
   syncStickyScrollbar();
 
-  const urlMsg = new URLSearchParams(window.location.search).get('msg') || '';
-  if (urlMsg.toLowerCase().startsWith('backup created:')) {
-    alert(urlMsg);
+  if (rawPageMessage.toLowerCase().startsWith('backup created:') && translatedPageMessage) {
+    showAppAlert(translatedPageMessage);
   }
 
   if (prefs.sortCol >= 0) sortBy(prefs.sortCol, true);
@@ -706,6 +787,8 @@
     } catch (e) {}
   }
 
+  bindFriendlyFileInput(stageImportInput, stageImportChooseBtn, stageImportName, T.noStageImport);
+  bindFriendlyFileInput(itemsHintsInput, itemsHintsChooseBtn, itemsHintsName, T.noHints);
 
   if (itemsReplaceChooseBtn && itemsReplaceInput) {
     itemsReplaceChooseBtn.addEventListener('click', () => itemsReplaceInput.click());
@@ -737,16 +820,16 @@
     describeReplaceFile(itemsReplaceInput.files && itemsReplaceInput.files[0]);
   }
   if (itemsReplaceForm && itemsReplaceInput) {
-    itemsReplaceForm.addEventListener('submit', (e) => {
+    itemsReplaceForm.addEventListener('submit', async (e) => {
       const file = itemsReplaceInput.files && itemsReplaceInput.files[0];
       if (!file) {
         e.preventDefault();
-        alert('Choose an items.csv replacement file first.');
+        showAppAlert(T.chooseReplacementFirst);
         return;
       }
       const incomingTime = formatLocalDate(file.lastModified);
-      const currentTime = formatLocalDate('{{ items_csv_mtime_iso }}');
-      const ok = confirm(`Replace this PC's main items.csv?\n\nIncoming file: ${file.name}\nIncoming modified/downloaded: ${incomingTime}\nCurrent main items.csv modified: ${currentTime}\n\nThis will overwrite the main items.csv and create a backup first.`);
+      const currentTime = formatLocalDate(currentItemsCsvModified);
+      const ok = await showAppConfirm(fmt(T.replaceMainConfirm, { name: file.name, incoming: incomingTime, current: currentTime }));
       if (!ok) e.preventDefault();
     });
   }
@@ -757,7 +840,7 @@
     saveSharedLinkBtn.addEventListener('click', () => {
       const normalized = normalizeLink(sharedLinkInput.value);
       if (!normalized) {
-        alert('Paste a link first.');
+        showAppAlert(T.pasteLinkFirst);
         return;
       }
       sharedLinkInput.value = normalized;
@@ -765,11 +848,29 @@
     });
   }
 
+  document.querySelectorAll('form[action="/items/clear-needs-review"]').forEach((form) => {
+    form.addEventListener('submit', async (e) => {
+      const modeInput = form.querySelector('input[name="mode"]');
+      const autoCount = Number('{{ auto_added_review_count or 0 }}');
+      if (!modeInput) return;
+      e.preventDefault();
+      if (autoCount > 0) {
+        const proceed = await showAppConfirm(T.clearReviewProceed);
+        if (!proceed) return;
+        const deleteAuto = await showAppConfirm(T.deleteAutoAdded);
+        modeInput.value = deleteAuto ? 'delete_auto_added' : 'clear_flags';
+      } else {
+        modeInput.value = 'clear_flags';
+      }
+      form.submit();
+    });
+  });
+
   if (openSharedLinkBtn && sharedLinkInput) {
     openSharedLinkBtn.addEventListener('click', () => {
       const normalized = normalizeLink(sharedLinkInput.value);
       if (!normalized) {
-        alert('Paste a link first.');
+        showAppAlert(T.pasteLinkFirst);
         return;
       }
       sharedLinkInput.value = normalized;
@@ -780,6 +881,22 @@
 })();
 </script>
 {% endblock %}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

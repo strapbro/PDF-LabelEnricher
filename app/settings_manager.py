@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 import subprocess
@@ -12,8 +12,14 @@ from .utils import atomic_write_text
 
 
 DEFAULT_CONFIG = {
+    "ui": {
+        "comic_mode": False,
+        "language_mode": "en",
+        "font_mode": "default",
+    },
     "paths": {
         "incoming_batch_folder": "incoming/batch",
+        "manual_incoming_folder": "incoming/manual",
         "processed_root_folder": "processed",
         "items_csv_path": "items.csv",
         "logs_folder": "logs",
@@ -38,8 +44,11 @@ DEFAULT_CONFIG = {
         "rotated_primary_preset": "auto_perpendicular",
         "rotated_secondary_preset": "auto_perpendicular",
         "font_name": "Helvetica-Bold",
+        "comic_mode": False,
         "font_size": 16,
+        "backside_font_size": 20,
         "line_spacing": 20,
+        "backside_line_spacing": 24,
         "max_lines": 24,
         "max_title_length": 70,
         "show_field_labels": True,
@@ -126,12 +135,17 @@ class SettingsManager:
 
     def ensure_directories(self) -> None:
         self.incoming_batch_folder.mkdir(parents=True, exist_ok=True)
+        self.manual_incoming_folder.mkdir(parents=True, exist_ok=True)
         self.processed_root_folder.mkdir(parents=True, exist_ok=True)
         self.logs_folder.mkdir(parents=True, exist_ok=True)
 
     @property
     def incoming_batch_folder(self) -> Path:
         return self.base_dir / self.config["paths"]["incoming_batch_folder"]
+
+    @property
+    def manual_incoming_folder(self) -> Path:
+        return self.base_dir / self.config["paths"]["manual_incoming_folder"]
 
     @property
     def processed_root_folder(self) -> Path:
@@ -176,3 +190,7 @@ class SettingsManager:
             return True
         except Exception:
             return False
+
+
+
+

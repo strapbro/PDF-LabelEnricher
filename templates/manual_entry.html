@@ -1,186 +1,107 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h2>Manual Entry (One-Off or Small Batch)</h2>
-  <p style="font-size:13px;color:#555;">Use this when you want to process labels manually without full CSV/TXT matching.</p>
-  <p style="font-size:13px;color:#555;">Rules: <strong>Qty required</strong>, <strong>label-link reference required</strong> (name/tracking/order ref), and <strong>internal label OR item key</strong> required.</p>
-  <p style="font-size:13px;color:#555;">Unprocessed queue count: <strong>{{ unresolved_count }}</strong></p>
-  <p style="font-size:13px;color:#555;">Tip: Label/Location Hints can auto-fill location (and ASIN when available) while you type Internal Label.</p>
+  <h2>{{ tr("Manual Entry (Unified Batch Mode)") }}</h2>
+  <p style="font-size:13px;color:#555;">{{ tr("Use this when you want to process labels manually without full CSV/TXT matching. If one label is staged, this behaves like single-label mode automatically.") }}</p>
+  <p style="font-size:13px;color:#555;">{{ tr("Rules:") }} <strong>{{ tr("Qty required") }}</strong>, <strong>{{ tr("name/tracking reference required") }}</strong>, and <strong>{{ tr("internal label OR item key") }}</strong> {{ tr("required.") }}</p>
+  <p style="font-size:13px;color:#555;">{{ tr("Unprocessed queue count:") }} <strong>{{ unresolved_count }}</strong></p>
 </section>
 
 <section class="card">
-  <h3>Option A: Upload/Stage Small Batch Files</h3>
+  <h3>{{ tr("1) Manual Staging Files") }}</h3>
   <form id="manualUploadForm" action="/manual-entry/upload" method="post" enctype="multipart/form-data">
     <input id="manualFileInput" type="file" name="files" multiple required style="display:none;">
-    <div id="manualDropZone" class="drop-zone" role="button" tabindex="0" aria-label="Drop files or click to choose files">
-      <div class="drop-title">Drag & drop .pdf/.zip/.txt/.csv here</div>
-      <div class="drop-sub">or click anywhere in this box to choose files</div>
-      <div class="drop-choose">Choose Files</div>
+    <div id="manualDropZone" class="drop-zone" role="button" tabindex="0" aria-label="{{ tr('Drop files or click to choose files') }}">
+      <div class="drop-title">{{ tr("Drag & drop .zip/.pdf/.csv/.txt here") }}</div>
+      <div class="drop-sub">{{ tr("or click anywhere in this box to choose files") }}</div>
+      <div class="drop-choose">{{ tr("Choose Files") }}</div>
     </div>
-    <div id="manualPendingCount" class="pending-count">Pending selection: 0 file(s)</div>
-    <button class="btn btn-md btn-success" type="submit">Upload to incoming/batch</button>
+    <div id="manualPendingCount" class="pending-count">{{ tr("Pending selection: {count} file(s)", count=0) }}</div>
+    <div id="manualPendingFileList" class="pending-file-list"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-md btn-success" type="submit">{{ tr("Upload to manual staging") }}</button>
+    </div>
+  </form>
+  <form action="/manual-entry/clear-staged" method="post" data-confirm="{{ tr('Clear all manual staging files?') }}" style="margin-top:8px;">
+    <button class="btn btn-md btn-secondary" type="submit">{{ tr("Clear manual staging files") }}</button>
   </form>
 </section>
 
 <section class="card">
-  <h3>Label/Location Hints (Optional Helper)</h3>
-  <p style="font-size:13px;color:#555;">Use this for transition labels not yet mapped to SKU/ASIN/item#.</p>
+  <h3>{{ tr("2) Label/Location Hints (Optional Helper)") }}</h3>
+  <p style="font-size:13px;color:#555;">{{ tr("Transition helper for labels not yet mapped to SKU/ASIN/item# in items.csv.") }}</p>
   <div class="items-controls">
-    <form action="/hints/upload" method="post" enctype="multipart/form-data">
+    <form id="manualHintsForm" action="/hints/upload" method="post" enctype="multipart/form-data" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <input type="hidden" name="from_page" value="manual">
-      <input type="file" name="hints_csv" accept=".csv,.tsv,.txt" required>
-      <button class="btn btn-md btn-secondary" type="submit">Upload Label/Location Hints</button>
+      <input id="manualHintsInput" type="file" name="hints_csv" accept=".csv,.tsv,.txt" required hidden>
+      <button class="btn btn-md btn-secondary" id="manualHintsChooseBtn" type="button">{{ tr("Choose hints file") }}</button>
+      <span id="manualHintsName">{{ tr("No hints file selected") }}</span>
+      <button class="btn btn-md btn-secondary" type="submit">{{ tr("Upload Label/Location Hints") }}</button>
     </form>
-    <form action="/hints/clear" method="post" onsubmit="return confirm('Clear label/location hints file?')">
+    <form action="/hints/clear" method="post" data-confirm="{{ tr('Clear label/location hints file?') }}">
       <input type="hidden" name="from_page" value="manual">
-      <button class="btn btn-md btn-secondary" type="submit">Clear Hints File</button>
+      <button class="btn btn-md btn-secondary" type="submit">{{ tr("Clear Hints File") }}</button>
     </form>
   </div>
 </section>
 
 <section class="card">
-  <h3>Option B: Single Label Text Parse</h3>
-  <form action="/manual-entry/parse-text" method="post">
-    <label>Label PDF (human-readable)
-      <select name="label_pdf">
-        <option value="">(No label selected)</option>
-        {% for l in labels %}
-        <option value="{{ l.path }}" {% if prefill.label_pdf == l.path %}selected{% endif %}>{{ l.label }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Paste one order text block
-      <textarea class="manual-paste" name="messy_text" rows="14" placeholder="Paste text for one order...">{{ prefill.messy_text or '' }}</textarea>
-    </label>
-    <button class="btn btn-md btn-secondary" type="submit">Parse Single</button>
-  </form>
-</section>
-
-<section class="card">
-  <h3>Structured Single Output</h3>
-  <form action="/manual-entry/create" method="post">
-    <div class="grid2">
-      <label>Label PDF
-        <select name="label_pdf" required>
-          <option value="">Select label PDF...</option>
-          {% for l in labels %}
-          <option value="{{ l.path }}" {% if prefill.label_pdf == l.path %}selected{% endif %}>{{ l.label }}</option>
-          {% endfor %}
-        </select>
-      </label>
-
-      <label>Platform
-        <select name="platform" required>
-          <option value="amazon" {% if prefill.platform == 'amazon' %}selected{% endif %}>Amazon</option>
-          <option value="ebay" {% if prefill.platform == 'ebay' %}selected{% endif %}>eBay</option>
-        </select>
-      </label>
-
-      <label>Item # / SKU / ASIN (optional if internal label provided)
-        <input name="item_key" placeholder="Optional if internal label provided" value="{{ prefill.item_key or '' }}">
-      </label>
-
-      <label>Label Link Reference (required)
-        <input name="label_ref" required placeholder="Name, tracking, or order ref" value="{{ prefill.label_ref or '' }}">
-      </label>
-
-      <label>ASIN (optional)
-        <input name="item_asin" placeholder="Optional; helps for Amazon linking" value="{{ prefill.item_asin or '' }}">
-      </label>
-
-      <label>Order ID (optional)
-        <input name="order_id" placeholder="If blank, auto MANUAL-YYYYMMDD-HHMMSS" value="{{ prefill.order_id or '' }}">
-      </label>
-
-      <label>Quantity
-        <input name="quantity" type="number" min="1" step="1" value="{{ prefill.quantity or '1' }}" required>
-      </label>
-
-      <label>Internal Label (optional if item key can resolve)
-        <input name="custom_label" list="manualLabelHintsList" placeholder="If blank: use DB label or title fallback" value="{{ prefill.custom_label or '' }}">
-      </label>
-
-      <label>Item Title (optional)
-        <input name="title" placeholder="Used for title fallback" value="{{ prefill.title or '' }}">
-      </label>
-
-      <label>Total Paid (optional)
-        <input name="total_paid" placeholder="e.g. 26.98" value="{{ prefill.total_paid or '' }}">
-      </label>
-
-      <label>Location (optional)
-        <input name="location" placeholder="e.g. A-12" value="{{ prefill.location or '' }}">
-      </label>
-    </div>
-
-    <label style="margin-top:8px;"><input type="checkbox" name="use_title_as_label" {% if prefill.use_title_as_label != '0' %}checked{% endif %} style="width:auto;"> Use title as label if Internal Label is blank</label>
-    <label style="margin-top:4px;"><input type="checkbox" name="write_to_items" {% if prefill.write_to_items == '1' %}checked{% endif %} style="width:auto;"> Write/update this row in items.csv (off by default for safety)</label>
-    <button class="btn btn-lg btn-primary" type="submit" style="margin-top:10px;">Create Manual Output PDF</button>
-  </form>
-</section>
-
-<section class="card">
-  <h3>Manual Batch (Multi Label)</h3>
+  <h3>{{ tr("3) Parse + Create Manual Output") }}</h3>
   <form action="/manual-entry/parse-text-batch" method="post">
-    <label>Paste text for all orders (all 5, etc.)
-      <textarea class="manual-paste manual-paste-lg" name="batch_messy_text" rows="18" placeholder="Paste all order-page text blocks here...">{{ prefill.batch_messy_text or '' }}</textarea>
-    </label>
-
     <div class="batch-grid">
       {% for row in prefill.batch_entries %}
       <div class="batch-row card">
-        <h4>Label {{ loop.index }}</h4>
-        <label>Label PDF
+        <h4>{{ tr("Label {count}", count=loop.index) }}</h4>
+        <label>{{ tr("Label PDF") }}
           <select name="row_{{ loop.index0 }}_label_pdf">
-            <option value="">Select label...</option>
+            <option value="">{{ tr("Select label...") }}</option>
             {% for l in labels %}
             <option value="{{ l.path }}" {% if row.label_pdf == l.path %}selected{% endif %}>{{ l.label }}</option>
             {% endfor %}
           </select>
         </label>
-        <label>Platform
+
+        <label>{{ tr("Paste text for this label (optional but recommended)") }}
+          <textarea class="manual-paste" name="row_{{ loop.index0 }}_messy_text" rows="8" placeholder="{{ tr('Paste one order text block here...') }}">{{ row.messy_text or '' }}</textarea>
+        </label>
+
+        <label>{{ tr("Platform") }}
           <select name="row_{{ loop.index0 }}_platform">
-            <option value="amazon" {% if row.platform == 'amazon' %}selected{% endif %}>Amazon</option>
-            <option value="ebay" {% if row.platform == 'ebay' %}selected{% endif %}>eBay</option>
+            <option value="amazon" {% if row.platform == 'amazon' %}selected{% endif %}>{{ tr("Amazon") }}</option>
+            <option value="ebay" {% if row.platform == 'ebay' %}selected{% endif %}>{{ tr("eBay") }}</option>
           </select>
         </label>
-        <label>Item # / SKU / ASIN <input name="row_{{ loop.index0 }}_item_key" value="{{ row.item_key or '' }}"></label>
-        <label>Label Link Reference* <input name="row_{{ loop.index0 }}_label_ref" value="{{ row.label_ref or '' }}" placeholder="Name/tracking/order ref"></label>
-        <label>ASIN <input name="row_{{ loop.index0 }}_item_asin" value="{{ row.item_asin or '' }}"></label>
-        <label>Order ID <input name="row_{{ loop.index0 }}_order_id" value="{{ row.order_id or '' }}"></label>
-        <label>Qty <input type="number" min="1" step="1" name="row_{{ loop.index0 }}_quantity" value="{{ row.quantity or '1' }}"></label>
-        <label>Internal Label <input name="row_{{ loop.index0 }}_custom_label" list="manualLabelHintsList" value="{{ row.custom_label or '' }}"></label>
-        <label>Title <input name="row_{{ loop.index0 }}_title" value="{{ row.title or '' }}"></label>
-        <label>Total <input name="row_{{ loop.index0 }}_total_paid" value="{{ row.total_paid or '' }}"></label>
-        <label>Location <input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"></label>
-        <label><input type="checkbox" name="row_{{ loop.index0 }}_use_title_as_label" {% if row.use_title_as_label != '0' %}checked{% endif %} style="width:auto;"> Use title as label if label blank</label>
+        <label>{{ tr("Item # / SKU / ASIN") }} <input name="row_{{ loop.index0 }}_item_key" value="{{ row.item_key or '' }}"></label>
+        <label>{{ tr("Name or Tracking*") }} <input name="row_{{ loop.index0 }}_label_ref" value="{{ row.label_ref or '' }}" placeholder="{{ tr('Name or tracking from order') }}"></label>
+        <label>{{ tr("Qty") }} <input type="number" min="1" step="1" name="row_{{ loop.index0 }}_quantity" value="{{ row.quantity or '1' }}"></label>
+        <label>{{ tr("Internal Label") }} <input name="row_{{ loop.index0 }}_custom_label" list="manualLabelHintsList" value="{{ row.custom_label or '' }}"></label>
+        <label>{{ tr("Title") }} <input name="row_{{ loop.index0 }}_title" value="{{ row.title or '' }}"></label>
+        <label>{{ tr("Total") }} <input name="row_{{ loop.index0 }}_total_paid" value="{{ row.total_paid or '' }}"></label>
+        <label>{{ tr("Location") }} <input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"></label>
+        <label><input type="checkbox" name="row_{{ loop.index0 }}_use_title_as_label" {% if row.use_title_as_label != '0' %}checked{% endif %} style="width:auto;"> {{ tr("Use title as label if label blank") }}</label>
       </div>
       {% endfor %}
     </div>
 
-    <label><input type="checkbox" name="write_to_items" {% if prefill.write_to_items == '1' %}checked{% endif %} style="width:auto;"> Write/update items.csv during batch (off by default)</label>
+    <label><input type="checkbox" name="write_to_items" {% if prefill.write_to_items == '1' %}checked{% endif %} style="width:auto;"> {{ tr("Write/update items.csv during batch (off by default)") }}</label>
     <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-      <button class="btn btn-md btn-secondary" type="submit">Parse Batch Text into Rows</button>
-      <button class="btn btn-lg btn-primary" type="submit" formaction="/manual-entry/create-batch">Create Combined Manual Output PDF</button>
+      <button class="btn btn-md btn-secondary" type="submit">{{ tr("Parse Row Text Blocks") }}</button>
+      <button class="btn btn-lg btn-primary" type="submit" formaction="/manual-entry/create-batch">{{ tr("Create Combined Manual Output PDF") }}</button>
     </div>
   </form>
 </section>
 
 <datalist id="manualLabelHintsList">
 {% for h in (label_hints or []) %}
-  <option value="{{ h.label }}">{{ h.label }}{% if h.location %} | LOC {{ h.location }}{% endif %}{% if h.asin %} | ASIN {{ h.asin }}{% endif %}</option>
+  <option value="{{ h.label }}">{{ h.label }}{% if h.location %} | {{ tr("LOC") }} {{ h.location }}{% endif %}{% if h.asin %} | {{ tr("ASIN") }} {{ h.asin }}{% endif %}</option>
 {% endfor %}
 </datalist>
 <script id="manualLabelHintsData" type="application/json">{{ (label_hints or [])|tojson }}</script>
+
 <style>
-.grid2 {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(220px, 1fr));
-  gap: 10px 14px;
-}
 .batch-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 10px;
 }
 .batch-row h4 { margin: 0 0 8px; }
@@ -208,16 +129,13 @@
 }
 .pending-count { margin: 8px 0; font-size: 13px; color: #444; transition: color 0.18s ease, text-shadow 0.18s ease; }
 .pending-count.pending-active { color: #3a7b4f; text-shadow: 0 0 18px rgba(88, 129, 87, 0.18); }
+.pending-file-list { margin: -2px 0 10px; font-size: 13px; color: #405a49; }
+.pending-file-list ul { margin: 0 0 0 18px; padding: 0; }
+.pending-file-list li { margin-bottom: 4px; word-break: break-word; }
 .manual-paste {
   width: 100%;
-  min-height: 260px;
+  min-height: 150px;
   box-sizing: border-box;
-}
-.manual-paste-lg {
-  min-height: 360px;
-}
-@media (max-width: 900px) {
-  .grid2 { grid-template-columns: 1fr; }
 }
 </style>
 
@@ -226,16 +144,55 @@
   const dropZone = document.getElementById('manualDropZone');
   const fileInput = document.getElementById('manualFileInput');
   const pendingCount = document.getElementById('manualPendingCount');
+  const pendingFileList = document.getElementById('manualPendingFileList');
   const uploadForm = document.getElementById('manualUploadForm');
   const hintsEl = document.getElementById('manualLabelHintsData');
+  const hintsInput = document.getElementById('manualHintsInput');
+  const hintsChooseBtn = document.getElementById('manualHintsChooseBtn');
+  const hintsName = document.getElementById('manualHintsName');
+  const T = {
+    pending: {{ tr("Pending selection: {count} file(s)", count="__COUNT__")|tojson }},
+    amazonZip: {{ tr("Amazon ZIP")|tojson }},
+    zip: {{ tr("ZIP")|tojson }},
+    ebayPdf: {{ tr("eBay PDF")|tojson }},
+    amazonPdf: {{ tr("Amazon PDF")|tojson }},
+    pdf: {{ tr("PDF")|tojson }},
+    amazonTxt: {{ tr("Amazon TXT")|tojson }},
+    csv: {{ tr("CSV")|tojson }},
+    file: {{ tr("File")|tojson }},
+    noHints: {{ tr("No hints file selected")|tojson }},
+    hintConflict: {{ tr('Hint conflict for location. Current: "{current}" | Hint: "{hint}". Use hint location?', current='__CURRENT__', hint='__HINT__')|tojson }},
+  };
+  function fmt(template, vars) {
+    let out = String(template || '');
+    Object.keys(vars || {}).forEach((key) => {
+      out = out.replaceAll(`__${key.toUpperCase()}__`, vars[key]);
+    });
+    return out;
+  }
   let hints = []; try { hints = JSON.parse((hintsEl && hintsEl.textContent) || '[]'); } catch (e) { hints = []; }
   if (!dropZone || !fileInput || !pendingCount || !uploadForm) return;
 
   let dt = new DataTransfer();
 
   function refreshPending() {
-    pendingCount.textContent = `Pending selection: ${dt.files.length} file(s)`;
-    pendingCount.classList.toggle("pending-active", dt.files.length > 0);
+    pendingCount.textContent = fmt(T.pending, { count: String(dt.files.length) });
+    pendingCount.classList.toggle('pending-active', dt.files.length > 0);
+    if (!pendingFileList) return;
+    if (!dt.files.length) {
+      pendingFileList.innerHTML = '';
+      return;
+    }
+    const describe = (file) => {
+      const lower = String(file.name || '').toLowerCase();
+      if (lower.endsWith('.zip')) return lower.includes('amznbulklabels') ? T.amazonZip : T.zip;
+      if (lower.endsWith('.pdf')) return lower.includes('ebay') ? T.ebayPdf : (lower.includes('amazon') || lower.includes('amzn')) ? T.amazonPdf : T.pdf;
+      if (lower.endsWith('.txt')) return T.amazonTxt;
+      if (lower.endsWith('.csv')) return T.csv;
+      return T.file;
+    };
+    const items = Array.from(dt.files).map((file) => `<li><strong>[${describe(file)}]</strong> ${file.name}</li>`).join('');
+    pendingFileList.innerHTML = `<ul>${items}</ul>`;
   }
 
   function addFiles(fileList) {
@@ -245,7 +202,6 @@
   }
 
   fileInput.addEventListener('change', (e) => addFiles(e.target.files));
-
   dropZone.addEventListener('click', () => fileInput.click());
   dropZone.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -274,45 +230,44 @@
     }, 0);
   });
 
-
   function findHint(label) {
     const t = (label || '').trim().toLowerCase();
     if (!t) return null;
     return hints.find(h => ((h.label || '').trim().toLowerCase() === t)) || null;
   }
 
-  function applyHintFromLabelInput(input) {
+  async function applyHintFromLabelInput(input) {
     if (!input) return;
     const hint = findHint(input.value || '');
     if (!hint) return;
     const section = input.closest('.card') || document;
     const loc = section.querySelector('input[name="location"], input[name$="_location"]');
-    const asin = section.querySelector('input[name="item_asin"], input[name$="_item_asin"]');
     if (loc && (hint.location || '').trim()) {
       const nextLoc = (hint.location || '').trim();
       const curLoc = (loc.value || '').trim();
       if (!curLoc) loc.value = nextLoc;
       else if (curLoc.toLowerCase() !== nextLoc.toLowerCase()) {
-        if (confirm(`Hint conflict for location. Current: "${curLoc}" | Hint: "${nextLoc}". Use hint location?`)) loc.value = nextLoc;
+        if (await showAppConfirm(fmt(T.hintConflict, { current: curLoc, hint: nextLoc }))) loc.value = nextLoc;
       }
     }
-    if (asin && (hint.asin || '').trim()) {
-      const nextAsin = (hint.asin || '').trim().toUpperCase();
-      const curAsin = (asin.value || '').trim().toUpperCase();
-      if (!curAsin) asin.value = nextAsin;
-      else if (curAsin !== nextAsin) {
-        if (confirm(`Hint conflict for ASIN. Current: "${curAsin}" | Hint: "${nextAsin}". Use hint ASIN?`)) asin.value = nextAsin;
-      }
-    }
+    const itemKey = section.querySelector('input[name="item_key"], input[name$="_item_key"]');
+    if (itemKey && !itemKey.value && (hint.asin || '').trim()) itemKey.value = (hint.asin || '').trim().toUpperCase();
   }
 
   document.addEventListener('input', (e) => {
     const t = e.target;
-    if (t && t.matches('input[name="custom_label"], input[name$="_custom_label"]')) {
-      applyHintFromLabelInput(t);
-    }
+    if (!(t instanceof HTMLInputElement)) return;
+    const n = t.name || '';
+    if (n === 'custom_label' || n.endsWith('_custom_label')) void applyHintFromLabelInput(t);
   });
-  refreshPending();
+
+  if (hintsChooseBtn && hintsInput && hintsName) {
+    hintsChooseBtn.addEventListener('click', () => hintsInput.click());
+    hintsInput.addEventListener('change', () => {
+      const file = hintsInput.files && hintsInput.files[0];
+      hintsName.textContent = file ? file.name : T.noHints;
+    });
+  }
 })();
 </script>
 {% endblock %}

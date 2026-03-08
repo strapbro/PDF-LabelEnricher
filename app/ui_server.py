@@ -5,8 +5,10 @@ import csv
 import json
 import os
 import re
+import signal
 import shutil
 import threading
+import zipfile
 from difflib import SequenceMatcher
 from datetime import datetime
 from pathlib import Path
@@ -20,9 +22,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .batch_manager import BatchManager
-from .item_db import ItemDB
+from .i18n import normalize_ui_language, translate_ui
 from .label_text_extractor import extract_label_signals
-from .overlay_renderer import create_overlay_pdf, get_page_size
+from .overlay_renderer import create_info_panel_overlay_pdf, create_overlay_pdf, get_page_size
 from .pdf_merge import merge_overlays_on_first_page
 from .settings_manager import SettingsManager
 from .utils import setup_logging
@@ -31,11 +33,50 @@ from .utils import setup_logging
 settings = SettingsManager()
 setup_logging(settings.logs_folder / "label_enricher.log")
 batch_manager = BatchManager(settings)
-item_db = ItemDB(settings.items_csv_path, settings.config.get("new_item_defaults", {}))
+item_db = batch_manager.item_db
 
 
 def _templates() -> Jinja2Templates:
-    return Jinja2Templates(directory=str(settings.base_dir / "templates"))
+    tpl = Jinja2Templates(directory=str(settings.base_dir / "templates"))
+    ui_cfg = settings.config.get("ui", {}) or {}
+    tpl.env.globals["comic_mode"] = bool(ui_cfg.get("comic_mode", False))
+    tpl.env.globals["ui_font_mode"] = str(ui_cfg.get("font_mode", "default") or "default")
+    lang = normalize_ui_language(str(ui_cfg.get("language_mode", "en") or "en"))
+    tpl.env.globals["ui_language_mode"] = lang
+    tpl.env.globals["tr"] = lambda text, **kwargs: translate_ui(text, lang=lang, **kwargs)
+    return tpl
+
+def _current_ui_lang() -> str:
+    ui_cfg = settings.config.get("ui", {}) or {}
+    return normalize_ui_language(str(ui_cfg.get("language_mode", "en") or "en"))
+
+
+def _ui(text: str | None, **kwargs: Any) -> str:
+    return translate_ui(text, lang=_current_ui_lang(), **kwargs)
+
+
+def _redirect_with_message(url: str, message: str = "", status_code: int = 303) -> RedirectResponse:
+    if not message:
+        return RedirectResponse(url=url, status_code=status_code)
+    sep = "&" if "?" in url else "?"
+    return RedirectResponse(url=f"{url}{sep}msg={quote_plus(message)}", status_code=status_code)
+
+
+def _redirect_ui(url: str, text: str, status_code: int = 303, **kwargs: Any) -> RedirectResponse:
+    return _redirect_with_message(url, _ui(text, **kwargs), status_code=status_code)
+
+
+def _join_ui_parts(parts: list[str], sep: str = " | ") -> str:
+    return sep.join([str(p) for p in parts if str(p).strip()])
+
+
+def _batch_counts_text(summary: dict[str, Any]) -> str:
+    return _ui(
+        "Matched: {matched}, unresolved: {unresolved}, errors: {errors}",
+        matched=summary.get("matched", 0),
+        unresolved=summary.get("unresolved", 0),
+        errors=summary.get("errors", 0),
+    )
 
 
 def _tail_log(path: Path, lines: int = 50) -> list[str]:
@@ -62,7 +103,10 @@ def _print_file(path: Path) -> bool:
 
 def _schedule_shutdown(delay_seconds: float = 0.8) -> None:
     def _shutdown() -> None:
-        os._exit(0)
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+        except Exception:
+            os._exit(0)
 
     threading.Timer(delay_seconds, _shutdown).start()
 
@@ -72,10 +116,13 @@ def _unresolved() -> list[dict[str, Any]]:
 
 def _human_reason(reason: str) -> str:
     r = (reason or "").strip().lower()
+
     if r == "ambiguous_or_low_confidence":
         return "Could not confidently match this label to one order."
     if r == "amazon_order_not_found_in_report":
         return "Amazon label order ID was not found in the uploaded Amazon report."
+    if r == "no_compatible_order_source":
+        return "No compatible order source was found for this label platform in the current staged batch."
     if r.startswith("missing_required_fields:"):
         code = r.split(":", 1)[1]
         mapping = {
@@ -106,20 +153,22 @@ def _needs_review_rows(limit: int = 15) -> list[dict[str, Any]]:
     rows = item_db.load_rows()
     return [r for r in rows if str(r.get("needs_review", "0")).strip() == "1"][:limit]
 
+
+def _auto_added_review_count() -> int:
+    return item_db.auto_added_review_count()
+
 def _queue_counts() -> tuple[int, int]:
     unresolved_count = len(_unresolved())
     review_count = _needs_review_count()
     return unresolved_count, review_count
 
 
-def _queue_guard_redirect(action: str = "open_combined") -> RedirectResponse | None:
+def _queue_guard_redirect(action: str = "opening combined pdf") -> RedirectResponse | None:
     unresolved_count, review_count = _queue_counts()
     if unresolved_count > 0:
-        msg = f"Address+{unresolved_count}+unprocessed+label(s)+before+{action}."
-        return RedirectResponse(url=f"/unprocessed?msg={msg}", status_code=303)
+        return _redirect_ui("/unprocessed", "Address {count} unprocessed label(s) before {action}.", count=unresolved_count, action=_ui(action))
     if review_count > 0:
-        msg = f"Address+{review_count}+items+needing+review+before+{action}."
-        return RedirectResponse(url=f"/items/review?msg={msg}", status_code=303)
+        return _redirect_ui("/items/review", "Address {count} items needing review before {action}.", count=review_count, action=_ui(action))
     return None
 
 
@@ -176,6 +225,23 @@ def _label_hints_path() -> Path:
 def _norm_hint_header(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").strip().lower())
 
+
+def _normalize_hint_asin(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    upper = raw.upper()
+    direct = re.search(r"\b(B[0-9A-Z]{9})\b", upper)
+    if direct:
+        return direct.group(1)
+    for pattern in [r"/dp/([A-Z0-9]{10})", r"/gp/product/([A-Z0-9]{10})", r"[?&]asin=([A-Z0-9]{10})"]:
+        match = re.search(pattern, raw, re.IGNORECASE)
+        if match:
+            candidate = match.group(1).upper()
+            if re.fullmatch(r"B[0-9A-Z]{9}", candidate):
+                return candidate
+    return ""
+
 def _load_label_hints() -> list[dict[str, str]]:
     p = _label_hints_path()
     if not p.exists():
@@ -209,7 +275,7 @@ def _load_label_hints() -> list[dict[str, str]]:
                 if not label:
                     continue
                 location = (row.get(col_location, "") if col_location else "").strip()
-                asin = (row.get(col_asin, "") if col_asin else "").strip().upper()
+                asin = _normalize_hint_asin((row.get(col_asin, "") if col_asin else "").strip())
                 key = label.lower()
                 prev = out_by_label.get(key, {"label": label, "location": "", "asin": ""})
                 if location and not prev.get("location"):
@@ -239,7 +305,7 @@ def _save_label_hints(rows: list[dict[str, str]]) -> int:
         clean.append({
             "label": label,
             "location": str(r.get("location", "") or "").strip(),
-            "asin": str(r.get("asin", "") or "").strip().upper(),
+            "asin": _normalize_hint_asin(str(r.get("asin", "") or "").strip()),
         })
     p = _label_hints_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -316,6 +382,27 @@ def _unique_path(base_dir: Path, filename: str) -> Path:
         i += 1
 
 
+def _manual_incoming_folder() -> Path:
+    return settings.manual_incoming_folder
+
+
+def _extract_zip_files_into(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    for zip_path in sorted(root.glob("*.zip"), key=lambda p: str(p).lower()):
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                for member in zf.infolist():
+                    if member.is_dir():
+                        continue
+                    target_name = Path(member.filename).name
+                    if not target_name:
+                        continue
+                    dest = _unique_path(root, target_name)
+                    with zf.open(member) as src, dest.open("wb") as out:
+                        shutil.copyfileobj(src, out)
+        except zipfile.BadZipFile:
+            continue
+
 def _available_label_pdfs(extract_zip: bool = False) -> list[Path]:
     if extract_zip:
         batch_manager._extract_zip_files()
@@ -325,16 +412,29 @@ def _available_label_pdfs(extract_zip: bool = False) -> list[Path]:
     return labels
 
 def _manual_label_options() -> list[dict[str, str]]:
-    # Include staged labels plus labels still in unresolved queue.
-    values: set[str] = {str(p) for p in _available_label_pdfs(extract_zip=True)}
+    manual_root = _manual_incoming_folder()
+    _extract_zip_files_into(manual_root)
+    values: set[str] = set()
+    for p in manual_root.rglob("*.pdf"):
+        if "packing slip" not in p.name.lower():
+            values.add(str(p))
+
     unresolved_by_path: dict[str, str] = {}
+    manual_root_str = str(manual_root.resolve()).lower()
     for row in _unresolved():
         p = str(row.get("label_pdf", "") or "").strip()
-        if p:
-            values.add(p)
-            ident = str(row.get("label_identity", "") or "").strip()
-            if ident:
-                unresolved_by_path[p] = ident
+        if not p:
+            continue
+        try:
+            resolved = str(Path(p).resolve()).lower()
+        except Exception:
+            resolved = p.lower()
+        if not resolved.startswith(manual_root_str):
+            continue
+        values.add(p)
+        ident = str(row.get("label_identity", "") or "").strip()
+        if ident:
+            unresolved_by_path[p] = ident
 
     out: list[dict[str, str]] = []
     for s in sorted(values):
@@ -355,8 +455,6 @@ def _manual_label_options() -> list[dict[str, str]]:
         label = p.name if display == p.name else f"{display} ({p.name})"
         out.append({"path": str(p), "label": label})
     return out
-
-
 
 def _latest_reprocess_label_options() -> dict[str, Any]:
     data = batch_manager.latest_batch_reprocess_candidates()
@@ -424,88 +522,125 @@ def _to_float(value: str | float | int | None) -> float:
 def _extract_manual_prefill_from_text(blob: str) -> dict[str, str]:
     text = str(blob or "")
     lower = text.lower()
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
 
     def _grab(pattern: str, flags: int = re.IGNORECASE) -> str:
         m = re.search(pattern, text, flags)
         return (m.group(1).strip() if m else "")
 
-    order_id = _grab(r"\b(\d{3}-\d{7}-\d{7})\b")
-    asin = _grab(r"\b(B[0-9A-Z]{9})\b")
-
-    sku = _grab(r"\bsku\b\s*[:#-]?\s*([A-Z0-9._-]{2,64})")
-    if not sku:
-        m = re.search(r"\bsku\b\s*[:#-]?\s*\n\s*([A-Z0-9._-]{2,64})", text, re.IGNORECASE)
-        sku = (m.group(1).strip() if m else "")
-
-    ebay_item = _grab(r"\b(\d{10,14})\b")
-    tracking = _grab(r"\b(1Z[0-9A-Z]{16}|9[0-9]{19,24}|[0-9]{12,22})\b")
-
-    qty = _grab(r"\b(?:qty|quantity)\b\s*[:#-]?\s*(\d{1,4})")
-    if not qty:
-        qty = _grab(r"(?m)^\s*(\d{1,3})\s+\$?\d")
-    if not qty:
-        qty = "1"
-
-    total = _grab(r"(?im)^\s*(?:grand total|item total)\s*[:$]*\s*\$?\s*([0-9]+(?:\.[0-9]{2})?)")
-    if not total:
-        total = _grab(r"\b(?:total|paid|amount)\b[^\d$]{0,8}\$?\s*([0-9]+(?:\.[0-9]{2})?)")
-
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    def _next_meaningful_after(patterns: list[str]) -> str:
+        for pat in patterns:
+            for i, ln in enumerate(lines):
+                if re.search(pat, ln, re.IGNORECASE):
+                    for cand in lines[i + 1 : i + 6]:
+                        cc = cand.strip(" :,-")
+                        cl = cc.lower()
+                        if not cc:
+                            continue
+                        if cl in {"phone", "item", "order", "shipping", "tracking"}:
+                            continue
+                        if cl.startswith("opens in a new window"):
+                            continue
+                        if re.fullmatch(r"\(\d+\)", cc):
+                            continue
+                        return cc
+        return ""
 
     def _looks_like_title_line(ln: str) -> bool:
-        ll = ln.strip().lower().strip(":")
+        raw = str(ln or "").strip()
+        ll = raw.lower().strip(":")
         if len(ll) < 8:
             return False
-        if re.search(r"\b(?:asin|sku|order item id|condition|tracking|order id|zip|qty|quantity)\b", ll):
+        bad_parts = [
+            "order total includes ebay collected tax",
+            "we collect and remit tax",
+            "learn moreopens",
+            "about ebay",
+            "copyright",
+            "seller hub",
+            "skip to main content",
+            "view more detailsopens",
+            "tell us what you thinkopens",
+            "accessibility, user agreement",
+        ]
+        if any(bp in ll for bp in bad_parts):
             return False
-        header_words = {
-            "order contents",
-            "status",
-            "image",
-            "product name",
-            "more information",
-            "unit price",
-            "proceeds",
-            "shipping address",
-            "order date",
-            "shipping service",
-            "buyer name",
-            "seller name",
-            "order summary",
-            "item subtotal",
-            "item total",
-            "grand total",
-            "tax",
-            "shipped",
-            "package 1",
-            "sales proceeds",
-        }
-        if ll in header_words:
+        if re.search(r"\b(?:asin|sku|order item id|condition|tracking|order id|zip|qty|quantity|buyer paid|sold|subtotal|shipping|sales tax|item total|grand total|order total|funds status|payment|ship to|buyer name|seller name|shipping service|sales record no)\b", ll):
+            return False
+        if ll in {"order details", "item", "shipping", "payment", "status", "product name", "order summary", "what your buyer paid"}:
             return False
         if re.fullmatch(r"\$?\d+(?:\.\d{2})?", ll):
             return False
         return True
 
-    start_idx = 0
-    for i, ln in enumerate(lines):
-        if re.search(r"^\s*order contents\s*$", ln, re.IGNORECASE):
-            start_idx = i
-            break
+    def _find_title() -> str:
+        ebay_top = _grab(r"(?is)order details\s+(.+?)\s+shipped")
+        if _looks_like_title_line(ebay_top):
+            return ebay_top
+        marker_patterns = [r"custom label \(sku\)", r"item id\s*:", r"sku\s*:", r"asin\s*:", r"condition\s*:", r"order item id\s*:", r"tracking", r"quantity"]
+        for i, ln in enumerate(lines):
+            if any(re.search(pat, ln, re.IGNORECASE) for pat in marker_patterns):
+                for cand in reversed(lines[max(0, i - 4):i]):
+                    if _looks_like_title_line(cand):
+                        return cand
+        for i, ln in enumerate(lines):
+            if re.fullmatch(r"item", ln, re.IGNORECASE):
+                section: list[str] = []
+                for cand in lines[i + 1 : i + 8]:
+                    if re.search(r"(?:custom label \(sku\)|item id\s*:|sku\s*:|asin\s*:|tracking|quantity)", cand, re.IGNORECASE):
+                        break
+                    if _looks_like_title_line(cand):
+                        section.append(cand)
+                if section:
+                    return max(section, key=len)
+        for i, ln in enumerate(lines):
+            if re.search(r"quantity\s+product details", ln, re.IGNORECASE):
+                section: list[str] = []
+                for cand in lines[i + 1 : i + 10]:
+                    if re.search(r"(?:sku\s*:|asin\s*:|condition\s*:|order item id\s*:|item subtotal|grand total|item total)", cand, re.IGNORECASE):
+                        break
+                    if _looks_like_title_line(cand):
+                        section.append(cand)
+                if section:
+                    return max(section, key=len)
+        candidates = [ln for ln in lines if _looks_like_title_line(ln)]
+        return max(candidates, key=len).strip() if candidates else ""
 
-    stop_idx = len(lines)
-    for i in range(start_idx, len(lines)):
-        ln = lines[i]
-        if re.search(r"\b(?:asin|sku)\s*:", ln, re.IGNORECASE):
-            stop_idx = i
-            break
+    order_id = _grab(r"\b(\d{3}-\d{7}-\d{7})\b")
+    asin = _grab(r"\b(B[0-9A-Z]{9})\b")
+    sku = _grab(r"\bsku\b\s*[:#-]?\s*([A-Z0-9._-]{2,64})")
+    if not sku:
+        m = re.search(r"\bsku\b\s*[:#-]?\s*\n\s*([A-Z0-9._-]{2,64})", text, re.IGNORECASE)
+        sku = (m.group(1).strip() if m else "")
+    ebay_item = _grab(r"\bitem id\b\s*[:#-]?\s*(\d{10,14})")
+    if not ebay_item:
+        ebay_item = _grab(r"\b(\d{10,14})\b")
+    tracking = _grab(r"\btracking\b\s*[:#-]?\s*(1Z[0-9A-Z]{16}|9[0-9]{19,24}|\d{15}|\d{20}|\d{22})")
+    if not tracking:
+        tracking = _grab(r"\b(1Z[0-9A-Z]{16}|9[0-9]{19,24})\b")
+    qty = _grab(r"(?is)\b(?:qty|quantity)\b[^\d]{0,20}(\d{1,4})")
+    if not qty:
+        qty = _grab(r"(?m)^\s*(\d{1,3})\s+\$?\d")
+    if not qty:
+        qty = "1"
+    total = _grab(r"(?im)^\s*(?:grand total|order total|item total)\*{0,2}\s*[:$]*\s*\$?\s*([0-9]+(?:\.\d{2})?)")
+    if not total:
+        total = _grab(r"\b(?:total|paid|amount)\b[^\d$]{0,12}\$?\s*([0-9]+(?:\.\d{2})?)")
 
-    search_lines = lines[start_idx:stop_idx] if stop_idx > start_idx else lines[:stop_idx]
-    candidates = [ln for ln in search_lines if _looks_like_title_line(ln)]
-    title = max(candidates, key=len).strip() if candidates else ""
+    recipient_name = _next_meaningful_after([r"^buyer name:?$", r"^buyer$", r"^ship to$", r"^shipping address:?$"])
+    if not recipient_name:
+        recipient_name = _grab(r"(?ims)^buyer\s*[\r\n]+\s*([A-Za-z][^\n]{1,80})$")
+    if not recipient_name:
+        recipient_name = _grab(r"(?im)^buyer\s+([A-Za-z][^\n]{1,80})$")
+    if recipient_name and (recipient_name.strip().isdigit() or recipient_name.strip() == ebay_item):
+        recipient_name = ""
 
-    platform = "amazon" if ("amazon" in lower or asin or sku) else "ebay"
-    item_key = sku or asin or ebay_item
-    label_ref = tracking or order_id
+    title = _find_title()
+    platform = "ebay" if (("ebay" in lower or ebay_item) and not sku) else ("amazon" if ("amazon" in lower or asin or sku) else "amazon")
+    item_key = sku or ebay_item or asin
+    label_ref = tracking or recipient_name or ""
+    if platform == "ebay" and label_ref and label_ref == item_key:
+        label_ref = recipient_name or ""
 
     return {
         "platform": platform,
@@ -519,7 +654,8 @@ def _extract_manual_prefill_from_text(blob: str) -> dict[str, str]:
         "custom_label": "",
         "location": "",
         "use_title_as_label": "1",
-    }
+                "messy_text": "",
+            }
 
 
 def _split_manual_text_chunks(blob: str) -> list[str]:
@@ -527,32 +663,49 @@ def _split_manual_text_chunks(blob: str) -> list[str]:
     if not text:
         return []
 
+    def _split_on_positions(matches: list[re.Match[str]]) -> list[str]:
+        chunks: list[str] = []
+        for i, m in enumerate(matches):
+            start = m.start()
+            end = matches[i + 1].start() if (i + 1) < len(matches) else len(text)
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+        return chunks
+
+    skip_matches = list(re.finditer(r"(?im)^skip to main content\s*$", text))
+    if len(skip_matches) >= 2:
+        chunks = _split_on_positions(skip_matches)
+        if chunks:
+            return chunks
+
+    detail_matches = list(re.finditer(r"(?im)^order details\s*$", text))
+    if len(detail_matches) >= 2:
+        chunks = _split_on_positions(detail_matches)
+        if chunks:
+            return chunks
+
+    ship_matches = list(re.finditer(r"(?im)^shipping address:\s*$", text))
+    if len(ship_matches) >= 2:
+        chunks = _split_on_positions(ship_matches)
+        if chunks:
+            return chunks
+
     order_matches = list(re.finditer(r"\b\d{3}-\d{7}-\d{7}\b", text))
     if len(order_matches) >= 2:
-        chunks: list[str] = []
-        for i, m in enumerate(order_matches):
-            start = m.start()
-            end = order_matches[i + 1].start() if (i + 1) < len(order_matches) else len(text)
-            chunk = text[start:end].strip()
-            if chunk:
-                chunks.append(chunk)
+        chunks = _split_on_positions(order_matches)
         if chunks:
             return chunks
 
-    marker_matches = list(re.finditer(r"(?im)^\s*order contents\s*$", text))
-    if len(marker_matches) >= 2:
-        chunks = []
-        for i, m in enumerate(marker_matches):
-            start = m.start()
-            end = marker_matches[i + 1].start() if (i + 1) < len(marker_matches) else len(text)
-            chunk = text[start:end].strip()
-            if chunk:
-                chunks.append(chunk)
+    ebay_order_matches = list(re.finditer(r"\b\d{2}-\d{5}-\d{5}\b", text))
+    if len(ebay_order_matches) >= 2:
+        chunks = _split_on_positions(ebay_order_matches)
         if chunks:
             return chunks
-
     parts = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
     return parts if parts else [text]
+
+
 def _manual_batch_defaults(label_options: list[dict[str, str]], limit: int = 12) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     for opt in label_options[: max(1, min(limit, len(label_options)))]:
@@ -570,6 +723,7 @@ def _manual_batch_defaults(label_options: list[dict[str, str]], limit: int = 12)
                 "total_paid": "",
                 "location": "",
                 "use_title_as_label": "1",
+                "messy_text": "",
             }
         )
     if not out:
@@ -587,6 +741,7 @@ def _manual_batch_defaults(label_options: list[dict[str, str]], limit: int = 12)
                 "total_paid": "",
                 "location": "",
                 "use_title_as_label": "1",
+                "messy_text": "",
             }
         )
     return out
@@ -605,16 +760,17 @@ def _manual_rows_from_form(form: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "label_pdf": str(form.get(prefix + "label_pdf", "") or "").strip(),
                 "platform": str(form.get(prefix + "platform", "amazon") or "amazon").strip().lower(),
-                "order_id": str(form.get(prefix + "order_id", "") or "").strip(),
+                "order_id": "",
                 "item_key": str(form.get(prefix + "item_key", "") or "").strip(),
                 "label_ref": str(form.get(prefix + "label_ref", "") or "").strip(),
-                "item_asin": str(form.get(prefix + "item_asin", "") or "").strip().upper(),
+                "item_asin": "",
                 "title": str(form.get(prefix + "title", "") or "").strip(),
                 "custom_label": str(form.get(prefix + "custom_label", "") or "").strip(),
                 "quantity": str(form.get(prefix + "quantity", "1") or "1").strip(),
                 "total_paid": str(form.get(prefix + "total_paid", "") or "").strip(),
                 "location": str(form.get(prefix + "location", "") or "").strip(),
                 "use_title_as_label": "1" if form.get(prefix + "use_title_as_label") else "0",
+                "messy_text": str(form.get(prefix + "messy_text", "") or ""),
             }
         )
     return rows
@@ -645,7 +801,42 @@ def _manual_lookup_row(
     return None
 
 
-TRACKING_REF_RE = re.compile(r"\b(1Z[0-9A-Z]{16}|9[0-9]{19,24}|[0-9]{12,22})\b", re.IGNORECASE)
+def _apply_manual_db_prefill(prefill: dict[str, Any]) -> dict[str, Any]:
+    data = dict(prefill or {})
+    platform = str(data.get("platform", "amazon") or "amazon").strip().lower()
+    key = str(data.get("item_key", "") or "").strip()
+    asin = str(data.get("item_asin", "") or "").strip().upper()
+    if platform == "amazon" and not asin and key.upper().startswith("B") and len(key) == 10:
+        asin = key.upper()
+        data["item_asin"] = asin
+
+    row = _manual_lookup_row(item_db.index(), platform, key, asin) if (key or asin) else None
+    if row is None:
+        return data
+
+    db_label = str(row.get("custom_label", "") or "").strip()
+    db_title = str(row.get("item_title", "") or "").strip()
+    db_location = str(row.get("location", "") or "").strip()
+    db_sku = str(row.get("amazon_sku", "") or "").strip()
+    db_asin = str(row.get("amazon_asin", "") or "").strip().upper()
+    db_ebay = str(row.get("ebay_item_number", "") or "").strip()
+
+    if db_label:
+        data["custom_label"] = db_label
+    if db_title and not str(data.get("title", "") or "").strip():
+        data["title"] = db_title
+    if db_location:
+        data["location"] = db_location
+    if platform == "amazon":
+        if db_sku and not key:
+            data["item_key"] = db_sku
+        if db_asin and not asin:
+            data["item_asin"] = db_asin
+    if platform == "ebay" and db_ebay and not key:
+        data["item_key"] = db_ebay
+    return data
+
+TRACKING_REF_RE = re.compile(r"\b(1Z[0-9A-Z]{16}|9[0-9]{19,24}|\d{15}|\d{20}|\d{22})\b", re.IGNORECASE)
 
 def _looks_like_tracking_ref(value: str) -> bool:
     return bool(TRACKING_REF_RE.search(str(value or "").strip()))
@@ -790,6 +981,7 @@ def _layout_ui_defaults() -> dict[str, Any]:
         strip_thickness = int(layout.get("margin_box_width", strip_thickness))
 
     output_sort = settings.config.get("output_sort", {})
+    ui_cfg = settings.config.get("ui", {}) if isinstance(settings.config.get("ui", {}), dict) else {}
     enabled_fields = output_sort.get("enabled_fields", {}) if isinstance(output_sort.get("enabled_fields", {}), dict) else {}
     directions = output_sort.get("directions", {}) if isinstance(output_sort.get("directions", {}), dict) else {}
     priorities = output_sort.get("priority_fields", ["label", "location", "qty", "item_key"])
@@ -799,7 +991,9 @@ def _layout_ui_defaults() -> dict[str, Any]:
         "margin_direction": margin_direction,
         "margin_mode": "both" if str(layout.get("overflow_mode", "backside")) == "secondary_margin" else "single",
         "font_size": int(layout.get("font_size", 16)),
+        "backside_font_size": int(layout.get("backside_font_size", layout.get("font_size", 20))),
         "line_spacing": int(layout.get("line_spacing", 20)),
+        "backside_line_spacing": int(layout.get("backside_line_spacing", layout.get("line_spacing", 24))),
         "strip_thickness": strip_thickness,
         "edge_padding": int(layout.get("edge_inset_y", 8)),
         "side_padding": int(layout.get("edge_inset_x", 8)),
@@ -812,7 +1006,10 @@ def _layout_ui_defaults() -> dict[str, Any]:
         "inline_separator": str(layout.get("inline_separator", " | ")),
         "show_field_labels": bool(layout.get("show_field_labels", True)),
         "page_mode": str(layout.get("page_mode", "half_sheet_top")),
+        "render_mode": str(layout.get("overlay_mode", "margin")),
         "archive_retention_days": int(settings.config.get("admin", {}).get("archive_retention_days", 14)),
+        "ui_language_mode": str(ui_cfg.get("language_mode", "en") or "en"),
+        "ui_font_mode": str(ui_cfg.get("font_mode", "default") or "default"),
         "output_sort_mode": str(output_sort.get("mode", "processed")),
         "sort_priority_1": str((priorities + ["", "", "", ""])[0]),
         "sort_priority_2": str((priorities + ["", "", "", ""])[1]),
@@ -835,7 +1032,9 @@ def _build_preview_config(
     margin_direction: str,
     margin_mode: str,
     font_size: int,
+    backside_font_size: int,
     line_spacing: int,
+    backside_line_spacing: int,
     strip_thickness: int,
     edge_padding: int,
     side_padding: int,
@@ -848,6 +1047,7 @@ def _build_preview_config(
     inline_separator: str,
     show_field_labels: bool,
     page_mode: str,
+    render_mode: str = "margin",
     output_sort_mode: str = "processed",
     sort_priority_1: str = "label",
     sort_priority_2: str = "location",
@@ -868,7 +1068,9 @@ def _build_preview_config(
     layout = cfg.setdefault("print_layout", {})
 
     layout["font_size"] = int(font_size)
+    layout["backside_font_size"] = int(backside_font_size)
     layout["line_spacing"] = int(line_spacing)
+    layout["backside_line_spacing"] = int(backside_line_spacing)
     layout["edge_inset_x"] = int(side_padding)
     layout["edge_inset_y"] = int(edge_padding)
     layout["text_align"] = str(text_align)
@@ -876,6 +1078,8 @@ def _build_preview_config(
     layout["inline_separator"] = str(inline_separator)
     layout["show_field_labels"] = bool(show_field_labels)
     layout["page_mode"] = page_mode
+    mode = str(render_mode or "margin").strip().lower()
+    layout["overlay_mode"] = mode if mode in {"margin", "backside", "both"} else "margin"
 
     if margin_direction == "left_right":
         layout["orientation_mode"] = "rotated_90"
@@ -924,8 +1128,6 @@ def _build_preview_config(
         },
     }
     return cfg
-
-
 def _sample_lines_for_order(field_order_csv: str, inline_fields_csv: str, show_field_labels: bool, inline_separator: str, line_groups_csv: str = "") -> list[str]:
     field_order_csv, inline_fields_csv = _apply_line_layout_mode("custom", field_order_csv, inline_fields_csv)
     tokens = [x.strip().lower() for x in (field_order_csv or "").split(",") if x.strip()]
@@ -949,8 +1151,6 @@ def _sample_lines_for_order(field_order_csv: str, inline_fields_csv: str, show_f
             used.update([f for f in fields if f in sample_map])
             if parts:
                 out.append((inline_separator or " | ").join(parts))
-        rem = [sample_map[t] for t in tokens if t in sample_map and t not in used]
-        out.extend(rem)
         return out
 
     out: list[str] = []
@@ -970,6 +1170,74 @@ def _sample_lines_for_order(field_order_csv: str, inline_fields_csv: str, show_f
         out.append((inline_separator or " | ").join(run))
     return out
 
+def _order_link_for(platform: str, order_id: str) -> str:
+    p = str(platform or "").strip().lower()
+    oid = str(order_id or "").strip()
+    if not oid:
+        return ""
+    if p == "amazon":
+        return f"https://sellercentral.amazon.com/orders-v3/order/{oid}"
+    if p == "ebay":
+        return f"https://www.ebay.com/mesh/ord/details?orderid={oid}"
+    return ""
+
+
+def _batch_dirs() -> list[Path]:
+    rows = [p for p in settings.processed_root_folder.glob("batch_*") if p.is_dir()]
+    rows.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return rows
+
+
+def _load_batch_report_rows(batch_dir: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    report_path = batch_dir / "batch_report.json"
+    if not report_path.exists():
+        return {}, []
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}, []
+    results = list(report.get("results", []) if isinstance(report, dict) else [])
+    matched = [r for r in results if str(r.get("status", "")).lower() == "matched"]
+    rows: list[dict[str, Any]] = []
+    for i, r in enumerate(matched):
+        order_id = str(r.get("order_id", "") or "").strip()
+        platform = str(r.get("platform", "") or "").strip().lower()
+        process_index = int(r.get("process_index", i) or i)
+        qty = int(r.get("quantity_total", r.get("sort_qty", 0)) or 0)
+        total_paid = r.get("total_paid", "")
+        if isinstance(total_paid, (int, float)):
+            total_paid = f"{float(total_paid):.2f}"
+        item_keys = r.get("item_keys", []) or []
+        if isinstance(item_keys, list):
+            item_keys_text = ", ".join([str(x) for x in item_keys if str(x).strip()])
+        else:
+            item_keys_text = str(item_keys or "")
+        item_titles = r.get("item_titles", []) or []
+        if isinstance(item_titles, list):
+            item_titles_text = " | ".join([str(x) for x in item_titles if str(x).strip()])
+        else:
+            item_titles_text = str(item_titles or "")
+        rows.append(
+            {
+                "process_index": process_index,
+                "order_id": order_id,
+                "platform": platform,
+                "name": str(r.get("ship_name", "") or ""),
+                "zip": str(r.get("ship_postal", "") or ""),
+                "tracking": str(r.get("tracking_number", "") or ""),
+                "carrier": str(r.get("carrier", "") or ""),
+                "qty": qty,
+                "total_paid": str(total_paid or ""),
+                "item_keys": item_keys_text,
+                "item_titles": item_titles_text,
+                "output_pdf": str(r.get("output_pdf", "") or ""),
+                "order_link": _order_link_for(platform, order_id),
+            }
+        )
+    rows.sort(key=lambda x: int(x.get("process_index", 0)))
+    return report if isinstance(report, dict) else {}, rows
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Label Enricher")
 
@@ -979,6 +1247,7 @@ def create_app() -> FastAPI:
     def dashboard(request: Request, msg: str = "", stale_open: int = 0):
         status = batch_manager.scan_inputs()
         latest_batch = batch_manager.latest_batch_snapshot()
+        reprocess_preview = batch_manager.latest_batch_reprocess_candidates()
         return _templates().TemplateResponse(
             "dashboard.html",
             {
@@ -988,12 +1257,43 @@ def create_app() -> FastAPI:
                 "log_lines": _tail_log(settings.logs_folder / "label_enricher.log"),
                 "unresolved": _unresolved_for_ui(),
                 "latest_batch": latest_batch,
+                "reprocess_preview": reprocess_preview,
                 "needs_review_count": _needs_review_count(),
                 "needs_review_rows": _needs_review_rows(),
+                "auto_added_review_count": _auto_added_review_count(),
                 "stale_open": bool(stale_open),
             },
         )
 
+    @app.get("/batch-table", response_class=HTMLResponse)
+    def batch_table_page(request: Request, batch: str = "latest", msg: str = ""):
+        dirs = _batch_dirs()
+        if not dirs:
+            return _templates().TemplateResponse("batch_table.html", {"request": request, "message": _ui("No processed batches found."), "rows": [], "batch_options": [], "selected_batch": "", "summary": {}, "default_sort": "process_index"})
+
+        selected_dir: Path
+        if batch and batch != "latest":
+            cand = settings.processed_root_folder / batch
+            selected_dir = cand if cand.exists() else dirs[0]
+        else:
+            selected_dir = dirs[0]
+
+        report, rows = _load_batch_report_rows(selected_dir)
+        summary = report.get("summary", {}) if isinstance(report, dict) else {}
+        batch_options = [{"name": p.name, "timestamp": datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")} for p in dirs[:50]]
+
+        return _templates().TemplateResponse(
+            "batch_table.html",
+            {
+                "request": request,
+                "message": msg,
+                "rows": rows,
+                "batch_options": batch_options,
+                "selected_batch": selected_dir.name,
+                "summary": summary,
+                "default_sort": "process_index",
+            },
+        )
     @app.post("/upload")
     async def upload(
         files: list[UploadFile] = File(...),
@@ -1009,17 +1309,17 @@ def create_app() -> FastAPI:
             saved += 1
 
         if quick_action != "upload_process_open":
-            return RedirectResponse(url=f"/?msg=Uploaded+{saved}+file(s)+to+staging", status_code=303)
+            return _redirect_ui("/", "Uploaded {count} file(s) to staging", count=saved)
 
         result = batch_manager.process_batch()
         if not result.get("ok"):
-            return RedirectResponse(url=f"/?msg=Uploaded+{saved}+file(s).+Process+failed:+{result.get('error', 'Batch failed')}", status_code=303)
+            return _redirect_ui("/", "Uploaded {count} file(s). Process failed: {error}", count=saved, error=result.get("error", _ui("Batch failed")))
 
         summary = result.get("report", {}).get("summary", {})
-        msg = (
-            f"Uploaded {saved} file(s). Batch complete. "
-            f"Matched: {summary.get('matched', 0)}, unresolved: {summary.get('unresolved', 0)}, errors: {summary.get('errors', 0)}"
-        )
+        parts = [
+            _ui("Uploaded {count} file(s). Batch complete.", count=saved),
+            _batch_counts_text(summary),
+        ]
 
         if int(summary.get("matched", 0) or 0) > 0:
             combined = batch_manager.combine_latest_output_pdfs()
@@ -1027,56 +1327,90 @@ def create_app() -> FastAPI:
                 combined_path = Path(str(combined.get("path", "")))
                 opened = _open_file(combined_path)
                 if opened:
-                    msg += f" | Opened combined PDF ({combined.get('count', 0)} files)"
+                    parts.append(_ui("Opened combined PDF ({count} files)", count=combined.get("count", 0)))
                 else:
-                    msg += f" | Combined PDF ready ({combined.get('count', 0)} files)"
+                    parts.append(_ui("Combined PDF ready ({count} files)", count=combined.get("count", 0)))
 
                 if _parse_bool(auto_print_after_process, False):
                     if _print_file(combined_path):
-                        msg += " | Sent combined PDF to default printer"
+                        parts.append(_ui("Sent combined PDF to default printer"))
                     else:
-                        msg += " | Auto-print failed (check default PDF app/printer)"
+                        parts.append(_ui("Auto-print failed (check default PDF app/printer)"))
             else:
-                msg += " | No combined PDF generated"
+                parts.append(_ui("No combined PDF generated"))
 
         if int(summary.get("processed_slips", 0) or 0) > 0:
-            msg += f" | Packing slips synced: {summary.get('processed_slips', 0)} (items touched: {summary.get('synced_items', 0)})"
+            parts.append(
+                _ui(
+                    "Packing slips synced: {processed} (items touched: {touched})",
+                    processed=summary.get("processed_slips", 0),
+                    touched=summary.get("synced_items", 0),
+                )
+            )
 
-        return RedirectResponse(url=f"/?msg={msg}", status_code=303)
+        return _redirect_with_message("/", _join_ui_parts(parts))
 
     @app.post("/staged/clear")
     def clear_staged_files():
         removed = batch_manager.clear_staged_files()
-        return RedirectResponse(url=f"/?msg=Cleared+{removed}+staged+file(s)", status_code=303)
+        return _redirect_ui("/", "Cleared {count} staged file(s)", count=removed)
 
     @app.post("/process")
     def process_batch():
         result = batch_manager.process_batch()
         if not result.get("ok"):
-            return RedirectResponse(url=f"/?msg={result.get('error', 'Batch failed')}", status_code=303)
+            return _redirect_with_message("/", str(result.get("error", _ui("Batch failed"))))
         summary = result.get("report", {}).get("summary", {})
-        msg = f"Batch complete. Matched: {summary.get('matched', 0)}, unresolved: {summary.get('unresolved', 0)}, errors: {summary.get('errors', 0)}"
+        parts = [_ui("Batch complete."), _batch_counts_text(summary)]
         if int(summary.get("matched", 0) or 0) > 0:
             combined = batch_manager.combine_latest_output_pdfs()
             if combined.get("ok"):
-                msg += f" | Combined PDF ready ({combined.get('count', 0)} files)"
+                parts.append(_ui("Combined PDF ready ({count} files)", count=combined.get("count", 0)))
         if int(summary.get("processed_slips", 0) or 0) > 0:
-            msg += f" | Packing slips synced: {summary.get('processed_slips', 0)} (items touched: {summary.get('synced_items', 0)})"
-        return RedirectResponse(url=f"/?msg={msg}", status_code=303)
+            parts.append(
+                _ui(
+                    "Packing slips synced: {processed} (items touched: {touched})",
+                    processed=summary.get("processed_slips", 0),
+                    touched=summary.get("synced_items", 0),
+                )
+            )
+        return _redirect_with_message("/", _join_ui_parts(parts))
+
+
+    @app.get("/process/reprocess-latest/confirm", response_class=HTMLResponse)
+    def reprocess_latest_confirm_page(request: Request, msg: str = ""):
+        preview = batch_manager.latest_batch_reprocess_candidates()
+        names = list(preview.get("restage_preview_names", []) if isinstance(preview, dict) else [])
+        total = int(preview.get("restage_file_count", 0) if isinstance(preview, dict) else 0)
+        shown = names[:40]
+        more_count = max(0, total - len(shown))
+        return _templates().TemplateResponse(
+            "reprocess_confirm.html",
+            {
+                "request": request,
+                "message": msg,
+                "preview": preview,
+                "preview_names": shown,
+                "preview_more_count": more_count,
+            },
+        )
 
     @app.post("/process/reprocess-latest")
     def reprocess_latest_batch():
         result = batch_manager.reprocess_latest_batch()
         if not result.get("ok"):
-            return RedirectResponse(url=f"/?msg={result.get('error', 'Reprocess failed')}", status_code=303)
+            return _redirect_with_message("/", str(result.get("error", _ui("Reprocess failed"))))
 
         summary = result.get("report", {}).get("summary", {})
-        msg = f"Reprocessed previous batch. Restaged: {result.get('restaged_files', 0)} file(s). Matched: {summary.get('matched', 0)}, unresolved: {summary.get('unresolved', 0)}, errors: {summary.get('errors', 0)}"
+        parts = [
+            _ui("Reprocessed previous batch. Restaged: {count} file(s).", count=result.get("restaged_files", 0)),
+            _batch_counts_text(summary),
+        ]
         if int(summary.get("matched", 0) or 0) > 0:
             combined = batch_manager.combine_latest_output_pdfs()
             if combined.get("ok"):
-                msg += f" | Combined PDF ready ({combined.get('count', 0)} files)"
-        return RedirectResponse(url=f"/?msg={msg}", status_code=303)
+                parts.append(_ui("Combined PDF ready ({count} files)", count=combined.get("count", 0)))
+        return _redirect_with_message("/", _join_ui_parts(parts))
 
     @app.get("/reprocess-select", response_class=HTMLResponse)
     def reprocess_select_page(request: Request, msg: str = ""):
@@ -1098,62 +1432,63 @@ def create_app() -> FastAPI:
         selected_order_ids = [str(v) for v in form.getlist("selected_labels") if str(v).strip()]
         result = batch_manager.reprocess_selected_from_latest(selected_order_ids)
         if not result.get("ok"):
-            return RedirectResponse(url=f"/reprocess-select?msg={result.get('error', 'Reprocess failed')}", status_code=303)
+            return _redirect_with_message("/reprocess-select", str(result.get("error", _ui("Reprocess failed"))))
 
         summary = result.get("report", {}).get("summary", {})
-        msg = (
-            f"Reprocessed selected labels. Selected: {result.get('selected_labels', len(selected_order_ids))}. "
-            f"Matched: {summary.get('matched', 0)}, unresolved: {summary.get('unresolved', 0)}, errors: {summary.get('errors', 0)}"
-        )
+        parts = [
+            _ui("Reprocessed selected labels. Selected: {selected}.", selected=result.get("selected_labels", len(selected_order_ids))),
+            _batch_counts_text(summary),
+        ]
 
         combined = result.get("combined", {})
         if isinstance(combined, dict) and combined.get("ok"):
             settings.open_folder(Path(str(combined.get("path", ""))))
-            msg += f" | Opened combined PDF ({combined.get('count', 0)} files)"
+            parts.append(_ui("Opened combined PDF ({count} files)", count=combined.get("count", 0)))
 
-        return RedirectResponse(url=f"/reprocess-select?msg={msg}", status_code=303)
+        return _redirect_with_message("/reprocess-select", _join_ui_parts(parts))
     @app.post("/batch/combine-latest")
     def combine_latest():
         result = batch_manager.combine_latest_output_pdfs()
         if not result.get("ok"):
-            return RedirectResponse(url=f"/?msg={result.get('error', 'Combine failed')}", status_code=303)
-        return RedirectResponse(url=f"/?msg=Combined+{result.get('count', 0)}+PDFs:+{result.get('path', '')}", status_code=303)
+            return _redirect_with_message("/", str(result.get("error", _ui("Combine failed"))))
+        return _redirect_ui("/", "Combined {count} PDFs: {path}", count=result.get('count', 0), path=result.get('path', ''))
 
     @app.post("/batch/open-combined-latest")
     def open_combined_latest(force_open: str | None = Form(None), reprocess_if_stale: str | None = Form(None)):
-        guard = _queue_guard_redirect("opening+combined+pdf")
+        guard = _queue_guard_redirect("opening combined pdf")
         if guard is not None:
             return guard
 
         stale = _settings_changed_since_latest_batch()
         if stale and not _parse_bool(force_open, False) and not _parse_bool(reprocess_if_stale, False):
-            return RedirectResponse(
-                url="/?msg=Layout+settings+changed+since+last+batch.+Reprocess+before+opening+for+accurate+output.&stale_open=1",
+            return _redirect_with_message(
+                "/?stale_open=1",
+                _ui("Layout settings changed since last batch. Reprocess before opening for accurate output."),
                 status_code=303,
             )
 
         if stale and _parse_bool(reprocess_if_stale, False):
             processed = batch_manager.process_batch()
             if not processed.get("ok"):
-                return RedirectResponse(url=f"/?msg=Reprocess+failed:+{processed.get('error', 'Batch failed')}", status_code=303)
+                return _redirect_ui("/", "Reprocess failed: {error}", error=processed.get("error", _ui("Batch failed")))
             summary = processed.get("report", {}).get("summary", {})
             if int(summary.get("matched", 0) or 0) <= 0:
-                return RedirectResponse(url="/?msg=Reprocess+completed+but+no+matched+labels+were+generated", status_code=303)
+                return _redirect_ui("/", "Reprocess completed but no matched labels were generated")
 
         snap = batch_manager.latest_batch_snapshot()
         path = snap.get("combined_pdf", "") if isinstance(snap, dict) else ""
         if not path or (stale and _parse_bool(reprocess_if_stale, False)):
             result = batch_manager.combine_latest_output_pdfs()
             if not result.get("ok"):
-                return RedirectResponse(url=f"/?msg={result.get('error', 'Combine failed')}", status_code=303)
+                return _redirect_with_message("/", str(result.get("error", _ui("Combine failed"))))
             path = result.get("path", "")
 
         if path:
             opened = _open_file(Path(path))
             if opened:
-                return RedirectResponse(url=f"/?msg=Opened+combined+PDF:+{path}", status_code=303)
-            return RedirectResponse(url=f"/?msg=Combined+PDF+ready+but+could+not+auto-open:+{path}", status_code=303)
-        return RedirectResponse(url="/?msg=No+combined+PDF+available", status_code=303)
+                return _redirect_ui("/", "Opened combined PDF: {path}", path=path)
+            return _redirect_ui("/", "Combined PDF ready but could not auto-open: {path}", path=path)
+        return _redirect_ui("/", "No combined PDF available")
 
     @app.post("/open")
     def open_folder(target: str = Form(...)):
@@ -1168,20 +1503,35 @@ def create_app() -> FastAPI:
             ok = settings.open_folder(settings.base_dir)
 
         if ok:
-            return RedirectResponse(url="/?msg=Opened+folder", status_code=303)
-        return RedirectResponse(url="/?msg=Could+not+open+folder+from+app", status_code=303)
+            return _redirect_ui("/", "Opened folder")
+        return _redirect_ui("/", "Could not open folder from app")
 
+
+
+    @app.post("/theme/comic-toggle")
+    def theme_comic_toggle(request: Request):
+        cfg = settings.config
+        ui_cfg = cfg.setdefault("ui", {})
+        cur_font = str(ui_cfg.get("font_mode", "default") or "default")
+        next_font = "default" if cur_font == "comic" else "comic"
+        ui_cfg["font_mode"] = next_font
+        ui_cfg["comic_mode"] = (next_font == "comic")
+        cfg.setdefault("print_layout", {})["comic_mode"] = False
+        settings.save(cfg)
+        dest = request.headers.get("referer") or "/"
+        state = "ON" if next_font == "comic" else "OFF"
+        return _redirect_ui(dest, "Comic Mode {state}", state=state)
 
     @app.post("/app/close", response_class=HTMLResponse)
     def close_app():
         _schedule_shutdown(0.8)
         return HTMLResponse(
-            """
-            <html>
-              <head><title>Label Enricher Closing</title></head>
+            f"""
+            <html lang="{_current_ui_lang()}">
+              <head><meta charset="utf-8"><title>{_ui('Label Enricher Closing')}</title></head>
               <body style="font-family:Segoe UI,Arial,sans-serif;padding:24px;">
-                <h2>Label Enricher is closing...</h2>
-                <p>You can close this tab.</p>
+                <h2>{_ui('Label Enricher is closing...')}</h2>
+                <p>{_ui('You can close this tab.')}</p>
               </body>
             </html>
             """
@@ -1196,7 +1546,9 @@ def create_app() -> FastAPI:
         margin_direction: str = Query("top_bottom"),
         margin_mode: str = Query("both"),
         font_size: int = Query(14),
+        backside_font_size: int = Query(20),
         line_spacing: int = Query(18),
+        backside_line_spacing: int = Query(24),
         strip_thickness: int = Query(32),
         edge_padding: int = Query(8),
         side_padding: int = Query(8),
@@ -1209,6 +1561,7 @@ def create_app() -> FastAPI:
         inline_separator: str = Query(" | "),
         show_field_labels: str | None = Query("1"),
         page_mode: str = Query("half_sheet_top"),
+        render_mode: str = Query("margin"),
     ):
         src = Path(label_pdf)
         if not src.exists():
@@ -1218,7 +1571,9 @@ def create_app() -> FastAPI:
             margin_direction=margin_direction,
             margin_mode=margin_mode,
             font_size=font_size,
+            backside_font_size=backside_font_size,
             line_spacing=line_spacing,
+            backside_line_spacing=backside_line_spacing,
             strip_thickness=strip_thickness,
             edge_padding=edge_padding,
             side_padding=side_padding,
@@ -1231,6 +1586,7 @@ def create_app() -> FastAPI:
             inline_separator=inline_separator,
             show_field_labels=_parse_bool(show_field_labels, True),
             page_mode=page_mode,
+            render_mode=render_mode,
         )
 
         field_order_csv, inline_fields_csv = _apply_line_layout_mode(line_layout_mode, field_order_csv, inline_fields_csv)
@@ -1240,104 +1596,126 @@ def create_app() -> FastAPI:
 
         try:
             page_w, page_h = get_page_size(src)
-            primary_overlay, remaining = create_overlay_pdf(page_w, page_h, lines, cfg, draw_rect=True, region="primary")
-            overlays = [primary_overlay]
-            if margin_mode == "both":
-                secondary_lines = remaining if remaining else []
-                secondary_overlay, still_remaining = create_overlay_pdf(page_w, page_h, secondary_lines, cfg, draw_rect=True, region="secondary")
-                overlays.append(secondary_overlay)
+            if render_mode == "backside" and str(page_mode).startswith("half_sheet_"):
+                panel_overlay, _ = create_info_panel_overlay_pdf(page_w, page_h, lines, cfg, draw_rect=True)
+                merge_overlays_on_first_page(src, [panel_overlay], out_pdf)
+            else:
+                primary_overlay, remaining = create_overlay_pdf(page_w, page_h, lines, cfg, draw_rect=True, region="primary")
+                overlays = [primary_overlay]
+                if margin_mode == "both" and render_mode != "backside":
+                    secondary_lines = remaining if remaining else []
+                    secondary_overlay, still_remaining = create_overlay_pdf(page_w, page_h, secondary_lines, cfg, draw_rect=True, region="secondary")
+                    overlays.append(secondary_overlay)
 
-                layout = cfg.get("print_layout", {})
-                orientation = str(layout.get("orientation_mode", "normal"))
-                primary_preset = str(layout.get("rotated_primary_preset", layout.get("placement_preset", "")))
-                secondary_preset = str(layout.get("rotated_secondary_preset", ""))
-                side_pair = {primary_preset, secondary_preset} == {"left_margin", "right_margin"}
+                    layout = cfg.get("print_layout", {})
+                    orientation = str(layout.get("orientation_mode", "normal"))
+                    primary_preset = str(layout.get("rotated_primary_preset", layout.get("placement_preset", "")))
+                    secondary_preset = str(layout.get("rotated_secondary_preset", ""))
+                    side_pair = {primary_preset, secondary_preset} == {"left_margin", "right_margin"}
 
-                if still_remaining and orientation == "rotated_90" and side_pair:
-                    spill_cfg = copy.deepcopy(cfg)
-                    spill_layout = spill_cfg.setdefault("print_layout", {})
-                    spill_layout["orientation_mode"] = "normal"
-                    spill_layout["placement_preset"] = "top_margin"
-                    spill_layout["margin_box_height"] = int(layout.get("secondary_strip_height", max(24, int(layout.get("margin_box_height", 36)))))
+                    if still_remaining and orientation == "rotated_90" and side_pair:
+                        spill_cfg = copy.deepcopy(cfg)
+                        spill_layout = spill_cfg.setdefault("print_layout", {})
+                        spill_layout["orientation_mode"] = "normal"
+                        spill_layout["placement_preset"] = "top_margin"
+                        spill_layout["margin_box_height"] = int(layout.get("secondary_strip_height", max(24, int(layout.get("margin_box_height", 36)))))
 
-                    top_spill_overlay, still_remaining = create_overlay_pdf(page_w, page_h, still_remaining, spill_cfg, draw_rect=True, region="primary")
-                    overlays.append(top_spill_overlay)
+                        top_spill_overlay, still_remaining = create_overlay_pdf(page_w, page_h, still_remaining, spill_cfg, draw_rect=True, region="primary")
+                        overlays.append(top_spill_overlay)
 
-                    if still_remaining:
-                        spill_layout["placement_preset"] = "bottom_margin"
-                        bottom_spill_overlay, _ = create_overlay_pdf(page_w, page_h, still_remaining, spill_cfg, draw_rect=True, region="primary")
-                        overlays.append(bottom_spill_overlay)
+                        if still_remaining:
+                            spill_layout["placement_preset"] = "bottom_margin"
+                            bottom_spill_overlay, _ = create_overlay_pdf(page_w, page_h, still_remaining, spill_cfg, draw_rect=True, region="primary")
+                            overlays.append(bottom_spill_overlay)
 
-            merge_overlays_on_first_page(src, overlays, out_pdf)
+                if render_mode == "both":
+                    panel_overlay, _ = create_info_panel_overlay_pdf(page_w, page_h, lines, cfg, draw_rect=True)
+                    overlays.append(panel_overlay)
+                merge_overlays_on_first_page(src, overlays, out_pdf)
 
             with fitz.open(str(out_pdf)) as doc:
                 pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
                 return Response(content=pix.tobytes("png"), media_type="image/png")
         except Exception:
             return Response(content=b"", media_type="image/png")
-
     @app.get("/items", response_class=HTMLResponse)
     def items_page(request: Request, msg: str = ""):
         rows = _rows_with_keys(item_db.load_rows())
         staged_sync = _load_items_sync_stage()
-        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "items", "label_hints": _load_label_hints(), "staged_sync": staged_sync, "app_root_path": str(settings.base_dir), "items_csv_mtime_iso": _safe_items_mtime_iso(), "items_csv_path": str(settings.items_csv_path)})
+        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "items", "label_hints": _load_label_hints(), "staged_sync": staged_sync, "app_root_path": str(settings.base_dir), "items_csv_mtime_iso": _safe_items_mtime_iso(), "items_csv_path": str(settings.items_csv_path), "auto_added_review_count": _auto_added_review_count()})
     @app.get("/items/review", response_class=HTMLResponse)
     def items_review_page(request: Request, msg: str = ""):
         rows = _rows_with_keys([r for r in item_db.load_rows() if str(r.get("needs_review", "0")).strip() == "1"])
-        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "review", "label_hints": _load_label_hints(), "app_root_path": str(settings.base_dir), "items_csv_mtime_iso": _safe_items_mtime_iso(), "items_csv_path": str(settings.items_csv_path)})
+        return _templates().TemplateResponse("items.html", {"request": request, "rows": rows, "message": msg, "backups_count": _items_backup_count(), "link_targets": _items_link_targets(rows), "page_mode": "review", "label_hints": _load_label_hints(), "app_root_path": str(settings.base_dir), "items_csv_mtime_iso": _safe_items_mtime_iso(), "items_csv_path": str(settings.items_csv_path), "auto_added_review_count": _auto_added_review_count()})
 
     @app.post("/items/save")
     async def items_save(request: Request):
         form = await request.form()
+        source_page = str(form.get("source_page", "items") or "items").strip().lower()
+        target = "/items/review" if source_page == "review" else "/items"
         try:
             kept, deleted = item_db.update_rows_from_form(dict(form))
-            return RedirectResponse(url=f"/items?msg=Saved+{kept}+row(s);+deleted+{deleted}+row(s)", status_code=303)
+            if source_page == "review":
+                remaining = _needs_review_count()
+                return _redirect_ui(target, "Saved review changes. Remaining items needing review: {remaining}", remaining=remaining)
+            return _redirect_ui(target, "Saved {kept} row(s); deleted {deleted} row(s)", kept=kept, deleted=deleted)
         except PermissionError:
-            return RedirectResponse(
-                url="/items?msg=Could+not+save+items.csv.+Please+close+items.csv+in+Excel+and+try+again",
-                status_code=303,
+            return _redirect_ui(
+                target,
+                "Could not save items.csv. Please close items.csv in Excel and try again",
             )
         except OSError as exc:
-            return RedirectResponse(url=f"/items?msg=Could+not+save+items.csv:+{type(exc).__name__}", status_code=303)
+            return _redirect_ui(target, "Could not save items.csv: {error}", error=type(exc).__name__)
 
     @app.get("/items/export")
     def items_export():
         if not settings.items_csv_path.exists():
-            return RedirectResponse(url="/items?msg=items.csv+not+found", status_code=303)
+            return _redirect_ui("/items", "items.csv not found")
         return FileResponse(path=str(settings.items_csv_path), filename="items.csv", media_type="text/csv")
 
     @app.post("/items/backup")
     def items_backup_now(from_page: str = Form("items")):
         backup = item_db.create_backup_now()
         if backup:
-            msg = quote_plus(f"Backup created: {backup.name} in {backup.parent}")
+            msg = _ui("Backup created: {name} in {folder}", name=backup.name, folder=backup.parent)
         else:
-            msg = "No+backup+created"
+            msg = _ui("No backup created")
         if from_page == "dashboard":
-            return RedirectResponse(url=f"/?msg={msg}", status_code=303)
-        return RedirectResponse(url=f"/items?msg={msg}", status_code=303)
+            return _redirect_with_message("/", msg)
+        return _redirect_with_message("/items", msg)
 
     @app.post("/items/open-backups")
     def items_open_backups(from_page: str = Form("items")):
         ok = settings.open_folder(item_db.backups_dir)
-        msg = "Opened+items+backups+folder" if ok else "Could+not+open+backups+folder"
+        msg = _ui("Opened items backups folder") if ok else _ui("Could not open backups folder")
         if from_page == "dashboard":
-            return RedirectResponse(url=f"/?msg={msg}", status_code=303)
-        return RedirectResponse(url=f"/items?msg={msg}", status_code=303)
-
+            return _redirect_with_message("/", msg)
+        return _redirect_with_message("/items", msg)
     @app.post("/items/clear-needs-review")
-    def items_clear_needs_review(from_page: str = Form("dashboard")):
-        cleared = item_db.clear_needs_review()
+    def items_clear_needs_review(from_page: str = Form("dashboard"), mode: str = Form("clear_flags")):
+        result = item_db.clear_needs_review_with_mode(mode)
+        cleared = int(result.get("cleared", 0))
+        deleted = int(result.get("deleted", 0))
+        parts: list[str] = []
+        if cleared:
+            parts.append(_ui("cleared {count} review flag(s)", count=cleared))
+        if deleted:
+            parts.append(_ui("deleted {count} auto-added row(s)", count=deleted))
+        if not parts:
+            parts.append(_ui("no review rows changed"))
+        msg = _ui("Needs review update: {details}", details=", ".join(parts))
         if from_page == "items":
-            return RedirectResponse(url=f"/items?msg=Cleared+{cleared}+needs-review+item(s)", status_code=303)
-        return RedirectResponse(url=f"/?msg=Cleared+{cleared}+needs-review+item(s)", status_code=303)
+            return _redirect_with_message("/items", msg)
+        if from_page == "review":
+            return _redirect_with_message("/items/review", msg)
+        return _redirect_with_message("/", msg)
 
     @app.post("/items/replace")
     async def items_replace_items_csv(items_csv_file: UploadFile = File(...)):
         filename = Path(str(items_csv_file.filename or "items.csv")).name
         suffix = Path(filename).suffix.lower()
         if suffix not in (".csv", ".txt", ".tsv"):
-            return RedirectResponse(url="/items?msg=Upload+a+CSV/TXT/TSV+file+to+replace+items.csv", status_code=303)
+            return _redirect_ui("/items", "Upload a CSV/TXT/TSV file to replace items.csv")
 
         temp = settings.incoming_batch_folder / f"_items_replace_{filename}"
         with temp.open("wb") as f:
@@ -1347,76 +1725,20 @@ def create_app() -> FastAPI:
         try:
             shutil.copyfile(temp, settings.items_csv_path)
             item_db.load_rows()
-            backup_name = backup.name if backup else "no backup"
-            msg = quote_plus(f"Replaced items.csv with {filename}. Previous file backed up as {backup_name}.")
+            backup_name = backup.name if backup else _ui("no backup")
+            msg = _ui("Replaced items.csv with {filename}. Previous file backed up as {backup_name}.", filename=filename, backup_name=backup_name)
         except PermissionError:
-            msg = "Could+not+replace+items.csv.+Please+close+items.csv+in+Excel+and+try+again"
-        except OSError as exc:
-            msg = quote_plus(f"Could not replace items.csv: {type(exc).__name__}")
+            msg = _ui("Could not replace items.csv. Please close items.csv in Excel and try again")
+        except OSError:
+            msg = _ui("Could not replace items.csv: {error}", error="OSError")
         except Exception as exc:
-            msg = quote_plus(f"Could not replace items.csv: {type(exc).__name__}")
+            msg = _ui("Could not replace items.csv: {error}", error=type(exc).__name__)
         finally:
             try:
                 temp.unlink(missing_ok=True)
             except Exception:
                 pass
-        return RedirectResponse(url=f"/items?msg={msg}", status_code=303)
-    @app.post("/items/sync")
-    async def items_sync(master_csv: UploadFile = File(...)):
-        temp = settings.incoming_batch_folder / f"_sync_{master_csv.filename}"
-        with temp.open("wb") as f:
-            shutil.copyfileobj(master_csv.file, f)
-        changed = item_db.sync_from_master_csv(temp)
-        try:
-            temp.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return RedirectResponse(url=f"/items?msg=Synced+{changed}+updates", status_code=303)
-
-
-    @app.post("/hints/upload")
-    async def hints_upload(from_page: str = Form("items"), hints_csv: UploadFile = File(...)):
-        temp = settings.incoming_batch_folder / f"_hints_{hints_csv.filename}"
-        with temp.open("wb") as f:
-            shutil.copyfileobj(hints_csv.file, f)
-        count = 0
-        try:
-            with temp.open("r", encoding="utf-8-sig", newline="") as f:
-                reader = csv.DictReader(f)
-                fieldnames = reader.fieldnames or []
-                keymap = {_norm_hint_header(h or ""): (h or "") for h in fieldnames}
-                def pick(*aliases: str) -> str | None:
-                    for a in aliases:
-                        h = keymap.get(_norm_hint_header(a))
-                        if h is not None:
-                            return h
-                    return None
-                col_label = pick("internal label", "custom label", "label", "model", "item label")
-                col_location = pick("location", "picking location")
-                col_asin = pick("asin", "amazon asin", "amz asin")
-                if col_label is None and fieldnames:
-                    col_label = fieldnames[0]
-                if col_location is None and len(fieldnames) >= 2:
-                    col_location = fieldnames[1]
-                if col_asin is None and len(fieldnames) >= 3:
-                    col_asin = fieldnames[2]
-                rows: list[dict[str, str]] = []
-                for r in reader:
-                    rows.append({
-                        "label": (r.get(col_label, "") if col_label else "").strip(),
-                        "location": (r.get(col_location, "") if col_location else "").strip(),
-                        "asin": (r.get(col_asin, "") if col_asin else "").strip().upper(),
-                    })
-                count = _save_label_hints(rows)
-        except Exception:
-            count = 0
-        finally:
-            try:
-                temp.unlink(missing_ok=True)
-            except Exception:
-                pass
-        url = "/items" if from_page == "items" else "/manual-entry"
-        return RedirectResponse(url=f"{url}?msg=Saved+{count}+label/location+hint(s)", status_code=303)
+        return _redirect_with_message("/items", msg)
 
     @app.post("/items/sync-stage")
     async def items_sync_stage(master_csv_stage: UploadFile = File(...)):
@@ -1433,39 +1755,43 @@ def create_app() -> FastAPI:
             }
             _save_items_sync_stage(staged)
             cnt = int((staged.get("counts") or {}).get("total", 0))
-            return RedirectResponse(url=f"/items?msg=Staged+{cnt}+import+row(s)+for+review", status_code=303)
+            return _redirect_ui("/items", "Staged {count} import row(s) for review", count=cnt)
         finally:
             try:
                 temp.unlink(missing_ok=True)
             except Exception:
                 pass
-
-    @app.post("/hints/clear")
-    def hints_clear(from_page: str = Form("items")):
-        try:
-            _label_hints_path().unlink(missing_ok=True)
-            msg = "Cleared+label/location+hints"
-        except Exception:
-            msg = "Could+not+clear+label/location+hints"
-        url = "/items" if from_page == "items" else "/manual-entry"
-        return RedirectResponse(url=f"{url}?msg={msg}", status_code=303)
-
     @app.post("/items/sync-apply")
     def items_sync_apply(only_add_new: str = Form("0")):
         staged = _load_items_sync_stage()
         if not staged:
-            return RedirectResponse(url="/items?msg=No+staged+import+found", status_code=303)
+            return _redirect_ui("/items", "No staged import found")
         entries = list(staged.get("entries") or [])
         only_new = str(only_add_new).strip().lower() in ("1", "on", "true", "yes")
         result = item_db.apply_staged_sync(entries, only_add_new=only_new)
         _clear_items_sync_stage()
-        msg = f"Applied+staged+import:+created+{result.get('created',0)},+updated+{result.get('updated',0)},+skipped+{result.get('skipped',0)}"
-        return RedirectResponse(url=f"/items?msg={msg}", status_code=303)
+        return _redirect_ui(
+            "/items",
+            "Applied staged import: created {created}, updated {updated}, skipped {skipped}",
+            created=result.get("created", 0),
+            updated=result.get("updated", 0),
+            skipped=result.get("skipped", 0),
+        )
 
     @app.post("/items/sync-clear")
     def items_sync_clear():
         _clear_items_sync_stage()
-        return RedirectResponse(url="/items?msg=Cleared+staged+import", status_code=303)
+        return _redirect_ui("/items", "Cleared staged import")
+    @app.post("/hints/clear")
+    def hints_clear(from_page: str = Form("items")):
+        try:
+            _label_hints_path().unlink(missing_ok=True)
+            msg = _ui("Cleared label/location hints")
+        except Exception:
+            msg = _ui("Could not clear label/location hints")
+        url = "/items" if from_page == "items" else "/manual-entry"
+        return _redirect_with_message(url, msg)
+
 
     def _render_manual_entry(request: Request, msg: str = "", prefill: dict[str, Any] | None = None):
         label_options = _manual_label_options()
@@ -1511,39 +1837,62 @@ def create_app() -> FastAPI:
     def manual_entry_page(request: Request, msg: str = ""):
         return _render_manual_entry(request, msg=msg)
 
+
+    @app.post("/manual-entry/clear-staged")
+    def manual_entry_clear_staged():
+        root = _manual_incoming_folder()
+        removed = 0
+        for p in root.rglob("*"):
+            if not p.is_file():
+                continue
+            try:
+                p.unlink()
+                removed += 1
+            except Exception:
+                pass
+        try:
+            shutil.rmtree(root / "_unzipped", ignore_errors=True)
+        except Exception:
+            pass
+        return _redirect_ui("/manual-entry", "Cleared {count} manual staged file(s)", count=removed)
+
     @app.post("/manual-entry/upload")
     async def manual_entry_upload(files: list[UploadFile] = File(...)):
         saved = 0
+        manual_root = _manual_incoming_folder()
         for file in files:
-            dest = _unique_path(settings.incoming_batch_folder, file.filename)
+            dest = _unique_path(manual_root, file.filename)
             dest.parent.mkdir(parents=True, exist_ok=True)
             with dest.open("wb") as f:
                 shutil.copyfileobj(file.file, f)
             saved += 1
-        return RedirectResponse(url=f"/manual-entry?msg=Uploaded+{saved}+file(s)+to+incoming/batch", status_code=303)
+            if dest.suffix.lower() == ".zip":
+                _extract_zip_files_into(manual_root)
+        return _redirect_ui("/manual-entry", "Uploaded {count} file(s) to manual staging", count=saved)
 
     @app.post("/manual-entry/parse-text", response_class=HTMLResponse)
     async def manual_entry_parse_text(request: Request, messy_text: str = Form(""), label_pdf: str = Form("")):
-        prefill = _extract_manual_prefill_from_text(messy_text)
+        prefill = _apply_manual_db_prefill(_extract_manual_prefill_from_text(messy_text))
         prefill["messy_text"] = messy_text or ""
         if label_pdf:
             prefill["label_pdf"] = label_pdf
-        return _render_manual_entry(request, msg="Parsed text and pre-filled fields. Verify before creating output.", prefill=prefill)
+        return _render_manual_entry(request, msg=_ui("Parsed text and pre-filled fields. Verify before creating output."), prefill=prefill)
 
     @app.post("/manual-entry/parse-text-batch", response_class=HTMLResponse)
     async def manual_entry_parse_text_batch(request: Request):
         form = await request.form()
-        blob = str(form.get("batch_messy_text", "") or "")
         rows = _manual_rows_from_form(dict(form))
-        chunks = _split_manual_text_chunks(blob)
-        parsed = [_extract_manual_prefill_from_text(ch) for ch in chunks]
 
+        parsed_count = 0
         batch_entries: list[dict[str, str]] = []
         for i, row in enumerate(rows):
             base = dict(row)
-            if i < len(parsed):
-                p = parsed[i]
-                for key in ["platform", "order_id", "item_key", "label_ref", "item_asin", "title", "quantity", "total_paid"]:
+            raw_text = str(form.get(f"row_{i}_messy_text", "") or "")
+            base["messy_text"] = raw_text
+            if raw_text.strip():
+                p = _apply_manual_db_prefill(_extract_manual_prefill_from_text(raw_text))
+                parsed_count += 1
+                for key in ["platform", "item_key", "label_ref", "title", "quantity", "total_paid", "location", "custom_label"]:
                     val = str(p.get(key, "") or "").strip()
                     if val:
                         base[key] = val
@@ -1552,15 +1901,22 @@ def create_app() -> FastAPI:
             batch_entries.append(base)
 
         prefill: dict[str, Any] = {
-            "batch_messy_text": blob,
             "batch_entries": batch_entries,
             "write_to_items": "0",
         }
-        return _render_manual_entry(request, msg=f"Parsed {len(parsed)} text chunk(s) into {len(batch_entries)} manual row(s). Verify before creating.", prefill=prefill)
+        return _render_manual_entry(
+            request,
+            msg=_ui(
+                "Parsed {parsed_count} row text block(s) into {row_count} manual row(s). Verify before creating.",
+                parsed_count=parsed_count,
+                row_count=len(batch_entries),
+            ),
+            prefill=prefill,
+        )
 
     @app.post("/manual-entry/create-batch")
     async def manual_entry_create_batch(request: Request):
-        guard = _queue_guard_redirect("creating+manual+output")
+        guard = _queue_guard_redirect("creating manual output")
         if guard is not None:
             return guard
         form = await request.form()
@@ -1568,7 +1924,7 @@ def create_app() -> FastAPI:
         write_to_items = bool(form.get("write_to_items"))
 
         if not rows:
-            return RedirectResponse(url="/manual-entry?msg=No+manual+rows+to+process", status_code=303)
+            return _redirect_ui("/manual-entry", "No manual rows to process")
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_dir = settings.processed_root_folder / "manual_entries" / f"manual_batch_{ts}"
@@ -1591,7 +1947,7 @@ def create_app() -> FastAPI:
                         src = p
                         break
             if not src.exists():
-                errors.append(f"Row {i}: Label PDF not found")
+                errors.append(_ui("Row {row}: Label PDF not found", row=i))
                 continue
 
             platform = str(r.get("platform", "amazon") or "amazon").strip().lower()
@@ -1601,7 +1957,7 @@ def create_app() -> FastAPI:
             key = str(r.get("item_key", "") or "").strip()
             label_ref = str(r.get("label_ref", "") or "").strip()
             if not label_ref:
-                errors.append(f"Row {i}: Label link reference required")
+                errors.append(_ui("Row {row}: Label link reference required", row=i))
                 continue
 
             asin = str(r.get("item_asin", "") or "").strip().upper()
@@ -1614,7 +1970,7 @@ def create_app() -> FastAPI:
                     reason = f"manual_ebay_safety:{why}"
                     _mark_item_needs_review(platform, key, asin, reason)
                     _append_manual_unresolved(src, reason)
-                    errors.append(f"Row {i}: Manual eBay safety check failed (tracking missing and name is not a strong match)")
+                    errors.append(_ui("Row {row}: Manual eBay safety check failed (tracking missing and name is not a strong match)", row=i))
                     continue
 
 
@@ -1623,7 +1979,7 @@ def create_app() -> FastAPI:
             except Exception:
                 qty = 0
             if qty <= 0:
-                errors.append(f"Row {i}: Quantity invalid")
+                errors.append(_ui("Row {row}: Quantity invalid", row=i))
                 continue
 
 
@@ -1641,10 +1997,10 @@ def create_app() -> FastAPI:
                 label = title
 
             if not label and not key:
-                errors.append(f"Row {i}: Provide internal label or item key")
+                errors.append(_ui("Row {row}: Provide internal label or item key", row=i))
                 continue
             if not label:
-                errors.append(f"Row {i}: Could not derive internal label from key/title")
+                errors.append(_ui("Row {row}: Could not derive internal label from key/title", row=i))
                 continue
 
             if write_to_items and key:
@@ -1729,21 +2085,21 @@ def create_app() -> FastAPI:
                     for pg in rpdf.pages:
                         writer.add_page(pg)
                 except Exception:
-                    errors.append(f"Combine skipped: {pdf_path.name}")
+                    errors.append(_ui("Combine skipped: {name}", name=pdf_path.name))
             combined = out_dir / "combined_manual_output.pdf"
             with combined.open("wb") as f:
                 writer.write(f)
             settings.open_folder(combined)
 
-        msg = f"Manual batch complete. Generated: {len(rendered)}"
+        parts = [_ui("Manual batch complete. Generated: {count}", count=len(rendered))]
         if errors:
             preview = "; ".join(errors[:3])
             if len(errors) > 3:
-                preview += f"; (+{len(errors)-3} more)"
-            msg += f" | Errors: {len(errors)} | {preview}"
+                preview += "; " + _ui("(+{count} more)", count=len(errors) - 3)
+            parts.append(_ui("Errors: {count} | {preview}", count=len(errors), preview=preview))
         if rendered:
-            msg += " | Opened combined manual PDF"
-        return RedirectResponse(url=f"/manual-entry?msg={msg}", status_code=303)
+            parts.append(_ui("Opened combined manual PDF"))
+        return _redirect_with_message("/manual-entry", _join_ui_parts(parts))
 
     @app.post("/manual-entry/create")
     async def manual_entry_create(
@@ -1761,7 +2117,7 @@ def create_app() -> FastAPI:
         use_title_as_label: str | None = Form(None),
         write_to_items: str | None = Form(None),
     ):
-        guard = _queue_guard_redirect("creating+manual+output")
+        guard = _queue_guard_redirect("creating manual output")
         if guard is not None:
             return guard
 
@@ -1774,7 +2130,7 @@ def create_app() -> FastAPI:
                     break
 
         if not src.exists():
-            return RedirectResponse(url="/manual-entry?msg=Label+PDF+not+found", status_code=303)
+            return _redirect_ui("/manual-entry", "Label PDF not found")
 
         p = (platform or "").strip().lower()
         if p not in ("amazon", "ebay"):
@@ -1783,10 +2139,10 @@ def create_app() -> FastAPI:
         key = (item_key or "").strip()
         ref = (label_ref or "").strip()
         if not ref:
-            return RedirectResponse(url="/manual-entry?msg=Label+link+reference+required+(name/tracking/order+ref)", status_code=303)
+            return _redirect_ui("/manual-entry", "Label link reference required (name/tracking/order ref)")
 
         if int(quantity or 0) <= 0:
-            return RedirectResponse(url="/manual-entry?msg=Quantity+must+be+1+or+higher", status_code=303)
+            return _redirect_ui("/manual-entry", "Quantity must be 1 or higher")
 
         asin = (item_asin or "").strip().upper()
         if p == "amazon" and not asin and key.upper().startswith("B") and len(key) == 10:
@@ -1799,9 +2155,9 @@ def create_app() -> FastAPI:
                 reason = f"manual_ebay_safety:{why}"
                 _mark_item_needs_review(p, key, asin, reason)
                 _append_manual_unresolved(src, reason)
-                return RedirectResponse(
-                    url="/manual-entry?msg=Manual+eBay+safety+check+failed:+tracking+missing+and+name+match+too+weak.+Sent+to+review.",
-                    status_code=303,
+                return _redirect_ui(
+                    "/manual-entry",
+                    "Manual eBay safety check failed: tracking missing and name match too weak. Sent to review.",
                 )
 
         t = (title or "").strip()
@@ -1818,9 +2174,9 @@ def create_app() -> FastAPI:
             label = t
 
         if not label and not key:
-            return RedirectResponse(url="/manual-entry?msg=Provide+internal+label+or+item+key", status_code=303)
+            return _redirect_ui("/manual-entry", "Provide internal label or item key")
         if not label:
-            return RedirectResponse(url="/manual-entry?msg=Could+not+derive+internal+label+from+key/title", status_code=303)
+            return _redirect_ui("/manual-entry", "Could not derive internal label from key/title")
 
         if write_to_items and key:
             row = item_db.ensure_item(p, key, title=t, item_asin=asin)
@@ -1895,12 +2251,12 @@ def create_app() -> FastAPI:
         opened = settings.open_folder(_out_pdf)
 
         batch_manager.remove_unresolved_entry(str(Path(label_pdf)))
-        msg = "Created+manual+output+PDF"
+        parts = [_ui("Created manual output PDF")]
         if opened:
-            msg += "+and+opened+it"
+            parts.append(_ui("Opened manual output PDF"))
         else:
-            msg += "+(could+not+auto-open)"
-        return RedirectResponse(url=f"/manual-entry?msg={msg}", status_code=303)
+            parts.append(_ui("Manual output PDF ready but could not auto-open"))
+        return _redirect_with_message("/manual-entry", _join_ui_parts(parts))
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request, msg: str = ""):
         labels = [str(p) for p in _available_label_pdfs(extract_zip=True)]
@@ -1921,7 +2277,9 @@ def create_app() -> FastAPI:
         margin_direction: str = Form("top_bottom"),
         margin_mode: str = Form("both"),
         font_size: int = Form(14),
+        backside_font_size: int = Form(20),
         line_spacing: int = Form(18),
+        backside_line_spacing: int = Form(24),
         strip_thickness: int = Form(32),
         edge_padding: int = Form(8),
         side_padding: int = Form(8),
@@ -1934,6 +2292,7 @@ def create_app() -> FastAPI:
         inline_separator: str = Form(" | "),
         show_field_labels: str | None = Form(None),
         page_mode: str = Form("half_sheet_top"),
+        render_mode: str = Form("margin"),
         archive_retention_days: int = Form(14),
         output_sort_mode: str = Form("processed"),
         sort_priority_1: str = Form("label"),
@@ -1950,12 +2309,16 @@ def create_app() -> FastAPI:
         sort_dir_item_key: str = Form("asc"),
         sort_dir_location: str = Form("asc"),
         sort_dir_carrier: str = Form("asc"),
+        ui_language_mode: str = Form("en"),
+        ui_font_mode: str = Form("default"),
     ):
         cfg = _build_preview_config(
             margin_direction=margin_direction,
             margin_mode=margin_mode,
             font_size=font_size,
+            backside_font_size=backside_font_size,
             line_spacing=line_spacing,
+            backside_line_spacing=backside_line_spacing,
             strip_thickness=strip_thickness,
             edge_padding=edge_padding,
             side_padding=side_padding,
@@ -1968,6 +2331,7 @@ def create_app() -> FastAPI:
             inline_separator=inline_separator,
             show_field_labels=bool(show_field_labels),
             page_mode=page_mode,
+            render_mode=render_mode,
             output_sort_mode=output_sort_mode,
             sort_priority_1=sort_priority_1,
             sort_priority_2=sort_priority_2,
@@ -1985,47 +2349,139 @@ def create_app() -> FastAPI:
             sort_dir_carrier=sort_dir_carrier,
         )
         cfg["admin"]["archive_retention_days"] = int(archive_retention_days)
+        ui_cfg = cfg.setdefault("ui", {})
+        if ui_language_mode not in ("en", "ko", "zh_cn", "zh_tw"):
+            ui_language_mode = "en"
+        if ui_font_mode not in ("default", "comic", "wingdings"):
+            ui_font_mode = "default"
+        ui_cfg["language_mode"] = ui_language_mode
+        ui_cfg["font_mode"] = ui_font_mode
+        ui_cfg["comic_mode"] = (ui_font_mode == "comic")
+        cfg.setdefault("print_layout", {})["comic_mode"] = False
         settings.save(cfg)
-        return RedirectResponse(url="/settings?msg=Saved", status_code=303)
-
+        return _redirect_ui("/settings", "Saved")
     @app.post("/archives/purge")
     def purge_archives(days: int = Form(14)):
         removed = batch_manager.purge_archives(days)
-        return RedirectResponse(url=f"/?msg=Purged+{removed}+old+batches", status_code=303)
+        return _redirect_ui("/", "Purged {count} old batches", count=removed)
 
     @app.post("/resolve/clear")
     def resolve_clear(from_page: str = Form("unprocessed")):
-        removed = batch_manager.clear_unresolved_queue()
-        if from_page == "dashboard":
-            return RedirectResponse(url=f"/?msg=Cleared+{removed}+unprocessed+queue+item(s)", status_code=303)
-        return RedirectResponse(url=f"/unprocessed?msg=Cleared+{removed}+queue+items", status_code=303)
-
+        target = "/" if from_page == "dashboard" else "/unprocessed"
+        try:
+            removed = batch_manager.clear_unresolved_queue()
+            msg = _ui("Cleared {count} unprocessed queue item(s).", count=removed)
+        except Exception as ex:
+            msg = _ui("Failed to clear unprocessed queue: {error}", error=ex)
+        return _redirect_with_message(target, msg)
     @app.get("/resolve", response_class=HTMLResponse)
     def resolve_page(request: Request, msg: str = ""):
-        return _templates().TemplateResponse("resolve_match.html", {"request": request, "rows": _unresolved_for_ui(), "message": msg})
+        rows = _unresolved_for_ui()
+        variation_rows = [r for r in rows if str(r.get("reason", "")) == "multi_variation_choice_required"]
+        other_rows = [r for r in rows if str(r.get("reason", "")) != "multi_variation_choice_required"]
+        return _templates().TemplateResponse("resolve_match.html", {"request": request, "rows": rows, "variation_rows": variation_rows, "other_rows": other_rows, "message": msg})
 
     @app.get("/unprocessed", response_class=HTMLResponse)
     def unprocessed_page(request: Request, msg: str = ""):
-        return _templates().TemplateResponse("resolve_match.html", {"request": request, "rows": _unresolved_for_ui(), "message": msg})
+        rows = _unresolved_for_ui()
+        variation_rows = [r for r in rows if str(r.get("reason", "")) == "multi_variation_choice_required"]
+        other_rows = [r for r in rows if str(r.get("reason", "")) != "multi_variation_choice_required"]
+        return _templates().TemplateResponse("resolve_match.html", {"request": request, "rows": rows, "variation_rows": variation_rows, "other_rows": other_rows, "message": msg})
+
+    @app.post("/resolve/variation-choice")
+    async def resolve_variation_choice(label_pdf: str = Form(...), order_id: str = Form(...), variant_choice: str = Form(...)):
+        result = batch_manager.save_variation_choice(label_pdf, order_id, variant_choice)
+        if result.get("ok"):
+            return _redirect_ui("/unprocessed", "Variation choice saved")
+        return _redirect_with_message("/unprocessed", str(result.get("error", _ui("Could not save variation choice"))))
+
+
+    @app.post("/resolve/save-all-variations")
+    async def resolve_save_all_variations(request: Request):
+        form = await request.form()
+        labels = list(form.getlist("label_pdf"))
+        orders = list(form.getlist("order_id"))
+        variants = list(form.getlist("variant_choice"))
+        choices: list[dict[str, str]] = []
+        for i in range(min(len(labels), len(orders), len(variants))):
+            choices.append({
+                "label_pdf": str(labels[i] or ""),
+                "order_id": str(orders[i] or ""),
+                "variant_choice": str(variants[i] or ""),
+            })
+        result = batch_manager.save_variation_choices_bulk(choices)
+        if result.get("ok") and int(result.get("saved", 0)) >= 0:
+            saved = int(result.get("saved", 0))
+            errs = result.get("errors", []) or []
+            parts = [_ui("Saved {saved} variation choice(s)", saved=saved)]
+            if errs:
+                parts.append(_ui("Skipped: {count} invalid choice(s)", count=len(errs)))
+            return _redirect_with_message("/unprocessed", _join_ui_parts(parts, sep=". "))
+        return _redirect_ui("/unprocessed", "Could not save variation choices")
+
+    @app.post("/resolve/generate-selected-variations")
+    def resolve_generate_selected_variations():
+        result = batch_manager.resolve_selected_variations()
+        generated = int(result.get("generated", 0))
+        remaining = int(result.get("remaining", 0))
+        errors = result.get("errors", []) or []
+        parts = [_ui("Generated {generated} variation output(s). Remaining variation queue: {remaining}", generated=generated, remaining=remaining)]
+        if errors:
+            parts.append(_ui("Errors: {count}", count=len(errors)))
+        return _redirect_with_message("/unprocessed", _join_ui_parts(parts, sep=". "))
 
     @app.post("/resolve/remove")
     async def resolve_remove(label_pdf: str = Form(...)):
         ok = batch_manager.remove_unresolved_entry(label_pdf)
         if ok:
-            return RedirectResponse(url="/unprocessed?msg=Queue+item+removed", status_code=303)
-        return RedirectResponse(url="/unprocessed?msg=Queue+item+not+found", status_code=303)
+            return _redirect_ui("/unprocessed", "Queue item removed")
+        return _redirect_ui("/unprocessed", "Queue item not found")
 
     @app.post("/resolve/assign")
-    async def resolve_assign(label_pdf: str = Form(...), order_id: str = Form(...)):
-        result = batch_manager.resolve_unmatched(label_pdf, order_id)
+    async def resolve_assign(label_pdf: str = Form(...), order_id: str = Form(...), variant_choice: str = Form("")):
+        result = batch_manager.resolve_unmatched(label_pdf, order_id, variant_choice)
         if result.get("ok"):
-            return RedirectResponse(url="/unprocessed?msg=Resolved+and+output+generated", status_code=303)
-        return RedirectResponse(url=f"/unprocessed?msg={result.get('error', 'Resolve+failed')}", status_code=303)
+            return _redirect_ui("/unprocessed", "Resolved and output generated")
+        return _redirect_with_message("/unprocessed", str(result.get("error", _ui("Resolve failed"))))
 
     return app
 
 
 app = create_app()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

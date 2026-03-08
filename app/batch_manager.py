@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import copy
 import json
@@ -6,7 +6,8 @@ import logging
 import re
 import shutil
 import zipfile
-from functools import lru_cache
+
+import fitz
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from .item_db import ItemDB
 from .label_text_extractor import extract_label_signals
 from .label_matcher import match_label
 from .order_parser import parse_amazon_packing_slips, parse_amazon_tsv, parse_ebay_csv
-from .overlay_renderer import build_overlay_lines, create_backside_pdf, create_overlay_pdf, get_page_size
+from .overlay_renderer import build_overlay_lines, create_backside_pdf, create_info_panel_overlay_pdf, create_overlay_pdf, get_page_size
 from .pdf_merge import append_backside_page, merge_overlay_on_first_page, merge_overlays_on_first_page
 from .platform_detector import detect_platform_from_path, parse_order_id_from_filename
 from .settings_manager import SettingsManager
@@ -25,6 +26,19 @@ from .utils import atomic_write_json, sanitize_filename
 
 
 ORDER_ID_RE = re.compile(r"\d{3}-\d{7}-\d{7}")
+
+def _natural_text_key(value: str) -> list[Any]:
+    parts = re.split(r"(\d+)", str(value or "").replace("\\", "/"))
+    out: list[Any] = []
+    for part in parts:
+        if not part:
+            continue
+        out.append(int(part) if part.isdigit() else part.lower())
+    return out
+
+def _path_sort_key(path: Path) -> list[Any]:
+    return _natural_text_key(str(path))
+
 
 
 class BatchManager:
@@ -57,18 +71,19 @@ class BatchManager:
             "amazon_txt_found": amazon_txt is not None,
             "unresolved_count": len(unresolved),
             "files": [str(p) for p in files],
+            "staged_file_names": [self._describe_staged_file(p) for p in files],
         }
 
     def _all_batch_files(self) -> list[Path]:
         root = self.settings.incoming_batch_folder
         root.mkdir(parents=True, exist_ok=True)
-        files = [p for p in root.rglob("*") if p.is_file()]
+        files = sorted([p for p in root.rglob("*") if p.is_file()], key=_path_sort_key)
         return [p for p in files if "_split_pages" not in p.parts]
 
     def _extract_zip_files(self) -> list[Path]:
         extracted: list[Path] = []
         root = self.settings.incoming_batch_folder
-        for z in root.glob("*.zip"):
+        for z in sorted(root.glob("*.zip"), key=_path_sort_key):
             dest = root / "_unzipped" / z.stem
             dest.mkdir(parents=True, exist_ok=True)
             try:
@@ -138,8 +153,6 @@ class BatchManager:
             if "packing slip" in name or self._pdf_looks_like_packing_slip(p):
                 out.append(p)
         return out
-
-    @lru_cache(maxsize=256)
     def _pdf_looks_like_packing_slip(self, path: Path) -> bool:
         try:
             reader = PdfReader(str(path))
@@ -155,11 +168,14 @@ class BatchManager:
         has_shipto = "ship to" in text or "recipient" in text
         return has_order and has_item_markers and has_shipto
 
+    def _find_ebay_csvs(self, files: list[Path]) -> list[Path]:
+        out = [p for p in files if p.suffix.lower() == ".csv" and "ordersreport" in p.name.lower()]
+        out.sort(key=lambda p: str(p).lower())
+        return out
+
     def _find_ebay_csv(self, files: list[Path]) -> Path | None:
-        for p in files:
-            if p.suffix.lower() == ".csv" and "ordersreport" in p.name.lower():
-                return p
-        return None
+        rows = self._find_ebay_csvs(files)
+        return rows[0] if rows else None
 
     def _looks_like_amazon_tsv(self, path: Path) -> bool:
         try:
@@ -169,17 +185,89 @@ class BatchManager:
         required = ["order-id", "sku", "quantity-purchased"]
         return all(r in first for r in required)
 
-    def _find_amazon_txt(self, files: list[Path]) -> Path | None:
+    def _find_amazon_txts(self, files: list[Path]) -> list[Path]:
         txts = [p for p in files if p.suffix.lower() == ".txt"]
-        # First pass: content-based detection (best).
-        for p in txts:
-            if self._looks_like_amazon_tsv(p):
-                return p
-        # Second pass: filename hint fallback.
-        for p in txts:
-            if "order report" in p.name.lower():
-                return p
-        return None
+        primary = [p for p in txts if self._looks_like_amazon_tsv(p)]
+        if primary:
+            return sorted(primary, key=lambda p: str(p).lower())
+        fallback = [p for p in txts if "order report" in p.name.lower()]
+        return sorted(fallback, key=lambda p: str(p).lower())
+
+    def _find_amazon_txt(self, files: list[Path]) -> Path | None:
+        rows = self._find_amazon_txts(files)
+        return rows[0] if rows else None
+
+    def _merge_order_record(self, orders: dict[str, dict[str, Any]], incoming: dict[str, Any]) -> None:
+        order_id = str(incoming.get("order_id", "") or "").strip()
+        if not order_id:
+            return
+        existing = orders.get(order_id)
+        if existing is None:
+            orders[order_id] = incoming
+            return
+
+        for k in ("ship_name", "ship_postal", "tracking_number", "platform"):
+            if not existing.get(k) and incoming.get(k):
+                existing[k] = incoming.get(k)
+
+        seen: set[tuple[str, str, str, int, int]] = set()
+        merged_items: list[dict[str, Any]] = []
+        for src in (existing.get("items", []) or []):
+            sig = (
+                str(src.get("item_id", "") or "").strip(),
+                str(src.get("item_sku", "") or "").strip(),
+                str(src.get("item_asin", "") or "").strip().upper(),
+                int(src.get("quantity", 1) or 1),
+                int(round(float(src.get("line_total", 0.0) or 0.0) * 100)),
+            )
+            if sig in seen:
+                continue
+            seen.add(sig)
+            merged_items.append(src)
+        for src in (incoming.get("items", []) or []):
+            sig = (
+                str(src.get("item_id", "") or "").strip(),
+                str(src.get("item_sku", "") or "").strip(),
+                str(src.get("item_asin", "") or "").strip().upper(),
+                int(src.get("quantity", 1) or 1),
+                int(round(float(src.get("line_total", 0.0) or 0.0) * 100)),
+            )
+            if sig in seen:
+                continue
+            seen.add(sig)
+            merged_items.append(src)
+        existing["items"] = merged_items
+
+        total = 0.0
+        for itm in merged_items:
+            try:
+                total += float(itm.get("line_total", 0.0) or 0.0)
+            except Exception:
+                pass
+        if total > 0:
+            existing["total_paid"] = total
+        elif not existing.get("total_paid") and incoming.get("total_paid"):
+            existing["total_paid"] = incoming.get("total_paid")
+
+        src_existing = str(existing.get("source", "") or "").strip()
+        src_incoming = str(incoming.get("source", "") or "").strip()
+        if not src_existing and src_incoming:
+            existing["source"] = src_incoming
+
+    def _describe_staged_file(self, path: Path) -> str:
+        name = path.name
+        lower = name.lower()
+        kind = path.suffix.lower().lstrip('.') or 'file'
+        if path.suffix.lower() == '.txt' and self._looks_like_amazon_tsv(path):
+            kind = 'Amazon TXT'
+        elif path.suffix.lower() == '.csv' and 'ordersreport' in lower:
+            kind = 'eBay CSV'
+        elif path.suffix.lower() == '.zip':
+            kind = 'Amazon ZIP' if ('amzn' in lower or 'amazon' in lower) else 'ZIP'
+        elif path.suffix.lower() == '.pdf':
+            plat = detect_platform_from_path(path)
+            kind = f"{plat.title()} PDF" if plat in ('amazon', 'ebay') else 'PDF'
+        return f"[{kind}] {name}"
 
     def _extract_amazon_order_ids_from_labels(self, label_pdfs: list[Path]) -> set[str]:
         ids: set[str] = set()
@@ -196,31 +284,33 @@ class BatchManager:
         coverage = len(amazon_ids) / max(1, len(amazon_label_pdfs))
         return coverage >= 0.7
     def _build_orders(self, files: list[Path], label_pdfs: list[Path]) -> dict[str, dict[str, Any]]:
-        ebay_csv = self._find_ebay_csv(files)
-        amazon_txt = self._find_amazon_txt(files)
+        ebay_csvs = self._find_ebay_csvs(files)
+        amazon_txts = self._find_amazon_txts(files)
         packing_slips = self._find_packing_slips(files)
 
         orders: dict[str, dict[str, Any]] = {}
-        if ebay_csv:
-            orders.update(parse_ebay_csv(ebay_csv))
+        for ebay_csv in ebay_csvs:
+            parsed_ebay = parse_ebay_csv(ebay_csv)
+            for rec in parsed_ebay.values():
+                self._merge_order_record(orders, rec)
 
         amazon_label_pdfs = [p for p in label_pdfs if detect_platform_from_path(p) == "amazon"]
         amazon_ids = self._extract_amazon_order_ids_from_labels(amazon_label_pdfs)
         filter_by_ids = self._should_filter_amazon_report_by_label_ids(amazon_label_pdfs, amazon_ids)
-        if amazon_txt:
+        for amazon_txt in amazon_txts:
             parsed = parse_amazon_tsv(amazon_txt, allowed_order_ids=amazon_ids if filter_by_ids else None)
             for rec in parsed.values():
                 rec["source"] = "amazon_report"
-            orders.update(parsed)
+                self._merge_order_record(orders, rec)
 
         if packing_slips:
             slip_rows = parse_amazon_packing_slips(packing_slips, allowed_order_ids=amazon_ids if filter_by_ids else None)
-            if amazon_txt:
+            if amazon_txts:
                 self._enrich_amazon_orders_with_packing_slips(orders, slip_rows)
             else:
                 for rec in slip_rows.values():
                     rec["source"] = "packing_slip"
-                orders.update({k: v for k, v in slip_rows.items() if k not in orders})
+                    self._merge_order_record(orders, rec)
 
         for order_id in amazon_ids:
             if order_id not in orders:
@@ -329,10 +419,71 @@ class BatchManager:
                         idx[("amazon", alias)] = row
                 if existing is None:
                     touched += 1
-                else:
-                    touched += 1
 
         return {"processed_slips": len(slips), "items_touched": touched}
+    def _label_platform_partition(self, label_pdf: Path, signals: dict[str, Any]) -> str:
+        sig = str(signals.get("platform_hint", "") or "").strip().lower()
+        if sig in ("amazon", "ebay"):
+            return sig
+        name_hint = str(detect_platform_from_path(label_pdf) or "").strip().lower()
+        if name_hint in ("amazon", "ebay"):
+            return name_hint
+        return "unknown"
+
+    def _partition_orders_by_platform(self, orders: dict[str, dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
+        out: dict[str, dict[str, dict[str, Any]]] = {"amazon": {}, "ebay": {}, "unknown": {}}
+        for order_id, order in orders.items():
+            platform = str(order.get("platform", "") or "").strip().lower()
+            if platform not in ("amazon", "ebay"):
+                platform = "unknown"
+            out[platform][order_id] = order
+        return out
+
+    def _compatible_orders_for_label(
+        self,
+        label_platform: str,
+        orders_partition: dict[str, dict[str, dict[str, Any]]],
+        all_orders: dict[str, dict[str, Any]],
+    ) -> tuple[dict[str, dict[str, Any]], str]:
+        lp = str(label_platform or "").strip().lower()
+        amz = orders_partition.get("amazon", {}) or {}
+        ebay = orders_partition.get("ebay", {}) or {}
+        unknown = orders_partition.get("unknown", {}) or {}
+        if lp in ("amazon", "ebay"):
+            return (orders_partition.get(lp, {}) or {}), lp
+        if amz and not ebay:
+            return amz, "amazon"
+        if ebay and not amz:
+            return ebay, "ebay"
+        if unknown and not amz and not ebay:
+            return unknown, ""
+        # Mixed-platform staged batch + unknown label platform: do not cross-match.
+        return {}, ""
+    def _build_preflight_partition(
+        self,
+        label_pdfs: list[Path],
+        orders: dict[str, dict[str, Any]],
+        signals_for: Any,
+    ) -> dict[str, Any]:
+        label_platforms: dict[str, str] = {}
+        label_counts = {"amazon": 0, "ebay": 0, "unknown": 0}
+        for label_pdf in label_pdfs:
+            platform = self._label_platform_partition(label_pdf, signals_for(label_pdf))
+            label_platforms[str(label_pdf)] = platform
+            label_counts[platform] = label_counts.get(platform, 0) + 1
+        orders_partition = self._partition_orders_by_platform(orders)
+        order_counts = {
+            "amazon": len(orders_partition.get("amazon", {}) or {}),
+            "ebay": len(orders_partition.get("ebay", {}) or {}),
+            "unknown": len(orders_partition.get("unknown", {}) or {}),
+        }
+        return {
+            "label_platforms": label_platforms,
+            "label_counts": label_counts,
+            "orders_partition": orders_partition,
+            "order_counts": order_counts,
+        }
+
     def process_batch(self) -> dict[str, Any]:
         logging.info("Batch start")
         self._extract_zip_files()
@@ -379,17 +530,54 @@ class BatchManager:
         archive_dir.mkdir(parents=True, exist_ok=True)
 
         unresolved_queue = self._load_unresolved_queue()
-        report: dict[str, Any] = {"timestamp": ts, "results": [], "summary": {"matched": 0, "unresolved": 0, "errors": 0}}
+        signals_cache: dict[str, dict[str, Any]] = {}
+        def _signals_for(path: Path) -> dict[str, Any]:
+            key = str(path)
+            if key not in signals_cache:
+                signals_cache[key] = extract_label_signals(path)
+            return signals_cache[key]
+        preflight = self._build_preflight_partition(label_pdfs, orders, _signals_for)
+        report: dict[str, Any] = {
+            "timestamp": ts,
+            "results": [],
+            "summary": {
+                "matched": 0,
+                "unresolved": 0,
+                "errors": 0,
+                "preflight": {
+                    "labels": preflight.get("label_counts", {}),
+                    "orders": preflight.get("order_counts", {}),
+                },
+            },
+        }
         idx = self.item_db.index()
 
         for label_pdf in label_pdfs:
             try:
-                platform = detect_platform_from_path(label_pdf)
+                unresolved_queue = [q for q in unresolved_queue if str(q.get("label_pdf", "")) != str(label_pdf)]
+                label_signals = _signals_for(label_pdf)
+                platform = str(preflight.get("label_platforms", {}).get(str(label_pdf), "unknown") or "unknown")
+                compatible_orders, match_hint = self._compatible_orders_for_label(platform, preflight.get("orders_partition", {}), orders)
+                if not compatible_orders:
+                    unresolved = {
+                        "label_pdf": str(label_pdf),
+                        "label_identity": self._build_label_identity(label_pdf, label_signals),
+                        "recipient_name": label_signals.get("recipient_name", ""),
+                        "tracking_number": label_signals.get("tracking_number", ""),
+                        "ship_postal": label_signals.get("ship_postal", ""),
+                        "reason": "no_compatible_order_source",
+                        "candidates": [],
+                    }
+                    unresolved_queue.append(unresolved)
+                    report["results"].append({"label_pdf": str(label_pdf), "status": "unresolved", "reason": unresolved["reason"]})
+                    report["summary"]["unresolved"] += 1
+                    continue
+
                 direct_order = None
-                if platform == "amazon":
+                if (match_hint or platform) == "amazon":
                     file_order_id = parse_order_id_from_filename(label_pdf)
-                    if file_order_id and file_order_id in orders:
-                        direct_order = orders[file_order_id]
+                    if file_order_id and file_order_id in compatible_orders:
+                        direct_order = compatible_orders[file_order_id]
 
                 if direct_order is not None:
                     m = {
@@ -400,10 +588,10 @@ class BatchManager:
                         "candidates": [],
                     }
                 else:
-                    m = match_label(label_pdf, orders, platform_hint=platform if platform != "unknown" else "")
+                    m = match_label(label_pdf, compatible_orders, platform_hint=match_hint if match_hint else "")
 
                 if m["status"] != "matched":
-                    label_signals = extract_label_signals(label_pdf)
+                    label_signals = _signals_for(label_pdf)
                     unresolved = {
                         "label_pdf": str(label_pdf),
                         "label_identity": self._build_label_identity(label_pdf, label_signals),
@@ -429,7 +617,7 @@ class BatchManager:
 
                 order = m["order"]
                 if order.get("platform") == "amazon" and order.get("source") == "stub":
-                    label_signals = extract_label_signals(label_pdf)
+                    label_signals = _signals_for(label_pdf)
                     unresolved = {
                         "label_pdf": str(label_pdf),
                         "label_identity": self._build_label_identity(label_pdf, label_signals),
@@ -444,9 +632,38 @@ class BatchManager:
                     report["summary"]["unresolved"] += 1
                     continue
 
+                variation_options = self._order_variation_options(order, idx)
+                if len(variation_options) >= 2:
+                    label_signals = _signals_for(label_pdf)
+                    unresolved = {
+                        "label_pdf": str(label_pdf),
+                        "label_identity": self._build_label_identity(label_pdf, label_signals),
+                        "recipient_name": label_signals.get("recipient_name", ""),
+                        "tracking_number": label_signals.get("tracking_number", ""),
+                        "ship_postal": label_signals.get("ship_postal", ""),
+                        "reason": "multi_variation_choice_required",
+                        "variation_options": variation_options,
+                        "order": order,
+                        "selected_variation": "",
+                        "selected_order_id": "",
+                        "candidates": [
+                            {
+                                "order_id": order.get("order_id", ""),
+                                "score": 1.0,
+                                "ship_name": order.get("ship_name", ""),
+                                "ship_postal": order.get("ship_postal", ""),
+                                "order": order,
+                            }
+                        ],
+                    }
+                    unresolved_queue.append(unresolved)
+                    report["results"].append({"label_pdf": str(label_pdf), "status": "unresolved", "reason": unresolved["reason"]})
+                    report["summary"]["unresolved"] += 1
+                    continue
+
                 valid, validation_reason = self._validate_required_fields(order, idx)
                 if not valid:
-                    label_signals = extract_label_signals(label_pdf)
+                    label_signals = _signals_for(label_pdf)
                     unresolved = {
                         "label_pdf": str(label_pdf),
                         "label_identity": self._build_label_identity(label_pdf, label_signals),
@@ -468,10 +685,34 @@ class BatchManager:
                     report["results"].append({"label_pdf": str(label_pdf), "status": "unresolved", "reason": unresolved["reason"]})
                     report["summary"]["unresolved"] += 1
                     continue
-
-                label_signals = extract_label_signals(label_pdf)
                 out_path = self._render_one_label(label_pdf, order, idx, output_dir)
                 sort_meta = self._sort_meta_for_order(order, idx, label_signals.get("carrier", ""))
+                items = list(order.get("items", []) or [])
+                total_paid = 0.0
+                try:
+                    total_paid = float(order.get("total_paid", 0.0) or 0.0)
+                except Exception:
+                    total_paid = 0.0
+                quantity_total = 0
+                item_keys: list[str] = []
+                item_titles: list[str] = []
+                for item in items:
+                    try:
+                        quantity_total += int(item.get("quantity", 1) or 1)
+                    except Exception:
+                        quantity_total += 1
+                    key = str(
+                        item.get("item_sku", "")
+                        or item.get("ebay_item_number", "")
+                        or item.get("item_id", "")
+                        or item.get("item_asin", "")
+                        or ""
+                    ).strip()
+                    if key and key not in item_keys:
+                        item_keys.append(key)
+                    title = str(item.get("title", "") or "").strip()
+                    if title and title not in item_titles:
+                        item_titles.append(title)
                 report["results"].append(
                     {
                         "label_pdf": str(label_pdf),
@@ -491,6 +732,11 @@ class BatchManager:
                         "sort_item_key": sort_meta.get("item_key", ""),
                         "sort_location": sort_meta.get("location", ""),
                         "sort_carrier": sort_meta.get("carrier", ""),
+                        "item_count": len(items),
+                        "quantity_total": quantity_total,
+                        "total_paid": round(total_paid, 2),
+                        "item_keys": item_keys,
+                        "item_titles": item_titles,
                     }
                 )
                 report["summary"]["matched"] += 1
@@ -523,6 +769,76 @@ class BatchManager:
             parts.append(f"ZIP {postal}")
 
         return " | ".join(parts) if parts else label_pdf.name
+
+    def _variation_options(self, row: dict[str, str] | None) -> list[str]:
+        raw = str((row or {}).get("variation_options", "") or "").strip()
+        if not raw:
+            return []
+        out: list[str] = []
+        for part in re.split(r"[|\n;,]+", raw):
+            value = str(part or "").strip()
+            if value and value not in out:
+                out.append(value)
+        return out
+
+    def _order_variation_options(self, order: dict[str, Any], idx: dict[tuple[str, str], dict[str, str]]) -> list[str]:
+        platform = str(order.get("platform", "")).lower().strip()
+        for item in order.get("items", []) or []:
+            row = self._find_row_for_item(platform, item, idx)
+            options = self._variation_options(row)
+            if len(options) >= 2:
+                return options
+        return []
+
+    def _apply_variant_choice(self, order: dict[str, Any], idx: dict[tuple[str, str], dict[str, str]], variant_choice: str) -> dict[str, Any]:
+        chosen = str(variant_choice or "").strip()
+        if not chosen:
+            return order
+        clone = copy.deepcopy(order)
+        platform = str(clone.get("platform", "")).lower().strip()
+        for item in clone.get("items", []) or []:
+            manual_row = item.get("_manual_row") if isinstance(item.get("_manual_row"), dict) else None
+            row = manual_row or self._find_row_for_item(platform, item, idx)
+            options = self._variation_options(row)
+            if len(options) < 2 or chosen not in options:
+                continue
+            next_row = dict(row or {})
+            next_row["custom_label"] = chosen
+            item["_manual_row"] = next_row
+            break
+        return clone
+
+    def _normalize_label_source(self, label_pdf: Path, order: dict[str, Any], output_dir: Path) -> Path:
+        if str(order.get("platform", "")).lower().strip() != "ebay":
+            return label_pdf
+        layout = self.settings.config.get("print_layout", {})
+        page_mode = str(layout.get("page_mode", "half_sheet_top"))
+        try:
+            with fitz.open(str(label_pdf)) as src:
+                if src.page_count <= 0:
+                    return label_pdf
+                page = src[0]
+                rect = page.rect
+                clip = rect
+                target = rect
+                if page_mode == "half_sheet_top":
+                    clip = fitz.Rect(0, 0, rect.width, rect.height / 2.0)
+                    target = fitz.Rect(0, 0, rect.width, rect.height / 2.0)
+                elif page_mode == "half_sheet_bottom":
+                    clip = fitz.Rect(0, rect.height / 2.0, rect.width, rect.height)
+                    target = fitz.Rect(0, rect.height / 2.0, rect.width, rect.height)
+                tmp_dir = output_dir / "_normalized"
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+                out_path = tmp_dir / f"normalized_{sanitize_filename(label_pdf.stem)}.pdf"
+                doc = fitz.open()
+                new_page = doc.new_page(width=rect.width, height=rect.height)
+                new_page.show_pdf_page(target, src, 0, clip=clip, rotate=180)
+                doc.save(str(out_path))
+                doc.close()
+                return out_path
+        except Exception:
+            logging.exception("Failed to normalize eBay label orientation: %s", label_pdf)
+        return label_pdf
 
     def _order_item_keys(self, item: dict[str, Any]) -> list[str]:
         iid = (item.get("item_id") or "").strip()
@@ -738,10 +1054,11 @@ class BatchManager:
         output_dir: Path,
         auto_add_missing_items: bool = True,
     ) -> Path:
+        working_pdf = self._normalize_label_source(label_pdf, order, output_dir)
         item_rows = self._resolve_item_rows(order, idx, auto_add_missing_items=auto_add_missing_items)
 
         lines = build_overlay_lines(order, item_rows, self.settings.config)
-        page_w, page_h = get_page_size(label_pdf)
+        page_w, page_h = get_page_size(working_pdf)
         primary_overlay, remaining = create_overlay_pdf(page_w, page_h, lines, self.settings.config, region="primary")
 
         layout = self.settings.config.get("print_layout", {})
@@ -753,6 +1070,34 @@ class BatchManager:
         )
         out_path = output_dir / out_name
 
+        if overlay_mode == "both":
+            overlays = [primary_overlay]
+            panel_overlay, panel_remaining = create_info_panel_overlay_pdf(page_w, page_h, lines, self.settings.config)
+            overlays.append(panel_overlay)
+            if remaining and overflow_mode == "secondary_margin":
+                secondary_overlay, remaining = create_overlay_pdf(page_w, page_h, remaining, self.settings.config, region="secondary")
+                overlays.append(secondary_overlay)
+            merge_overlays_on_first_page(working_pdf, overlays, out_path)
+            extra_remaining = panel_remaining if panel_remaining else remaining
+            if extra_remaining:
+                backside_pdf = create_backside_pdf(page_w, page_h, extra_remaining, self.settings.config)
+                tmp_out = out_path.with_suffix(".tmp.pdf")
+                append_backside_page(out_path, backside_pdf, tmp_out)
+                tmp_out.replace(out_path)
+            return out_path
+
+        if overlay_mode == "backside" and str(layout.get("page_mode", "full_page")).startswith("half_sheet_"):
+            panel_overlay, remaining = create_info_panel_overlay_pdf(page_w, page_h, lines, self.settings.config)
+            if remaining:
+                merge_overlay_on_first_page(working_pdf, panel_overlay, out_path)
+                backside_pdf = create_backside_pdf(page_w, page_h, remaining, self.settings.config)
+                tmp_out = out_path.with_suffix(".tmp.pdf")
+                append_backside_page(out_path, backside_pdf, tmp_out)
+                tmp_out.replace(out_path)
+            else:
+                merge_overlay_on_first_page(working_pdf, panel_overlay, out_path)
+            return out_path
+
         if remaining:
             if overflow_mode == "secondary_margin" and overlay_mode == "margin":
                 secondary_overlay, still_remaining = create_overlay_pdf(page_w, page_h, remaining, self.settings.config, region="secondary")
@@ -763,8 +1108,6 @@ class BatchManager:
                 secondary_preset = str(layout.get("rotated_secondary_preset", ""))
                 side_pair = {primary_preset, secondary_preset} == {"left_margin", "right_margin"}
 
-                # For left/right margin mode: keep single-sided by spilling next into
-                # upper-half top then upper-half bottom margins (no backside page).
                 if still_remaining and orientation == "rotated_90" and side_pair:
                     spill_cfg = copy.deepcopy(self.settings.config)
                     spill_layout = spill_cfg.setdefault("print_layout", {})
@@ -783,11 +1126,11 @@ class BatchManager:
                         overlays.append(bottom_spill_overlay)
 
                     if still_remaining:
-                        logging.warning("Overlay overflow truncated after side + top/bottom spill regions: %s", label_pdf)
+                        logging.warning("Overlay overflow truncated after side + top/bottom spill regions: %s", working_pdf)
 
-                    merge_overlays_on_first_page(label_pdf, overlays, out_path)
+                    merge_overlays_on_first_page(working_pdf, overlays, out_path)
                 else:
-                    merge_overlays_on_first_page(label_pdf, overlays, out_path)
+                    merge_overlays_on_first_page(working_pdf, overlays, out_path)
                     if still_remaining:
                         backside_pdf = create_backside_pdf(page_w, page_h, still_remaining, self.settings.config)
                         tmp_out = out_path.with_suffix(".tmp.pdf")
@@ -795,26 +1138,28 @@ class BatchManager:
                         tmp_out.replace(out_path)
             else:
                 if overlay_mode == "backside":
-                    append_backside_page(label_pdf, create_backside_pdf(page_w, page_h, lines, self.settings.config), out_path)
+                    append_backside_page(working_pdf, create_backside_pdf(page_w, page_h, lines, self.settings.config), out_path)
                 else:
-                    merge_overlay_on_first_page(label_pdf, primary_overlay, out_path)
+                    merge_overlay_on_first_page(working_pdf, primary_overlay, out_path)
                     backside_pdf = create_backside_pdf(page_w, page_h, remaining, self.settings.config)
                     tmp_out = out_path.with_suffix(".tmp.pdf")
                     append_backside_page(out_path, backside_pdf, tmp_out)
                     tmp_out.replace(out_path)
         else:
             if overlay_mode == "backside":
-                append_backside_page(label_pdf, create_backside_pdf(page_w, page_h, lines, self.settings.config), out_path)
+                append_backside_page(working_pdf, create_backside_pdf(page_w, page_h, lines, self.settings.config), out_path)
             else:
-                merge_overlay_on_first_page(label_pdf, primary_overlay, out_path)
+                merge_overlay_on_first_page(working_pdf, primary_overlay, out_path)
 
         return out_path
-
     def _archive_inputs(self, files: list[Path], archive_dir: Path) -> None:
         root = self.settings.incoming_batch_folder
         for src in files:
             if "_unzipped" in src.parts:
                 continue
+            if not src.exists():
+                continue
+
             rel = src.relative_to(root)
             dst = archive_dir / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -865,7 +1210,158 @@ class BatchManager:
     def _save_unresolved_queue(self, queue: list[dict[str, Any]]) -> None:
         atomic_write_json(self.unresolved_queue_path, queue)
 
-    def resolve_unmatched(self, label_pdf: str, order_id: str) -> dict[str, Any]:
+    def _resolve_source_pdf_from_queue_entry(self, entry: dict[str, Any]) -> Path | None:
+        src = Path(str(entry.get("label_pdf", "") or ""))
+        if src.exists():
+            return src
+
+        name = src.name
+        for p in self.settings.processed_root_folder.rglob(name):
+            if "input_archive" in p.parts:
+                return p
+
+        m = re.match(r"^(?P<base>.+)__p(?P<page>\d+)$", src.stem)
+        if not m:
+            return None
+
+        base = f"{m.group('base')}.pdf"
+        page_idx = int(m.group("page")) - 1
+        for p in self.settings.processed_root_folder.rglob(base):
+            if "input_archive" not in p.parts:
+                continue
+            try:
+                reader = PdfReader(str(p))
+                if page_idx < 0 or page_idx >= len(reader.pages):
+                    continue
+                out_dir = self.settings.processed_root_folder / "manual_resolved" / "_recovered"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                recovered = out_dir / f"{sanitize_filename(src.stem)}.pdf"
+                writer = PdfWriter()
+                writer.add_page(reader.pages[page_idx])
+                with recovered.open("wb") as f:
+                    writer.write(f)
+                return recovered
+            except Exception:
+                logging.exception("Failed to recover split source PDF for unresolved entry: %s", entry.get("label_pdf", ""))
+        return None
+
+    def save_variation_choice(self, label_pdf: str, order_id: str, variant_choice: str) -> dict[str, Any]:
+        queue = self._load_unresolved_queue()
+        chosen = str(variant_choice or "").strip()
+        if not chosen:
+            return {"ok": False, "error": "Choose a variation first"}
+
+        updated = False
+        for row in queue:
+            if str(row.get("label_pdf", "")) != str(label_pdf):
+                continue
+            if str(row.get("reason", "")) != "multi_variation_choice_required":
+                return {"ok": False, "error": "This queue item is not a variation-choice item"}
+            options = [str(x).strip() for x in (row.get("variation_options", []) or []) if str(x).strip()]
+            if options and chosen not in options:
+                return {"ok": False, "error": "Selected variation is not valid for this item"}
+            row["selected_variation"] = chosen
+            row["selected_order_id"] = str(order_id or row.get("selected_order_id", "") or "").strip()
+            updated = True
+            break
+
+        if not updated:
+            return {"ok": False, "error": "Queue entry not found"}
+        self._save_unresolved_queue(queue)
+        return {"ok": True}
+
+
+    def save_variation_choices_bulk(self, choices: list[dict[str, str]]) -> dict[str, Any]:
+        queue = self._load_unresolved_queue()
+        saved = 0
+        errors: list[str] = []
+        by_label: dict[str, dict[str, str]] = {}
+        for ch in choices:
+            label_pdf = str(ch.get("label_pdf", "") or "").strip()
+            if not label_pdf:
+                continue
+            by_label[label_pdf] = {
+                "label_pdf": label_pdf,
+                "order_id": str(ch.get("order_id", "") or "").strip(),
+                "variant_choice": str(ch.get("variant_choice", "") or "").strip(),
+            }
+        if not by_label:
+            return {"ok": False, "saved": 0, "errors": ["No variation choices provided"]}
+
+        for row in queue:
+            key = str(row.get("label_pdf", "") or "").strip()
+            if not key or key not in by_label:
+                continue
+            if str(row.get("reason", "")) != "multi_variation_choice_required":
+                continue
+            chosen = by_label[key].get("variant_choice", "")
+            if not chosen:
+                continue
+            options = [str(x).strip() for x in (row.get("variation_options", []) or []) if str(x).strip()]
+            if options and chosen not in options:
+                errors.append(f"Invalid variation for {Path(key).name}")
+                continue
+            row["selected_variation"] = chosen
+            row["selected_order_id"] = by_label[key].get("order_id", "") or str(row.get("selected_order_id", "") or "")
+            saved += 1
+
+        self._save_unresolved_queue(queue)
+        return {"ok": True, "saved": saved, "errors": errors}
+
+    def resolve_selected_variations(self) -> dict[str, Any]:
+        queue = self._load_unresolved_queue()
+        if not queue:
+            return {"ok": True, "generated": 0, "remaining": 0, "errors": []}
+
+        kept: list[dict[str, Any]] = []
+        generated = 0
+        errors: list[str] = []
+        idx = self.item_db.index()
+        output_dir = self.settings.processed_root_folder / "manual_resolved"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        for row in queue:
+            if str(row.get("reason", "")) != "multi_variation_choice_required":
+                kept.append(row)
+                continue
+
+            chosen = str(row.get("selected_variation", "") or "").strip()
+            if not chosen:
+                kept.append(row)
+                continue
+
+            order_id = str(row.get("selected_order_id", "") or "").strip()
+            order = None
+            for c in row.get("candidates", []) or []:
+                if str(c.get("order_id", "")) == order_id and c.get("order"):
+                    order = c.get("order")
+                    break
+            if order is None:
+                order = row.get("order")
+            if order is None:
+                errors.append("Missing order payload for variation row")
+                kept.append(row)
+                continue
+
+            src = self._resolve_source_pdf_from_queue_entry(row)
+            if src is None or not src.exists():
+                errors.append(f"Source label PDF not found for {row.get('label_pdf', '')}")
+                kept.append(row)
+                continue
+
+            try:
+                order = self._apply_variant_choice(order, idx, chosen)
+                self._render_one_label(src, order, idx, output_dir)
+                generated += 1
+            except Exception:
+                logging.exception("Failed to generate output for variation queue row: %s", row.get("label_pdf", ""))
+                errors.append(f"Failed to generate output for {row.get('label_pdf', '')}")
+                kept.append(row)
+
+        self._save_unresolved_queue(kept)
+        return {"ok": True, "generated": generated, "remaining": len(kept), "errors": errors}
+
+    def resolve_unmatched(self, label_pdf: str, order_id: str, variant_choice: str = "") -> dict[str, Any]:
         queue = self._load_unresolved_queue()
         kept: list[dict[str, Any]] = []
         target: dict[str, Any] | None = None
@@ -884,16 +1380,15 @@ class BatchManager:
                 order = c.get("order")
                 break
         if order is None:
+            order = target.get("order")
+        if order is None:
             return {"ok": False, "error": "Order ID not in candidates"}
 
-        src = Path(label_pdf)
-        if not src.exists():
-            name = src.name
-            for p in self.settings.processed_root_folder.rglob(name):
-                if "input_archive" in p.parts:
-                    src = p
-                    break
-        if not src.exists():
+        if str(target.get("reason", "")) == "multi_variation_choice_required":
+            return {"ok": False, "error": "Use variation queue actions to save choices first, then generate all selected variations."}
+
+        src = self._resolve_source_pdf_from_queue_entry(target)
+        if src is None or not src.exists():
             return {"ok": False, "error": "Source label PDF not found"}
 
         output_dir = self.settings.processed_root_folder / "manual_resolved"
@@ -903,6 +1398,7 @@ class BatchManager:
 
         self._save_unresolved_queue(kept)
         return {"ok": True, "output_pdf": str(out)}
+
     def remove_unresolved_entry(self, label_pdf: str) -> bool:
         queue = self._load_unresolved_queue()
         kept = [q for q in queue if str(q.get("label_pdf", "")) != str(label_pdf)]
@@ -979,11 +1475,16 @@ class BatchManager:
                 "tracking_number": str(r.get("tracking_number", "") or "").strip(),
             })
 
+        archived_files = [p for p in archive.rglob("*") if p.is_file()]
+        archived_file_names = [str(p.relative_to(archive)) for p in sorted(archived_files, key=_path_sort_key)]
+
         return {
             "ok": True,
             "batch_dir": str(latest),
             "archive_dir": str(archive),
             "labels": rows,
+            "restage_file_count": len(archived_files),
+            "restage_preview_names": archived_file_names[:12],
         }
 
     def _restage_from_archive(self, archive: Path, selected_labels: set[Path] | None = None) -> int:
@@ -1148,3 +1649,18 @@ class BatchManager:
                 shutil.rmtree(p, ignore_errors=True)
                 removed += 1
         return removed
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
