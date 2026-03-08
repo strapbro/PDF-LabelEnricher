@@ -1,43 +1,60 @@
 ﻿<!doctype html>
-<html>
+<html lang="{{ ui_language_mode|default('en') }}">
 <head>
   <meta charset="utf-8">
-  <title>Label Enricher</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260307b">
+  <title>{{ tr("Label Enricher") }}</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260307c">
 </head>
-<body>
+<body class="ui-font-{{ ui_font_mode|default('default') }} {% if comic_mode %}comic-mode{% endif %}">
   <header id="appHeader">
-    <h1>Label Enricher</h1>
+    <h1>{{ tr("Label Enricher") }}</h1>
     <div id="timeGreeting" class="time-greeting" aria-live="polite"></div>
     <div class="nav-row">
       <nav class="nav-links">
-        <a href="/">Dashboard</a>
-        <a href="/items">Item Database</a>
-        <a href="/settings">Layout & Settings</a>
-        <a href="/manual-entry">Manual Entry</a>
+        <a href="/">{{ tr("Dashboard") }}</a>
+        <a href="/items">{{ tr("Item Database") }}</a>
+        <a href="/settings">{{ tr("Layout & Settings") }}</a>
+        <a href="/batch-table">{{ tr("Batch Table") }}</a>
+        <a href="/manual-entry">{{ tr("Manual Entry") }}</a>
       </nav>
-      <form class="nav-close" action="/app/close" method="post">
-        <button class="btn btn-md btn-attn" type="submit">Close App</button>
-      </form>
+      <div class="nav-right">
+        <form class="nav-comic" action="/theme/comic-toggle" method="post">
+          <button class="btn btn-md btn-secondary" type="submit">{% if comic_mode %}{{ tr("Comic: ON") }}{% else %}{{ tr("Comic: OFF") }}{% endif %}</button>
+        </form>
+        <form class="nav-close" action="/app/close" method="post">
+          <button class="btn btn-md btn-attn" type="submit">{{ tr("Close App") }}</button>
+        </form>
+      </div>
     </div>
   </header>
-  {% if message %}<div class="msg">{{ message }}</div>{% endif %}
+  {% if message %}<div class="msg">{{ tr(message) }}</div>{% endif %}
   <main>
     {% block content %}{% endblock %}
   </main>
+  <div id="appConfirm" class="app-confirm" hidden>
+    <div class="app-confirm-backdrop"></div>
+    <div class="app-confirm-dialog card" role="dialog" aria-modal="true" aria-labelledby="appConfirmTitle">
+      <h3 id="appConfirmTitle">{{ tr("Confirm Action") }}</h3>
+      <p id="appConfirmMsg"></p>
+      <div class="app-confirm-actions">
+        <button id="appConfirmCancel" class="btn btn-secondary" type="button">{{ tr("Cancel") }}</button>
+        <button id="appConfirmOk" class="btn btn-primary" type="button">{{ tr("Confirm") }}</button>
+      </div>
+    </div>
+  </div>
   <script>
     (function () {
       const el = document.getElementById('timeGreeting');
       if (!el) return;
+      const morning = {{ tr("GOOD FUCKING MORNINGGGGGG DAPH")|tojson }};
+      const afternoon = {{ tr("GOOD FUCKING AFTERNOONNNNNNN DAPH")|tojson }};
+      const evening = {{ tr("GOOD FUCKING EVENINGGGGGGGG DAPH")|tojson }};
       const hour = new Date().getHours();
-      if (hour < 12) {
-        el.textContent = 'GOOD FUCKING MORNINGGGGGG DAPH';
-      } else if (hour < 18) {
-        el.textContent = 'GOOD FUCKING AFTERNOONNNNNNN DAPH';
-      } else {
-        el.textContent = 'GOOD FUCKING EVENINGGGGGGGG DAPH';
-      }
+      if (hour < 12) el.textContent = morning;
+      else if (hour < 18) el.textContent = afternoon;
+      else el.textContent = evening;
     })();
+
     (function () {
       const header = document.getElementById('appHeader');
       if (!header) return;
@@ -48,7 +65,50 @@
         window.location.href = '/';
       });
     })();
+
+    (function () {
+      const modal = document.getElementById('appConfirm');
+      const msgEl = document.getElementById('appConfirmMsg');
+      const okBtn = document.getElementById('appConfirmOk');
+      const cancelBtn = document.getElementById('appConfirmCancel');
+      const defaultMsg = {{ tr("Are you sure?")|tojson }};
+      const okMsg = {{ tr("OK")|tojson }};
+      if (!modal || !msgEl || !okBtn || !cancelBtn) return;
+
+      window.showAppConfirm = function (message) {
+        return new Promise((resolve) => {
+          msgEl.textContent = message || defaultMsg;
+          modal.hidden = false;
+          const cleanup = () => {
+            okBtn.onclick = null;
+            cancelBtn.onclick = null;
+            modal.hidden = true;
+          };
+          okBtn.onclick = () => { cleanup(); resolve(true); };
+          cancelBtn.onclick = () => { cleanup(); resolve(false); };
+        });
+      };
+
+      window.showAppAlert = function (message) {
+        return window.showAppConfirm(message || okMsg).then(() => true);
+      };
+
+      document.addEventListener('submit', async (e) => {
+        const form = e.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        const message = form.getAttribute('data-confirm');
+        if (!message) return;
+        e.preventDefault();
+        let ok = false;
+        try {
+          ok = await window.showAppConfirm(message);
+        } catch (err) {
+          ok = true;
+        }
+        if (!ok) return;
+        form.submit();
+      }, true);
+    })();
   </script>
 </body>
 </html>
-

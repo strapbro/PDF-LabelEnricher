@@ -416,9 +416,10 @@ def parse_ebay_csv(path: Path) -> dict[str, dict[str, Any]]:
                     "line_total": line_total,
                 }
             )
-            rec["total_paid"] = max(rec["total_paid"], line_total)
+            rec["total_paid"] += line_total
 
     return records
+
 
 
 

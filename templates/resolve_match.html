@@ -1,17 +1,73 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h2>Unprocessed Label Queue (Resolve Matches)</h2>
-  <form action="/resolve/clear" method="post" onsubmit="return confirm('Clear all unresolved queue items?')" style="margin-bottom:10px;">
-    <button type="submit">Clear Queue</button>
-  </form>
+  <h2>{{ tr("Unprocessed Label Queue") }}</h2>
+  <p style="margin:4px 0 10px;color:#4e6355;font-size:13px;">
+    {{ tr("Variation-choice items are shown separately from regular match issues.") }}
+  </p>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+    <form id="variationSaveAllForm" action="/resolve/save-all-variations" method="post">
+      <div id="variationHiddenInputs"></div>
+      <button class="btn btn-md btn-primary" type="submit">{{ tr("Save All Variation Choices") }}</button>
+    </form>
+    <form action="/resolve/generate-selected-variations" method="post">
+      <button class="btn btn-md btn-primary" type="submit">{{ tr("Generate Outputs For Saved Variation Choices") }}</button>
+    </form>
+    <form action="/resolve/clear" method="post" data-confirm="{{ tr('Clear all unresolved queue items?') }}">
+      <button class="btn btn-md btn-secondary" type="submit">{{ tr("Clear Queue") }}</button>
+    </form>
+  </div>
+
+  {% if variation_rows and variation_rows|length > 0 %}
+  <h3 style="margin:8px 0;">{{ tr("Variation Choice Queue ({count})", count=variation_rows|length) }}</h3>
   <table>
-    <thead><tr><th>Label</th><th>Reason</th><th>Candidates (Most likely first)</th><th>Action</th></tr></thead>
+    <thead><tr><th>{{ tr("Label") }}</th><th>{{ tr("Choice Needed") }}</th><th>{{ tr("Action") }}</th></tr></thead>
     <tbody>
-      {% for row in rows %}
+      {% for row in variation_rows %}
       <tr>
         <td><strong>{{ row.label_identity or row.recipient_name or row.tracking_number or row.label_pdf }}</strong><br><small>{{ row.label_pdf }}</small></td>
-        <td><strong>{{ row.reason_human or row.reason }}</strong><br><small>{{ row.reason }}</small></td>
+        <td>
+          <div><strong>{{ tr("Options:") }}</strong> {{ (row.variation_options or [])|join(' | ') }}</div>
+          {% if row.selected_variation %}<div style="color:#2f6b45;"><strong>{{ tr("Saved:") }}</strong> {{ row.selected_variation }}</div>{% endif %}
+        </td>
+        <td>
+          <div class="variation-row" data-label-pdf="{{ row.label_pdf }}" data-initial-order="{{ row.selected_order_id or ((row.candidates or [])[0].get('order_id', '') if (row.candidates or []) else '') }}" data-initial-choice="{{ row.selected_variation or '' }}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <select class="variation-order" {% if row.selected_variation %}disabled{% endif %}>
+              {% for c in (row.candidates or []) %}
+              {% set oid = c.get('order_id', '') %}
+              <option value="{{ oid }}" {% if (row.selected_order_id and row.selected_order_id == oid) or ((not row.selected_order_id) and loop.first) %}selected{% endif %}>{{ tr("Order #") }} {{ oid }}</option>
+              {% endfor %}
+            </select>
+            <select class="variation-choice" {% if row.selected_variation %}disabled{% endif %}>
+              <option value="">{{ tr("Choose variation...") }}</option>
+              {% for opt in (row.variation_options or []) %}
+              <option value="{{ opt }}" {% if row.selected_variation == opt %}selected{% endif %}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn btn-sm btn-primary variation-confirm" type="button" {% if row.selected_variation %}style="display:none;"{% endif %}>{{ tr("Confirm") }}</button>
+            <span class="variation-confirmed" style="{% if not row.selected_variation %}display:none;{% endif %}color:#2f6b45;font-weight:700;">{{ tr("Confirm") }}</span>
+            <button class="btn btn-sm btn-secondary variation-undo" type="button" style="{% if not row.selected_variation %}display:none;{% endif %}">x</button>
+          </div>
+          <form action="/resolve/remove" method="post" data-confirm="{{ tr('Remove this queue item?') }}" style="margin-top:6px;">
+            <input type="hidden" name="label_pdf" value="{{ row.label_pdf }}">
+            <button class="btn btn-sm btn-secondary" type="submit">{{ tr("Remove From Queue") }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h3 style="margin:12px 0 8px;">{{ tr("Match/Error Queue ({count})", count=(other_rows|length if other_rows is defined else rows|length)) }}</h3>
+  <table>
+    <thead><tr><th>{{ tr("Label") }}</th><th>{{ tr("Reason") }}</th><th>{{ tr("Candidates (Most likely first)") }}</th><th>{{ tr("Action") }}</th></tr></thead>
+    <tbody>
+      {% for row in (other_rows if other_rows is defined else rows) %}
+      <tr>
+        <td><strong>{{ row.label_identity or row.recipient_name or row.tracking_number or row.label_pdf }}</strong><br><small>{{ row.label_pdf }}</small></td>
+        <td><strong>{{ tr(row.reason_human or row.reason) }}</strong><br><small>{{ row.reason }}</small></td>
         <td>
           <ul>
           {% for c in (row.candidates or []) %}
@@ -19,40 +75,104 @@
             {% set c_items = c_order.get("items", []) if c_order else [] %}
             {% set first_item = c_items[0] if c_items and c_items|length > 0 else None %}
             <li>
-              <strong>Order {{ c.get("order_id", "") }}</strong>
+              <strong>{{ tr("Order #") }} {{ c.get("order_id", "") }}</strong>
               | {{ ((c.get("score", 0) * 100) | round(0)) }}% match
               | {{ c.get("ship_name", "") }}
-              | ZIP {{ c.get("ship_postal", "") }}
-              {% if first_item %}| Item: {{ first_item.get("title", "") }}{% endif %}
-              {% if first_item %}| Qty: {{ first_item.get("quantity", "") }}{% endif %}
+              | {{ tr("ZIP") }} {{ c.get("ship_postal", "") }}
+              {% if first_item %}| {{ tr("Item Title") }}: {{ first_item.get("title", "") }}{% endif %}
+              {% if first_item %}| {{ tr("Qty") }}: {{ first_item.get("quantity", "") }}{% endif %}
             </li>
           {% else %}
-            <li>No candidate matches found</li>
+            <li>{{ tr("No candidate matches found") }}</li>
           {% endfor %}
           </ul>
         </td>
         <td>
           {% if row.candidates and row.candidates|length > 0 %}
-          <form action="/resolve/assign" method="post" style="margin-bottom:6px;">
+          <form action="/resolve/assign" method="post" style="margin-bottom:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
             <input type="hidden" name="label_pdf" value="{{ row.label_pdf }}">
             <select name="order_id" required>
               {% for c in row.candidates %}
-              <option value="{{ c.get('order_id', '') }}">Order {{ c.get('order_id', '') }} ({{ ((c.get('score', 0) * 100) | round(0)) }}%)</option>
+              <option value="{{ c.get('order_id', '') }}">{{ tr("Order #") }} {{ c.get('order_id', '') }} ({{ ((c.get('score', 0) * 100) | round(0)) }}%)</option>
               {% endfor %}
             </select>
-            <button type="submit">Resolve + Generate Output</button>
+            <button class="btn btn-sm btn-primary" type="submit">{{ tr("Resolve + Generate Output") }}</button>
           </form>
           {% endif %}
-          <form action="/resolve/remove" method="post" onsubmit="return confirm('Remove this queue item?')">
+          <form action="/resolve/remove" method="post" data-confirm="{{ tr('Remove this queue item?') }}">
             <input type="hidden" name="label_pdf" value="{{ row.label_pdf }}">
-            <button type="submit">Remove From Queue</button>
+            <button class="btn btn-sm btn-secondary" type="submit">{{ tr("Remove From Queue") }}</button>
           </form>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="4">No unresolved labels</td></tr>
+      <tr><td colspan="4">{{ tr("No unresolved labels") }}</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </section>
+
+<script>
+(function () {
+  const hidden = document.getElementById('variationHiddenInputs');
+  const chooseVariationMessage = {{ tr("Choose a variation first.")|tojson }};
+  if (!hidden) return;
+
+  function setHidden(labelPdf, orderId, choice) {
+    const safe = CSS.escape(labelPdf);
+    const prev = hidden.querySelectorAll(`[data-label-pdf="${safe}"]`);
+    prev.forEach((n) => n.remove());
+    if (!choice) return;
+    const wrap = document.createElement('div');
+    wrap.setAttribute('data-label-pdf', labelPdf);
+    wrap.innerHTML = `
+      <input type="hidden" name="label_pdf" value="${labelPdf}">
+      <input type="hidden" name="order_id" value="${orderId}">
+      <input type="hidden" name="variant_choice" value="${choice}">
+    `;
+    hidden.appendChild(wrap);
+  }
+
+  document.querySelectorAll('.variation-row').forEach((row) => {
+    const orderSel = row.querySelector('.variation-order');
+    const choiceSel = row.querySelector('.variation-choice');
+    const confirmBtn = row.querySelector('.variation-confirm');
+    const undoBtn = row.querySelector('.variation-undo');
+    const confirmed = row.querySelector('.variation-confirmed');
+    const labelPdf = row.getAttribute('data-label-pdf') || '';
+
+    const initOrder = row.getAttribute('data-initial-order') || (orderSel ? orderSel.value : '');
+    const initChoice = row.getAttribute('data-initial-choice') || (choiceSel ? choiceSel.value : '');
+    if (initChoice) setHidden(labelPdf, initOrder, initChoice);
+
+    if (confirmBtn) {
+      confirmBtn.addEventListener('click', () => {
+        const orderId = orderSel ? orderSel.value : '';
+        const choice = choiceSel ? choiceSel.value : '';
+        if (!choice) {
+          showAppAlert(chooseVariationMessage);
+          return;
+        }
+        if (orderSel) orderSel.disabled = true;
+        if (choiceSel) choiceSel.disabled = true;
+        confirmBtn.style.display = 'none';
+        if (confirmed) confirmed.style.display = '';
+        if (undoBtn) undoBtn.style.display = '';
+        setHidden(labelPdf, orderId, choice);
+      });
+    }
+
+    if (undoBtn) {
+      undoBtn.addEventListener('click', () => {
+        if (orderSel) orderSel.disabled = false;
+        if (choiceSel) choiceSel.disabled = false;
+        if (confirmBtn) confirmBtn.style.display = '';
+        if (confirmed) confirmed.style.display = 'none';
+        undoBtn.style.display = 'none';
+        setHidden(labelPdf, '', '');
+      });
+    }
+  });
+})();
+</script>
 {% endblock %}

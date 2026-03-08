@@ -1,8 +1,8 @@
 ﻿{% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h2>Layout + Live Preview</h2>
-  <p class="settings-intro">Build the printed lines the same way they should appear on paper. Drag fields into each line, reorder them, and the preview updates live.</p>
+  <h2>{{ tr("Layout + Live Preview") }}</h2>
+  <p class="settings-intro">{{ tr("Build the printed lines the same way they should appear on paper. Drag fields into each line, reorder them, and the preview updates live.") }}</p>
 
   <div class="settings-split">
     <div class="settings-left">
@@ -13,215 +13,227 @@
 
         <div class="settings-grid">
           <div class="settings-box">
-            <div class="box-title">Placement</div>
-            <label>Text goes on which two margins?
+            <div class="box-title">{{ tr("UI Preferences") }}</div>
+            <label><span>{{ tr("Settings language") }}</span>
+              <select name="ui_language_mode" id="ui_language_mode">
+                <option value="en" {% if ui.ui_language_mode == 'en' %}selected{% endif %}>{{ tr("English") }}</option>
+                <option value="ko" {% if ui.ui_language_mode == 'ko' %}selected{% endif %}>한국어</option>
+                <option value="zh_cn" {% if ui.ui_language_mode == 'zh_cn' %}selected{% endif %}>中文简体</option>
+                <option value="zh_tw" {% if ui.ui_language_mode == 'zh_tw' %}selected{% endif %}>中文繁體</option>
+              </select>
+            </label>
+            <label><span>{{ tr("UI font mode") }}</span>
+              <select name="ui_font_mode" id="ui_font_mode">
+                <option value="default" {% if ui.ui_font_mode == 'default' %}selected{% endif %}>{{ tr("Default") }}</option>
+                <option value="comic" {% if ui.ui_font_mode == 'comic' %}selected{% endif %}>{{ tr("Comic Sans") }}</option>
+                <option value="wingdings" {% if ui.ui_font_mode == 'wingdings' %}selected{% endif %}>{{ tr("Wingdings (UI only)") }}</option>
+              </select>
+            </label>
+            <p class="builder-help" style="margin-top:8px;">{{ tr("Font mode changes the app UI only. Label PDF overlay text stays readable.") }}</p>
+          </div>
+
+          <div class="settings-box">
+            <div class="box-title">{{ tr("Placement") }}</div>
+            <label>{{ tr("Text goes on which two margins?") }}
               <select name="margin_direction" id="margin_direction">
-                <option value="top_bottom" {% if ui.margin_direction == 'top_bottom' %}selected{% endif %}>Top + Bottom margins</option>
-                <option value="left_right" {% if ui.margin_direction == 'left_right' %}selected{% endif %}>Left + Right margins</option>
+                <option value="top_bottom" {% if ui.margin_direction == 'top_bottom' %}selected{% endif %}>{{ tr("Top + Bottom margins") }}</option>
+                <option value="left_right" {% if ui.margin_direction == 'left_right' %}selected{% endif %}>{{ tr("Left + Right margins") }}</option>
               </select>
             </label>
 
-            <label>Use one margin or both margins?
+            <label>{{ tr("Use one margin or both margins?") }}
               <select name="margin_mode" id="margin_mode">
-                <option value="both" {% if ui.margin_mode == 'both' %}selected{% endif %}>Both margins (overflow wraps to second margin)</option>
-                <option value="single" {% if ui.margin_mode == 'single' %}selected{% endif %}>Single margin (overflow goes to backside)</option>
+                <option value="both" {% if ui.margin_mode == 'both' %}selected{% endif %}>{{ tr("Both margins (overflow wraps to second margin)") }}</option>
+                <option value="single" {% if ui.margin_mode == 'single' %}selected{% endif %}>{{ tr("Single margin (overflow goes to blank half/page)") }}</option>
               </select>
             </label>
 
-            <label>Page mode
+            <label>{{ tr("Print info on") }}
+              <select name="render_mode" id="render_mode">
+                <option value="margin" {% if ui.render_mode == 'margin' %}selected{% endif %}>{{ tr("Front margins on label page") }}</option>
+                <option value="backside" {% if ui.render_mode == 'backside' %}selected{% endif %}>{{ tr("Blank half/page info panel") }}</option>
+                <option value="both" {% if ui.render_mode == 'both' %}selected{% endif %}>{{ tr("Both margins + duplicate on blank half/page") }}</option>
+              </select>
+            </label>
+
+            <label>{{ tr("Page mode") }}
               <select name="page_mode" id="page_mode">
-                <option value="half_sheet_top" {% if ui.page_mode == 'half_sheet_top' %}selected{% endif %}>Top half-sheet labels</option>
-                <option value="half_sheet_bottom" {% if ui.page_mode == 'half_sheet_bottom' %}selected{% endif %}>Bottom half-sheet labels</option>
-                <option value="full_page" {% if ui.page_mode == 'full_page' %}selected{% endif %}>Full-page labels</option>
+                <option value="half_sheet_top" {% if ui.page_mode == 'half_sheet_top' %}selected{% endif %}>{{ tr("Top half-sheet labels") }}</option>
+                <option value="half_sheet_bottom" {% if ui.page_mode == 'half_sheet_bottom' %}selected{% endif %}>{{ tr("Bottom half-sheet labels") }}</option>
+                <option value="full_page" {% if ui.page_mode == 'full_page' %}selected{% endif %}>{{ tr("Full-page labels") }}</option>
               </select>
             </label>
 
-            <label>Quick layout preset
+            <label>{{ tr("Quick layout preset") }}
               <select name="line_layout_mode" id="line_layout_mode">
-                <option value="qty_label_loc_inline" {% if ui.line_layout_mode == 'qty_label_loc_inline' %}selected{% endif %}>Line 1: QTY | LABEL | LOC</option>
-                <option value="label_qty_total_inline" {% if ui.line_layout_mode == 'label_qty_total_inline' %}selected{% endif %}>Line 1: LABEL | QTY | TOTAL</option>
-                <option value="location_label_qty_total_inline" {% if ui.line_layout_mode == 'location_label_qty_total_inline' %}selected{% endif %}>Line 1: LOC | LABEL | QTY | TOTAL</option>
-                <option value="qty_label_then_total_loc" {% if ui.line_layout_mode == 'qty_label_then_total_loc' %}selected{% endif %}>Line 1: QTY | LABEL, Line 2: TOTAL | LOC</option>
-                <option value="stacked" {% if ui.line_layout_mode == 'stacked' %}selected{% endif %}>Stacked lines</option>
-                <option value="custom" {% if ui.line_layout_mode == 'custom' %}selected{% endif %}>Custom line builder</option>
+                <option value="qty_label_loc_inline" {% if ui.line_layout_mode == 'qty_label_loc_inline' %}selected{% endif %}>{{ tr("Line 1: QTY | LABEL | LOC") }}</option>
+                <option value="label_qty_total_inline" {% if ui.line_layout_mode == 'label_qty_total_inline' %}selected{% endif %}>{{ tr("Line 1: LABEL | QTY | TOTAL") }}</option>
+                <option value="location_label_qty_total_inline" {% if ui.line_layout_mode == 'location_label_qty_total_inline' %}selected{% endif %}>{{ tr("Line 1: LOC | LABEL | QTY | TOTAL") }}</option>
+                <option value="qty_label_then_total_loc" {% if ui.line_layout_mode == 'qty_label_then_total_loc' %}selected{% endif %}>{{ tr("Line 1: QTY | LABEL, Line 2: TOTAL | LOC") }}</option>
+                <option value="stacked" {% if ui.line_layout_mode == 'stacked' %}selected{% endif %}>{{ tr("Stacked lines") }}</option>
+                <option value="custom" {% if ui.line_layout_mode == 'custom' %}selected{% endif %}>{{ tr("Custom line builder") }}</option>
               </select>
             </label>
           </div>
 
           <div class="settings-box">
-            <div class="box-title">Text Box</div>
-            <label>Margin strip thickness (points)
+            <div class="box-title">{{ tr("Text Box") }}</div>
+            <label>{{ tr("Margin strip thickness (points)") }}
               <input type="number" name="strip_thickness" id="strip_thickness" value="{{ ui.strip_thickness }}" min="16" max="180">
             </label>
 
-            <label>Distance from page edge (top/bottom) (points)
+            <label>{{ tr("Distance from page edge (top/bottom) (points)") }}
               <input type="number" name="edge_padding" id="edge_padding" value="{{ ui.edge_padding }}" min="-80" max="120">
             </label>
 
-            <label>Distance from page side (left/right) (points)
+            <label>{{ tr("Distance from page side (left/right) (points)") }}
               <input type="number" name="side_padding" id="side_padding" value="{{ ui.side_padding }}" min="-80" max="120">
             </label>
 
-            <label>Text alignment
+            <label>{{ tr("Text alignment") }}
               <select name="text_align" id="text_align">
-                <option value="left" {% if ui.text_align == 'left' %}selected{% endif %}>Left</option>
-                <option value="center" {% if ui.text_align == 'center' %}selected{% endif %}>Center</option>
-                <option value="right" {% if ui.text_align == 'right' %}selected{% endif %}>Right</option>
+                <option value="left" {% if ui.text_align == 'left' %}selected{% endif %}>{{ tr("Left") }}</option>
+                <option value="center" {% if ui.text_align == 'center' %}selected{% endif %}>{{ tr("Center") }}</option>
+                <option value="right" {% if ui.text_align == 'right' %}selected{% endif %}>{{ tr("Right") }}</option>
               </select>
             </label>
           </div>
 
           <div class="settings-box">
-            <div class="box-title">Font + Wrapping</div>
-            <label>Font size
+            <div class="box-title">{{ tr("Font + Wrapping") }}</div>
+            <label>{{ tr("Font size") }}
               <input type="number" name="font_size" id="font_size" value="{{ ui.font_size }}" min="8" max="32">
             </label>
 
-            <label>Line spacing
-              <input type="number" name="line_spacing" id="line_spacing" value="{{ ui.line_spacing }}" min="10" max="40">
+            <label>{{ tr("Line spacing") }}
+              <input type="number" name="line_spacing" id="line_spacing" value="{{ ui.line_spacing }}" max="40">
             </label>
 
-            <label>Wrapping style
+            <label>{{ tr("Blank half/page font size") }}
+              <input type="number" name="backside_font_size" id="backside_font_size" value="{{ ui.backside_font_size }}" min="8" max="40">
+            </label>
+
+            <label>{{ tr("Blank half/page line spacing") }}
+              <input type="number" name="backside_line_spacing" id="backside_line_spacing" value="{{ ui.backside_line_spacing }}" max="48">
+            </label>
+
+            <label>{{ tr("Wrapping style") }}
               <select name="wrap_mode" id="wrap_mode">
-                <option value="word" {% if ui.wrap_mode == 'word' %}selected{% endif %}>Wrap by words</option>
-                <option value="char" {% if ui.wrap_mode == 'char' %}selected{% endif %}>Wrap by characters</option>
-                <option value="truncate" {% if ui.wrap_mode == 'truncate' %}selected{% endif %}>Cut with ...</option>
+                <option value="word" {% if ui.wrap_mode == 'word' %}selected{% endif %}>{{ tr("Wrap by words") }}</option>
+                <option value="char" {% if ui.wrap_mode == 'char' %}selected{% endif %}>{{ tr("Wrap by characters") }}</option>
+                <option value="truncate" {% if ui.wrap_mode == 'truncate' %}selected{% endif %}>{{ tr("Cut with ...") }}</option>
               </select>
             </label>
 
-            <label>Inline separator
+            <label>{{ tr("Inline separator") }}
               <input type="text" name="inline_separator" id="inline_separator" value="{{ ui.inline_separator or ' | ' }}">
             </label>
 
-            <label><input type="checkbox" name="show_field_labels" id="show_field_labels" {% if ui.show_field_labels %}checked{% endif %}> Show labels like "QTY" and "TOTAL"</label>
+            <label><input type="checkbox" name="show_field_labels" id="show_field_labels" {% if ui.show_field_labels %}checked{% endif %}> {{ tr('Show labels like "QTY" and "TOTAL"') }}</label>
           </div>
 
           <div class="settings-box">
-            <div class="box-title">Batch Output Sorting</div>
-            <label>Combined PDF sort mode
+            <div class="box-title">{{ tr("Batch Output Sorting") }}</div>
+            <label>{{ tr("Combined PDF sort mode") }}
               <select name="output_sort_mode">
-                <option value="processed" {% if ui.output_sort_mode == 'processed' %}selected{% endif %}>Processed order (exact)</option>
-                <option value="processed_reverse" {% if ui.output_sort_mode == 'processed_reverse' %}selected{% endif %}>Processed order (reverse)</option>
-                <option value="custom" {% if ui.output_sort_mode == 'custom' %}selected{% endif %}>Custom sort (fields below)</option>
+                <option value="processed" {% if ui.output_sort_mode == 'processed' %}selected{% endif %}>{{ tr("Processed order (exact)") }}</option>
+                <option value="processed_reverse" {% if ui.output_sort_mode == 'processed_reverse' %}selected{% endif %}>{{ tr("Processed order (reverse)") }}</option>
+                <option value="custom" {% if ui.output_sort_mode == 'custom' %}selected{% endif %}>{{ tr("Custom sort (fields below)") }}</option>
               </select>
             </label>
 
             <div class="sort-grid">
-              <label>Priority 1
-                <select name="sort_priority_1">
-                  <option value="label" {% if ui.sort_priority_1 == 'label' %}selected{% endif %}>Internal Label</option>
-                  <option value="qty" {% if ui.sort_priority_1 == 'qty' %}selected{% endif %}>Quantity</option>
-                  <option value="item_key" {% if ui.sort_priority_1 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
-                  <option value="location" {% if ui.sort_priority_1 == 'location' %}selected{% endif %}>Location</option>
-                  <option value="carrier" {% if ui.sort_priority_1 == 'carrier' %}selected{% endif %}>Carrier (UPS / FedEx / USPS)</option>
+              {% for idx in [1,2,3,4] %}
+              <label>{{ tr('Priority {count}', count=idx) }}
+                <select name="sort_priority_{{ idx }}">
+                  {% set current = ui|attr('sort_priority_' ~ idx) %}
+                  <option value="label" {% if current == 'label' %}selected{% endif %}>{{ tr("Internal Label") }}</option>
+                  <option value="qty" {% if current == 'qty' %}selected{% endif %}>{{ tr("Quantity") }}</option>
+                  <option value="item_key" {% if current == 'item_key' %}selected{% endif %}>{{ tr("SKU / Item #") }}</option>
+                  <option value="location" {% if current == 'location' %}selected{% endif %}>{{ tr("Location") }}</option>
+                  <option value="carrier" {% if current == 'carrier' %}selected{% endif %}>{{ tr("Carrier (UPS / FedEx / USPS)") }}</option>
                 </select>
               </label>
-              <label>Priority 2
-                <select name="sort_priority_2">
-                  <option value="label" {% if ui.sort_priority_2 == 'label' %}selected{% endif %}>Internal Label</option>
-                  <option value="qty" {% if ui.sort_priority_2 == 'qty' %}selected{% endif %}>Quantity</option>
-                  <option value="item_key" {% if ui.sort_priority_2 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
-                  <option value="location" {% if ui.sort_priority_2 == 'location' %}selected{% endif %}>Location</option>
-                  <option value="carrier" {% if ui.sort_priority_2 == 'carrier' %}selected{% endif %}>Carrier (UPS / FedEx / USPS)</option>
-                </select>
-              </label>
-              <label>Priority 3
-                <select name="sort_priority_3">
-                  <option value="label" {% if ui.sort_priority_3 == 'label' %}selected{% endif %}>Internal Label</option>
-                  <option value="qty" {% if ui.sort_priority_3 == 'qty' %}selected{% endif %}>Quantity</option>
-                  <option value="item_key" {% if ui.sort_priority_3 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
-                  <option value="location" {% if ui.sort_priority_3 == 'location' %}selected{% endif %}>Location</option>
-                  <option value="carrier" {% if ui.sort_priority_3 == 'carrier' %}selected{% endif %}>Carrier (UPS / FedEx / USPS)</option>
-                </select>
-              </label>
-              <label>Priority 4
-                <select name="sort_priority_4">
-                  <option value="label" {% if ui.sort_priority_4 == 'label' %}selected{% endif %}>Internal Label</option>
-                  <option value="qty" {% if ui.sort_priority_4 == 'qty' %}selected{% endif %}>Quantity</option>
-                  <option value="item_key" {% if ui.sort_priority_4 == 'item_key' %}selected{% endif %}>SKU / Item #</option>
-                  <option value="location" {% if ui.sort_priority_4 == 'location' %}selected{% endif %}>Location</option>
-                  <option value="carrier" {% if ui.sort_priority_4 == 'carrier' %}selected{% endif %}>Carrier (UPS / FedEx / USPS)</option>
-                </select>
-              </label>
+              {% endfor %}
             </div>
 
             <div class="sort-grid compact">
-              <label><input type="checkbox" name="sort_enable_label" {% if ui.sort_enable_label %}checked{% endif %}> Use Label</label>
-              <label><input type="checkbox" name="sort_enable_qty" {% if ui.sort_enable_qty %}checked{% endif %}> Use Quantity</label>
-              <label><input type="checkbox" name="sort_enable_item_key" {% if ui.sort_enable_item_key %}checked{% endif %}> Use SKU / Item #</label>
-              <label><input type="checkbox" name="sort_enable_location" {% if ui.sort_enable_location %}checked{% endif %}> Use Location</label>
-              <label><input type="checkbox" name="sort_enable_carrier" {% if ui.sort_enable_carrier %}checked{% endif %}> Use Carrier</label>
+              <label><input type="checkbox" name="sort_enable_label" {% if ui.sort_enable_label %}checked{% endif %}> {{ tr("Use Label") }}</label>
+              <label><input type="checkbox" name="sort_enable_qty" {% if ui.sort_enable_qty %}checked{% endif %}> {{ tr("Use Quantity") }}</label>
+              <label><input type="checkbox" name="sort_enable_item_key" {% if ui.sort_enable_item_key %}checked{% endif %}> {{ tr("Use SKU / Item #") }}</label>
+              <label><input type="checkbox" name="sort_enable_location" {% if ui.sort_enable_location %}checked{% endif %}> {{ tr("Use Location") }}</label>
+              <label><input type="checkbox" name="sort_enable_carrier" {% if ui.sort_enable_carrier %}checked{% endif %}> {{ tr("Use Carrier") }}</label>
             </div>
 
             <div class="sort-grid">
-              <label>Label direction
+              <label>{{ tr("Label direction") }}
                 <select name="sort_dir_label">
-                  <option value="asc" {% if ui.sort_dir_label == 'asc' %}selected{% endif %}>A -> Z</option>
-                  <option value="desc" {% if ui.sort_dir_label == 'desc' %}selected{% endif %}>Z -> A</option>
+                  <option value="asc" {% if ui.sort_dir_label == 'asc' %}selected{% endif %}>{{ tr("A -> Z") }}</option>
+                  <option value="desc" {% if ui.sort_dir_label == 'desc' %}selected{% endif %}>{{ tr("Z -> A") }}</option>
                 </select>
               </label>
-              <label>Quantity direction
+              <label>{{ tr("Quantity direction") }}
                 <select name="sort_dir_qty">
-                  <option value="asc" {% if ui.sort_dir_qty == 'asc' %}selected{% endif %}>Low -> High</option>
-                  <option value="desc" {% if ui.sort_dir_qty == 'desc' %}selected{% endif %}>High -> Low</option>
+                  <option value="asc" {% if ui.sort_dir_qty == 'asc' %}selected{% endif %}>{{ tr("Low -> High") }}</option>
+                  <option value="desc" {% if ui.sort_dir_qty == 'desc' %}selected{% endif %}>{{ tr("High -> Low") }}</option>
                 </select>
               </label>
-              <label>SKU / Item # direction
+              <label>{{ tr("SKU / Item # direction") }}
                 <select name="sort_dir_item_key">
-                  <option value="asc" {% if ui.sort_dir_item_key == 'asc' %}selected{% endif %}>A -> Z</option>
-                  <option value="desc" {% if ui.sort_dir_item_key == 'desc' %}selected{% endif %}>Z -> A</option>
+                  <option value="asc" {% if ui.sort_dir_item_key == 'asc' %}selected{% endif %}>{{ tr("A -> Z") }}</option>
+                  <option value="desc" {% if ui.sort_dir_item_key == 'desc' %}selected{% endif %}>{{ tr("Z -> A") }}</option>
                 </select>
               </label>
-              <label>Location direction
+              <label>{{ tr("Location direction") }}
                 <select name="sort_dir_location">
-                  <option value="asc" {% if ui.sort_dir_location == 'asc' %}selected{% endif %}>A -> Z</option>
-                  <option value="desc" {% if ui.sort_dir_location == 'desc' %}selected{% endif %}>Z -> A</option>
+                  <option value="asc" {% if ui.sort_dir_location == 'asc' %}selected{% endif %}>{{ tr("A -> Z") }}</option>
+                  <option value="desc" {% if ui.sort_dir_location == 'desc' %}selected{% endif %}>{{ tr("Z -> A") }}</option>
                 </select>
               </label>
-              <label>Carrier direction
+              <label>{{ tr("Carrier direction") }}
                 <select name="sort_dir_carrier">
-                  <option value="asc" {% if ui.sort_dir_carrier == 'asc' %}selected{% endif %}>A -> Z</option>
-                  <option value="desc" {% if ui.sort_dir_carrier == 'desc' %}selected{% endif %}>Z -> A</option>
+                  <option value="asc" {% if ui.sort_dir_carrier == 'asc' %}selected{% endif %}>{{ tr("A -> Z") }}</option>
+                  <option value="desc" {% if ui.sort_dir_carrier == 'desc' %}selected{% endif %}>{{ tr("Z -> A") }}</option>
                 </select>
               </label>
             </div>
 
-            <label>Archive retention days
+            <label>{{ tr("Archive retention days") }}
               <input type="number" name="archive_retention_days" value="{{ ui.archive_retention_days }}" min="1" max="365">
             </label>
           </div>
         </div>
 
         <div class="settings-box line-builder-box">
-          <div class="box-title">Line Builder</div>
-          <p class="builder-help">Drag the field chips into the lines below. Whatever is on Line 1 prints first, then Line 2, and so on. Fields left in the pool get auto-appended after your placed lines.</p>
+          <div class="box-title">{{ tr("Line Builder") }}</div>
+          <p class="builder-help">{{ tr("Drag the field chips into the lines below. Whatever is on Line 1 prints first, then Line 2, and so on. Fields left in the pool are intentionally not printed.") }}</p>
           <div class="builder-pool-wrap">
-            <div class="builder-label">Available / auto-append fields</div>
+            <div class="builder-label">{{ tr("Available / not-printed fields") }}</div>
             <div id="fieldPool" class="line-dropzone field-pool"></div>
           </div>
           <div id="lineBuilder" class="line-builder"></div>
         </div>
 
-        <button id="saveSettingsBtn" class="btn btn-secondary save-btn save-passive" type="submit">Save</button>
+        <button id="saveSettingsBtn" class="btn btn-secondary save-btn save-passive" type="submit">{{ tr("Save") }}</button>
       </form>
     </div>
 
     <div class="settings-right">
-      <h3 style="margin-top:0;">Live Preview</h3>
+      <h3 style="margin-top:0;">{{ tr("Live Preview") }}</h3>
       {% if labels and labels|length > 0 %}
-      <label>Preview using label file
+      <label>{{ tr("Preview using label file") }}
         <select id="preview_label_pdf" style="max-width:100%;">
           {% for p in labels %}
           <option value="{{ p }}">{{ p }}</option>
           {% endfor %}
         </select>
       </label>
-      <p class="preview-help">Red boxes show the text-safe areas. Preview updates live and does not save until you click <strong>Save</strong>.</p>
+      <p class="preview-help">{{ tr("Red boxes show the text-safe areas. Preview updates live and does not save until you click Save.") }}</p>
       <div class="preview-frame">
-        <img id="livePreviewImg" alt="Live preview" class="preview-image">
+        <img id="livePreviewImg" alt="{{ tr('Live Preview') }}" class="preview-image">
       </div>
       {% else %}
-      <p>No label PDFs found. Upload a label PDF/ZIP in Dashboard first, then come back.</p>
+      <p>{{ tr("No label PDFs found. Upload a label PDF/ZIP in Dashboard first, then come back.") }}</p>
       {% endif %}
     </div>
   </div>
@@ -255,6 +267,7 @@
 .preview-image { max-width: 100%; height: auto; display: block; }
 .save-btn { min-width: 160px; margin-top: 12px; }
 .save-passive { opacity: 0.68; filter: saturate(0.72); }
+.sort-disabled { opacity: 0.48; }
 @media (max-width: 1400px) {
   .settings-split { grid-template-columns: 1fr; }
   .settings-right { position: static; }
@@ -272,6 +285,7 @@
   const labelSel = document.getElementById('preview_label_pdf');
   const modeSel = document.getElementById('line_layout_mode');
   const saveBtn = document.getElementById('saveSettingsBtn');
+  const outputSortModeSel = form.querySelector('[name="output_sort_mode"]');
   const fieldOrderInput = document.getElementById('field_order_csv');
   const inlineFieldsInput = document.getElementById('inline_fields_csv');
   const lineGroupsInput = document.getElementById('line_groups_csv');
@@ -279,12 +293,37 @@
   const lineBuilder = document.getElementById('lineBuilder');
   if (!form || !modeSel || !saveBtn || !fieldPool || !lineBuilder) return;
 
+  const T = {
+    qty: {{ tr("QTY")|tojson }},
+    qtyHint: {{ tr("units ordered")|tojson }},
+    label: {{ tr("LABEL")|tojson }},
+    labelHint: {{ tr("internal label")|tojson }},
+    total: {{ tr("TOTAL")|tojson }},
+    totalHint: {{ tr("buyer total")|tojson }},
+    location: {{ tr("LOC")|tojson }},
+    locationHint: {{ tr("pick location")|tojson }},
+    title: {{ tr("TITLE")|tojson }},
+    titleHint: {{ tr("support title")|tojson }},
+    clearLine: {{ tr("Clear line")|tojson }},
+    dropFields: {{ tr("Drop fields here")|tojson }},
+    allPlaced: {{ tr("All fields are placed into lines.")|tojson }},
+    line: {{ tr("Line {count}", count="__COUNT__")|tojson }},
+  };
+
+  function fmt(template, vars) {
+    let out = String(template || '');
+    Object.keys(vars || {}).forEach((key) => {
+      out = out.replaceAll(`__${key.toUpperCase()}__`, vars[key]);
+    });
+    return out;
+  }
+
   const FIELD_META = {
-    qty: { title: 'QTY', hint: 'units ordered' },
-    label: { title: 'LABEL', hint: 'internal label' },
-    total: { title: 'TOTAL', hint: 'buyer total' },
-    location: { title: 'LOC', hint: 'pick location' },
-    title: { title: 'TITLE', hint: 'support title' },
+    qty: { title: T.qty, hint: T.qtyHint },
+    label: { title: T.label, hint: T.labelHint },
+    total: { title: T.total, hint: T.totalHint },
+    location: { title: T.location, hint: T.locationHint },
+    title: { title: T.title, hint: T.titleHint },
   };
   const ALL_FIELDS = Object.keys(FIELD_META);
   const PRESETS = {
@@ -329,16 +368,7 @@
     const grouped = String(lineGroupsInput.value || '').trim().toLowerCase();
     if (grouped) {
       const parsed = grouped.split(';').map(part => part.split(',').map(x => x.trim()).filter(Boolean));
-      const lines = normalizeLines(parsed);
-      const used = new Set(lines.flat());
-      const fieldOrder = String(fieldOrderInput.value || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
-      const leftovers = fieldOrder.filter(f => FIELD_META[f] && !used.has(f));
-      leftovers.forEach((field, idx) => {
-        const slot = lines.findIndex(line => line.length === 0);
-        if (slot >= 0) lines[slot] = [field];
-        else lines[lines.length - 1].push(field);
-      });
-      return normalizeLines(lines);
+      return normalizeLines(parsed);
     }
     const preset = PRESETS[String(modeSel.value || '').trim()] || null;
     if (preset) return normalizeLines(preset);
@@ -356,9 +386,6 @@
         if (!used.includes(field)) used.push(field);
       });
     });
-    ALL_FIELDS.forEach((field) => {
-      if (!used.includes(field)) used.push(field);
-    });
     fieldOrderInput.value = used.join(',');
     inlineFieldsInput.value = '';
     lineGroupsInput.value = groups.join(';');
@@ -370,7 +397,7 @@
     pill.className = 'field-pill';
     pill.draggable = true;
     pill.dataset.field = field;
-    pill.innerHTML = `<span>${meta.title}</span><small>${meta.hint}</small>${withRemove ? '<button type="button" title="Remove from line">x</button>' : ''}`;
+    pill.innerHTML = `<span>${meta.title}</span><small>${meta.hint}</small>${withRemove ? '<button type="button" title="x">x</button>' : ''}`;
     pill.addEventListener('dragstart', () => { dragField = field; });
     pill.addEventListener('dragend', () => { dragField = ''; });
     if (withRemove) {
@@ -382,11 +409,8 @@
     } else {
       pill.addEventListener('click', () => {
         const idx = assignedLines.findIndex(line => line.length === 0);
-        if (idx >= 0) {
-          assignedLines[idx].push(field);
-        } else {
-          assignedLines[assignedLines.length - 1].push(field);
-        }
+        if (idx >= 0) assignedLines[idx].push(field);
+        else assignedLines[assignedLines.length - 1].push(field);
         modeSel.value = 'custom';
         syncBuilder(true);
       });
@@ -421,11 +445,11 @@
       row.className = 'line-row';
       const header = document.createElement('div');
       header.className = 'line-row-header';
-      header.innerHTML = `<div class="line-row-title">Line ${idx + 1}</div>`;
+      header.innerHTML = `<div class="line-row-title">${fmt(T.line, { count: String(idx + 1) })}</div>`;
       const clearBtn = document.createElement('button');
       clearBtn.type = 'button';
       clearBtn.className = 'clear-line-btn';
-      clearBtn.textContent = 'Clear line';
+      clearBtn.textContent = T.clearLine;
       clearBtn.addEventListener('click', () => {
         assignedLines[idx] = [];
         modeSel.value = 'custom';
@@ -438,7 +462,7 @@
       if (!line.length) {
         const hint = document.createElement('div');
         hint.className = 'empty-hint';
-        hint.textContent = 'Drop fields here';
+        hint.textContent = T.dropFields;
         zone.appendChild(hint);
       } else {
         line.forEach(field => zone.appendChild(renderFieldPill(field, true)));
@@ -455,7 +479,7 @@
     if (!available.length) {
       const hint = document.createElement('div');
       hint.className = 'empty-hint';
-      hint.textContent = 'All fields are placed into lines.';
+      hint.textContent = T.allPlaced;
       fieldPool.appendChild(hint);
       return;
     }
@@ -485,7 +509,9 @@
     q.set('margin_direction', fd.get('margin_direction') || 'top_bottom');
     q.set('margin_mode', fd.get('margin_mode') || 'both');
     q.set('font_size', fd.get('font_size') || '14');
+    q.set('backside_font_size', fd.get('backside_font_size') || '20');
     q.set('line_spacing', fd.get('line_spacing') || '18');
+    q.set('backside_line_spacing', fd.get('backside_line_spacing') || '24');
     q.set('strip_thickness', fd.get('strip_thickness') || '32');
     q.set('edge_padding', fd.get('edge_padding') || '8');
     q.set('side_padding', fd.get('side_padding') || '8');
@@ -498,6 +524,7 @@
     q.set('inline_separator', fd.get('inline_separator') || ' | ');
     q.set('show_field_labels', fd.get('show_field_labels') ? '1' : '0');
     q.set('page_mode', fd.get('page_mode') || 'half_sheet_top');
+    q.set('render_mode', fd.get('render_mode') || 'margin');
     q.set('_t', String(Date.now()));
     return q.toString();
   }
@@ -507,16 +534,31 @@
     img.src = '/settings/live-preview.png?' + queryFromForm();
   }
 
+  function updateSortControls() {
+    if (!outputSortModeSel) return;
+    const custom = String(outputSortModeSel.value || 'processed') === 'custom';
+    form.querySelectorAll('[name^="sort_priority_"], [name^="sort_enable_"], [name^="sort_dir_"]').forEach((el) => {
+      el.disabled = !custom;
+      const label = el.closest('label');
+      if (label) label.classList.toggle('sort-disabled', !custom);
+    });
+  }
+
   function queueRefresh() {
     if (timer) clearTimeout(timer);
     timer = setTimeout(refreshPreview, 180);
   }
 
+  if (outputSortModeSel) {
+    outputSortModeSel.addEventListener('change', () => {
+      updateSortControls();
+      setSaveDirty(true);
+    });
+  }
+
   modeSel.addEventListener('change', () => {
     const presetKey = String(modeSel.value || '').trim();
-    if (PRESETS[presetKey]) {
-      assignedLines = normalizeLines(PRESETS[presetKey]);
-    }
+    if (PRESETS[presetKey]) assignedLines = normalizeLines(PRESETS[presetKey]);
     syncBuilder(true);
   });
 
@@ -536,10 +578,12 @@
   });
   if (labelSel) labelSel.addEventListener('change', queueRefresh);
 
+  updateSortControls();
   loadPresetOrCurrent(false);
   setSaveDirty(false);
   refreshPreview();
 })();
 </script>
 {% endblock %}
+
 

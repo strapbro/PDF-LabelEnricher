@@ -1,0 +1,35 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>{{ tr("Confirm Reprocess Previous Batch") }}</h2>
+  {% if preview and preview.ok %}
+  <p>{{ tr("This will clear current staged files, restage files from the latest archived batch, then process again.") }}</p>
+  <p><strong>{{ tr("Source Batch:") }}</strong> {{ preview.batch_dir }}</p>
+  <p><strong>{{ tr("Files to restage:") }}</strong> {{ preview.restage_file_count or 0 }}</p>
+
+  {% if preview_names %}
+  <div class="tiny-meta">
+    <strong>{{ tr("Preview file list:") }}</strong>
+    <ul style="margin:6px 0 0 18px;padding:0;">
+      {% for f in preview_names %}
+      <li>{{ f }}</li>
+      {% endfor %}
+    </ul>
+    {% if preview_more_count > 0 %}
+    <div style="margin-top:6px;color:#4c5f50;">{{ tr("... and {count} more file(s)", count=preview_more_count) }}</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+    <form action="/process/reprocess-latest" method="post">
+      <button class="btn btn-lg btn-primary" type="submit">{{ tr("Confirm Reprocess") }}</button>
+    </form>
+    <a class="btn btn-lg btn-secondary" href="/">{{ tr("Cancel") }}</a>
+  </div>
+  {% else %}
+  <p style="color:#7d4f4f;"><strong>{{ tr("Cannot reprocess:") }}</strong> {{ tr(preview.error if preview else 'No preview available') }}</p>
+  <a class="btn btn-md btn-secondary" href="/">{{ tr("Back to Dashboard") }}</a>
+  {% endif %}
+</section>
+{% endblock %}

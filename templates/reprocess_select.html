@@ -1,32 +1,32 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h2>Reprocess Selected PDFs (Previous Batch)</h2>
-  <p style="font-size:13px;color:#555;">Select one or more label PDFs from the latest archived batch. We will restage only those labels, re-run processing, combine outputs, and open the combined PDF.</p>
+  <h2>{{ tr("Reprocess Selected PDFs (Previous Batch)") }}</h2>
+  <p style="font-size:13px;color:#555;">{{ tr("Select one or more label PDFs from the latest archived batch. We will restage only those labels, re-run processing, combine outputs, and open the combined PDF.") }}</p>
   {% if batch_dir %}
-  <p style="font-size:12px;color:#666;"><strong>Source batch:</strong> {{ batch_dir }}</p>
+  <p style="font-size:12px;color:#666;"><strong>{{ tr("Source batch:") }}</strong> {{ batch_dir }}</p>
   {% endif %}
   {% if error %}
-  <p style="color:#b00020;"><strong>{{ error }}</strong></p>
+  <p style="color:#b00020;"><strong>{{ tr(error) }}</strong></p>
   {% endif %}
 </section>
 
 <section class="card">
   <div class="controls">
-    <input id="filterBox" type="text" placeholder="Filter by name, ZIP, tracking, filename">
-    <button id="selectAllBtn" type="button">Select All</button>
-    <button id="clearAllBtn" type="button">Clear</button>
+    <input id="filterBox" type="text" placeholder="{{ tr('Filter by name, ZIP, tracking, filename') }}">
+    <button id="selectAllBtn" type="button">{{ tr("Select All") }}</button>
+    <button id="clearAllBtn" type="button">{{ tr("Clear") }}</button>
   </div>
 
-  <form action="/process/reprocess-selected" method="post" onsubmit="return confirm('Reprocess selected labels now? Current staged files will be replaced.')">
+  <form action="/process/reprocess-selected" method="post" data-confirm="{{ tr('Reprocess selected labels now? Current staged files will be replaced.') }}">
     <div class="list-wrap">
       {% if rows %}
       <table class="items-table" id="reprocessTable">
         <thead>
           <tr>
             <th style="width:44px;"></th>
-            <th>Label Identity</th>
-            <th>File</th>
+            <th>{{ tr("Label Identity") }}</th>
+            <th>{{ tr("File") }}</th>
           </tr>
         </thead>
         <tbody>
@@ -40,14 +40,14 @@
         </tbody>
       </table>
       {% else %}
-      <p>No matched labels found in latest batch report.</p>
+      <p>{{ tr("No matched labels found in latest batch report.") }}</p>
       {% endif %}
     </div>
 
     <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
-      <button class="btn btn-lg btn-primary" type="submit">Reprocess Selected + Open Combined PDF</button>
-      <a class="btn btn-md btn-secondary" href="/">Back to Dashboard</a>
-      <a class="btn btn-md btn-secondary" href="/settings">Layout + Live Preview</a>
+      <button class="btn btn-lg btn-primary" type="submit">{{ tr("Reprocess Selected + Open Combined PDF") }}</button>
+      <a class="btn btn-md btn-secondary" href="/">{{ tr("Back to Dashboard") }}</a>
+      <a class="btn btn-md btn-secondary" href="/settings">{{ tr("Layout & Settings") }}</a>
     </div>
   </form>
 </section>
@@ -93,5 +93,3 @@
 })();
 </script>
 {% endblock %}
-
-

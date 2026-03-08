@@ -99,7 +99,14 @@ nav a:hover,
   transform: translateY(-1px);
 }
 
-.nav-close {
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-close,
+.nav-comic {
   margin: 0;
   flex: 0 0 auto;
 }
@@ -377,3 +384,46 @@ body > header {
 
 
 
+
+.app-confirm[hidden] { display:none !important; }
+.app-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
+.app-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 28, 24, 0.42);
+  backdrop-filter: blur(3px);
+}
+.app-confirm-dialog {
+  position: relative;
+  max-width: 520px;
+  margin: 14vh auto 0;
+  background: rgba(255,255,255,0.88);
+}
+.app-confirm-dialog h3 { margin: 0 0 8px; }
+.app-confirm-dialog p { margin: 0; color: #355043; }
+.app-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.ui-font-comic,
+.ui-font-comic * {
+  font-family: "Comic Sans MS", "Comic Sans", "Chalkboard SE", cursive !important;
+}
+
+.ui-font-wingdings,
+.ui-font-wingdings * {
+  font-family: Wingdings, "Segoe UI Symbol", sans-serif !important;
+}
+
+
+.comic-mode,
+.comic-mode * {
+  font-family: "Comic Sans MS", "Comic Sans", "Chalkboard SE", cursive !important;
+}

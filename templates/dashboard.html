@@ -1,149 +1,168 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 <section class="card upload-card">
   <div class="section-head">
-    <h2>Drop Files</h2>
-    <span class="section-note">Fast path: upload + process + open combined PDF</span>
+    <h2>{{ tr("Drop Files") }}</h2>
+    <span class="section-note">{{ tr("Fast path: upload + process + open combined PDF") }}</span>
   </div>
 
   <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
     <input id="fileInput" type="file" name="files" multiple required style="display:none;">
-    <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Drop files or click to choose files">
-      <div class="drop-title">Drag & drop .zip/.pdf/.csv/.txt here</div>
-      <div class="drop-sub">or click anywhere in this box to choose files</div>
-      <div class="drop-choose">Choose Files</div>
+    <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="{{ tr('Drop files or click to choose files') }}">
+      <div class="drop-title">{{ tr("Drag & drop .zip/.pdf/.csv/.txt here") }}</div>
+      <div class="drop-sub">{{ tr("or click anywhere in this box to choose files") }}</div>
+      <div class="drop-choose">{{ tr("Choose Files") }}</div>
     </div>
 
     <div class="upload-meta-row">
-      <div id="pendingCount" class="pending-count">Pending selection: 0 file(s)</div>
+      <div id="pendingCount" class="pending-count">{{ tr("Pending selection: {count} file(s)", count=0) }}</div>
     </div>
+    <div id="pendingFileList" class="pending-file-list"></div>
 
     <div class="upload-quick-actions">
       <div class="quick-primary-stack">
-        <button class="btn btn-lg btn-quick btn-spotlight" type="submit" name="quick_action" value="upload_process_open">Upload + Process + Open Combined</button>
+        <button class="btn btn-lg btn-quick btn-spotlight" type="submit" name="quick_action" value="upload_process_open">{{ tr("Upload + Process + Open Combined") }}</button>
         <label class="inline-check quick-inline-check" for="autoPrintAfterProcess">
           <input id="autoPrintAfterProcess" type="checkbox" name="auto_print_after_process" value="1">
-          Auto-print after processing
+          {{ tr("Auto-print after processing") }}
         </label>
       </div>
-      <button class="btn btn-lg btn-upload" type="submit" name="quick_action" value="upload_only">Upload to incoming/batch</button>
+      <button class="btn btn-lg btn-upload" type="submit" name="quick_action" value="upload_only">{{ tr("Upload to incoming/batch") }}</button>
     </div>
   </form>
 </section>
 
 <section class="grid stats-grid">
   <div class="card stat-card">
-    <div class="stat-label">Staged Files</div>
+    <div class="stat-label">{{ tr("Staged Files") }}</div>
     <div class="stat-value">{{ status.staged_file_count }}</div>
   </div>
   <div class="card stat-card">
-    <div class="stat-label">Label Sources</div>
+    <div class="stat-label">{{ tr("Label Sources") }}</div>
     <div class="stat-value">{{ status.label_source_count }}</div>
-    <div class="stat-sub">PDF + ZIP</div>
+    <div class="stat-sub">{{ tr("PDF + ZIP") }}</div>
   </div>
   <div class="card stat-card {{ 'stat-ok' if status.ebay_csv_found else 'stat-miss' }}">
-    <div class="stat-label">eBay CSV</div>
-    <div class="stat-value">{{ 'Yes' if status.ebay_csv_found else 'None' }}</div>
+    <div class="stat-label">{{ tr("eBay CSV") }}</div>
+    <div class="stat-value">{{ tr('Yes') if status.ebay_csv_found else tr('None') }}</div>
   </div>
   <div class="card stat-card {{ 'stat-ok' if status.amazon_txt_found else 'stat-miss' }}">
-    <div class="stat-label">Amazon TXT</div>
-    <div class="stat-value">{{ 'Yes' if status.amazon_txt_found else 'None' }}</div>
+    <div class="stat-label">{{ tr("Amazon TXT") }}</div>
+    <div class="stat-value">{{ tr('Yes') if status.amazon_txt_found else tr('None') }}</div>
   </div>
   <div class="card stat-card {{ 'stat-alert' if status.unresolved_count > 0 else '' }}">
-    <div class="stat-label">Unprocessed Queue</div>
+    <div class="stat-label">{{ tr("Unprocessed Queue") }}</div>
     <div class="stat-value">{{ status.unresolved_count }}</div>
   </div>
   <div class="card stat-card {{ 'stat-alert' if needs_review_count > 0 else '' }}">
-    <div class="stat-label">Items Needing Review</div>
+    <div class="stat-label">{{ tr("Items Needing Review") }}</div>
     <div class="stat-value">{{ needs_review_count }}</div>
   </div>
 </section>
 
 <section class="card split-actions">
   <div>
-    <h3>Primary Actions</h3>
+    <h3>{{ tr("Primary Actions") }}</h3>
     {% if stale_open %}
     <div class="stale-warning">
-      <strong>Layout settings changed since last batch.</strong> Reprocess before opening so the print file matches current layout.
+      <strong>{{ tr("Layout settings changed since last batch.") }}</strong> {{ tr("Reprocess before opening so the print file matches current layout.") }}
       <div class="stale-warning-actions">
         <form action="/batch/open-combined-latest" method="post">
           <input type="hidden" name="reprocess_if_stale" value="1">
-          <button class="btn btn-md btn-primary" type="submit">Reprocess + Open (Recommended)</button>
+          <button class="btn btn-md btn-primary" type="submit">{{ tr("Reprocess + Open (Recommended)") }}</button>
         </form>
         <form action="/batch/open-combined-latest" method="post">
           <input type="hidden" name="force_open" value="1">
-          <button class="btn btn-md btn-outline" type="submit">Open Last Combined Anyway</button>
+          <button class="btn btn-md btn-outline" type="submit">{{ tr("Open Last Combined Anyway") }}</button>
         </form>
       </div>
     </div>
     {% endif %}
     <div class="actions-grid main-actions">
-      <form action="/process" method="post"><button class="btn btn-lg btn-primary" type="submit">Process Batch</button></form>
-      <form action="/batch/open-combined-latest" method="post"><button class="btn btn-lg btn-open" type="submit">Open Combined PDF</button></form>
-      <form action="/process/reprocess-latest" method="post" onsubmit="return confirm('Reprocess latest archived batch? This will clear current staged files first.')"><button class="btn btn-md btn-secondary" type="submit">Reprocess Previous Batch</button></form>
-      <a class="btn btn-md btn-secondary" href="/reprocess-select">Reprocess Select PDFs (Prev Batch)</a>
+      <form action="/process" method="post"><button class="btn btn-lg btn-primary" type="submit">{{ tr("Process Batch") }}</button></form>
+      <form action="/batch/open-combined-latest" method="post"><button class="btn btn-lg btn-open" type="submit">{{ tr("Open Combined PDF") }}</button></form>
+      <a class="btn btn-md btn-secondary" href="/process/reprocess-latest/confirm">{{ tr("Reprocess Previous Batch") }}</a>
+      <a class="btn btn-md btn-secondary" href="/reprocess-select">{{ tr("Reprocess Select PDFs (Prev Batch)") }}</a>
     </div>
   </div>
 
   <div>
-    <h3>Queues + Data</h3>
+    <h3>{{ tr("Queues + Data") }}</h3>
     <div class="actions-grid helper-actions">
       <a class="btn btn-md {% if status.unresolved_count > 0 %}btn-warn{% else %}btn-secondary{% endif %}" href="/unprocessed">
-        View Unprocessed Queue {% if status.unresolved_count > 0 %}({{ status.unresolved_count }}){% endif %}
+        {{ tr("View Unprocessed Queue") }} {% if status.unresolved_count > 0 %}({{ status.unresolved_count }}){% endif %}
       </a>
       <a class="btn btn-md {% if needs_review_count > 0 %}btn-attn{% else %}btn-secondary{% endif %}" href="/items/review">
-        View Items Needing Review {% if needs_review_count > 0 %}({{ needs_review_count }}){% endif %}
+        {{ tr("View Items Needing Review") }} {% if needs_review_count > 0 %}({{ needs_review_count }}){% endif %}
       </a>
-      <form action="/open" method="post"><input type="hidden" name="target" value="incoming"><button class="btn btn-sm btn-outline" type="submit">Open Incoming Folder</button></form>
-      <form action="/open" method="post"><input type="hidden" name="target" value="processed"><button class="btn btn-sm btn-outline" type="submit">Open Processed Folder</button></form>
+      <form action="/open" method="post"><input type="hidden" name="target" value="incoming"><button class="btn btn-sm btn-outline" type="submit">{{ tr("Open Incoming Folder") }}</button></form>
+      <form action="/open" method="post"><input type="hidden" name="target" value="processed"><button class="btn btn-sm btn-outline" type="submit">{{ tr("Open Processed Folder") }}</button></form>
     </div>
   </div>
 
   <div>
-    <h3>Maintenance</h3>
+    <h3>{{ tr("Maintenance") }}</h3>
     <div class="actions-grid helper-actions">
-      <form action="/staged/clear" method="post" onsubmit="return confirm('Clear all staged files in incoming/batch?')"><button class="btn btn-sm btn-outline" type="submit">Clear Staged Files</button></form>
-      <form action="/resolve/clear" method="post" onsubmit="return confirm('Clear all unresolved queue items?')"><input type="hidden" name="from_page" value="dashboard"><button class="btn btn-sm btn-outline" type="submit">Clear Unprocessed Queue</button></form>
-      <form action="/items/clear-needs-review" method="post" onsubmit="return confirm('Clear all items from Needs Review list?')"><input type="hidden" name="from_page" value="dashboard"><button class="btn btn-sm btn-outline" type="submit">Clear Items Needing Review</button></form>
+      <form action="/staged/clear" method="post" data-confirm="{{ tr('Clear all staged files in incoming/batch?') }}"><button class="btn btn-sm btn-outline" type="submit">{{ tr("Clear Staged Files") }}</button></form>
+      <form action="/resolve/clear" method="post" data-confirm="{{ tr('Clear all unresolved queue items?') }}"><input type="hidden" name="from_page" value="dashboard"><button class="btn btn-sm btn-outline" type="submit">{{ tr("Clear Unprocessed Queue") }}</button></form>
+      <form action="/items/clear-needs-review" method="post"><input type="hidden" name="from_page" value="dashboard"><input type="hidden" name="mode" value="clear_flags"><button class="btn btn-sm btn-outline" type="submit">{{ tr("Clear Items Needing Review") }}</button></form>
     </div>
   </div>
 </section>
 
 <section class="card tiny-meta">
-  <strong>Staged breakdown:</strong> PDF {{ status.pdf_count }}, ZIP {{ status.zip_count }}, CSV {{ status.csv_count }}, TXT {{ status.txt_count }}
+  <strong>{{ tr("Staged breakdown:") }}</strong> {{ tr("PDF") }} {{ status.pdf_count }}, {{ tr("ZIP") }} {{ status.zip_count }}, {{ tr("CSV") }} {{ status.csv_count }}, {{ tr("TXT") }} {{ status.txt_count }}
 </section>
 
+<section class="card tiny-meta staged-file-list">
+  <strong>{{ tr("Staged file names:") }}</strong>
+  {% if status.staged_file_names %}
+  <ul>
+    {% for f in status.staged_file_names %}
+      <li>{{ f }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div>{{ tr("None") }}</div>
+  {% endif %}
+</section>
 <section class="card tiny-meta">
-  <strong>What these counters mean:</strong>
-  Unprocessed Queue = labels that still need a manual match before printing.
-  Items Needing Review = products that still need item details checked or updated in the Item Database.
+  <strong>{{ tr("What these counters mean:") }}</strong>
+  {{ tr("Unprocessed Queue = labels that still need a manual match before printing.") }}
+  {{ tr("Items Needing Review = products that still need item details checked or updated in the Item Database.") }}
 </section>
 <section class="two-col">
   <section class="card">
-    <h2>Items Needing Review (Top 15)</h2>
+    <h2>{{ tr("Items Needing Review (Top 15)") }}</h2>
     <ul>
       {% for r in needs_review_rows %}
-        <li>{{ r.platform }} | eBay {{ r.ebay_item_number or '-' }} | SKU {{ r.amazon_sku or '-' }} | ASIN {{ r.amazon_asin or '-' }} | {{ r.custom_label or r.item_title or 'No label' }}{% if r.needs_review_reason %} | Reason: {{ r.needs_review_reason }}{% endif %}</li>
+        <li>
+          {% if r.platform == 'amazon' %}{{ tr("Amazon") }}{% elif r.platform == 'ebay' %}{{ tr("eBay") }}{% elif r.platform == 'both' %}{{ tr("Both") }}{% else %}{{ r.platform }}{% endif %}
+          | {{ tr("eBay Item #") }} {{ r.ebay_item_number or '-' }}
+          | {{ tr("Amazon SKU") }} {{ r.amazon_sku or '-' }}
+          | {{ tr("ASIN") }} {{ r.amazon_asin or '-' }}
+          | {{ r.custom_label or r.item_title or tr('No label') }}{% if r.needs_review_reason %} | {{ tr('Reason:') }} {{ tr(r.needs_review_reason) }}{% endif %}
+        </li>
       {% else %}
-        <li>None</li>
+        <li>{{ tr("None") }}</li>
       {% endfor %}
     </ul>
   </section>
 
   {% if latest_batch %}
   <section class="card">
-    <h2>Latest Batch</h2>
-    <p><strong>Folder:</strong> {{ latest_batch.batch_dir }}</p>
-    <p><strong>Matched:</strong> {{ latest_batch.summary.matched or 0 }} | <strong>Unprocessed:</strong> {{ latest_batch.summary.unresolved or 0 }} | <strong>Errors:</strong> {{ latest_batch.summary.errors or 0 }}</p>
+    <h2>{{ tr("Latest Batch") }}</h2>
+    <p><strong>{{ tr("Folder:") }}</strong> {{ latest_batch.batch_dir }}</p>
+    <p><strong>{{ tr("Matched:") }}</strong> {{ latest_batch.summary.matched or 0 }} | <strong>{{ tr("Unprocessed:") }}</strong> {{ latest_batch.summary.unresolved or 0 }} | <strong>{{ tr("Errors:") }}</strong> {{ latest_batch.summary.errors or 0 }}</p>
     {% if latest_batch.combined_pdf %}
-    <p><strong>Combined print PDF:</strong> {{ latest_batch.combined_pdf }}</p>
+    <p><strong>{{ tr("Combined print PDF:") }}</strong> {{ latest_batch.combined_pdf }}</p>
     {% endif %}
   </section>
   {% endif %}
 </section>
 
 <section class="card">
-  <h2>Activity Log (last 50)</h2>
+  <h2>{{ tr("Activity Log (last 50)") }}</h2>
   <pre>{% for line in log_lines %}{{ line }}
 {% endfor %}</pre>
 </section>
@@ -180,6 +199,9 @@
 .upload-meta-row { display: flex; justify-content: flex-start; align-items: center; gap: 12px; flex-wrap: wrap; }
 .pending-count { margin: 6px 0 10px; font-size: 18px; line-height: 1.1; color: #233b2f; font-weight: 800; letter-spacing: 0.2px; transition: color 0.18s ease, text-shadow 0.18s ease; }
 .pending-count.pending-active { color: #3a7b4f; text-shadow: 0 0 18px rgba(88, 129, 87, 0.18); }
+.pending-file-list { margin: -2px 0 10px; font-size: 13px; color: #405a49; }
+.pending-file-list ul { margin: 0 0 0 18px; padding: 0; }
+.pending-file-list li { margin-bottom: 4px; word-break: break-word; }
 .inline-check { display:flex; align-items:center; gap:8px; margin: 6px 0; font-size:14px; color:#20392d; font-weight: 700; }
 .inline-check input[type="checkbox"] { width:auto; margin:0; accent-color:#3a5a40; }
 .quick-inline-check { margin-top: 8px; }
@@ -208,6 +230,8 @@
 .actions-grid .btn, .actions-grid button { width: 100%; min-height: 40px; }
 
 .tiny-meta { font-size: 13px; color: #3b5645; }
+.staged-file-list ul { margin: 8px 0 0 18px; padding: 0; }
+.staged-file-list li { margin-bottom: 4px; word-break: break-word; }
 .two-col { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }
 
 @media (max-width: 1100px) {
@@ -227,12 +251,63 @@
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 const pendingCount = document.getElementById('pendingCount');
+const pendingFileList = document.getElementById('pendingFileList');
+
+const T = {
+  pending: {{ tr("Pending selection: {count} file(s)", count="__COUNT__")|tojson }},
+  amazonZip: {{ tr("Amazon ZIP")|tojson }},
+  zip: {{ tr("ZIP")|tojson }},
+  ebayCsv: {{ tr("eBay CSV")|tojson }},
+  csv: {{ tr("CSV")|tojson }},
+  amazonTxt: {{ tr("Amazon TXT")|tojson }},
+  ebayPdf: {{ tr("eBay PDF")|tojson }},
+  amazonPdf: {{ tr("Amazon PDF")|tojson }},
+  pdf: {{ tr("PDF")|tojson }},
+  file: {{ tr("File")|tojson }},
+  autoAddedContinue: {{ tr("There are {count} auto-added review row(s). Continue?", count="__COUNT__")|tojson }},
+  deleteAutoAdded: {{ tr("Also delete auto-added rows from items.csv? Click Cancel to keep rows and only clear flags.")|tojson }},
+  clearReviewFlags: {{ tr("Clear items needing review flags?")|tojson }},
+};
+
+function fmt(template, vars) {
+  let out = String(template || '');
+  Object.keys(vars || {}).forEach((key) => {
+    out = out.replaceAll(`__${key.toUpperCase()}__`, vars[key]);
+  });
+  return out;
+}
 
 let dt = new DataTransfer();
 
 function refreshPending() {
-  pendingCount.textContent = `Pending selection: ${dt.files.length} file(s)`;
-  pendingCount.classList.toggle("pending-active", dt.files.length > 0);
+  pendingCount.textContent = fmt(T.pending, { count: String(dt.files.length) });
+  pendingCount.classList.toggle('pending-active', dt.files.length > 0);
+  if (!pendingFileList) return;
+  if (!dt.files.length) {
+    pendingFileList.innerHTML = '';
+    return;
+  }
+  const describe = (file) => {
+    const name = String(file.name || '');
+    const lower = name.toLowerCase();
+    if (lower.endsWith('.zip')) {
+      if (lower.includes('amznbulklabels')) return T.amazonZip;
+      return T.zip;
+    }
+    if (lower.endsWith('.csv')) {
+      if (lower.includes('ebay') || lower.includes('ordersreport')) return T.ebayCsv;
+      return T.csv;
+    }
+    if (lower.endsWith('.txt')) return T.amazonTxt;
+    if (lower.endsWith('.pdf')) {
+      if (lower.includes('ebay')) return T.ebayPdf;
+      if (lower.includes('amazon') || lower.includes('amzn')) return T.amazonPdf;
+      return T.pdf;
+    }
+    return T.file;
+  };
+  const items = Array.from(dt.files).map((file) => `<li><strong>[${describe(file)}]</strong> ${file.name}</li>`).join('');
+  pendingFileList.innerHTML = `<ul>${items}</ul>`;
 }
 
 function addFiles(fileList) {
@@ -273,6 +348,28 @@ document.getElementById('uploadForm').addEventListener('submit', () => {
   }, 0);
 });
 
+const reviewClearForms = document.querySelectorAll('form[action="/items/clear-needs-review"]');
+reviewClearForms.forEach((form) => {
+  form.addEventListener('submit', async (e) => {
+    const modeInput = form.querySelector('input[name="mode"]');
+    const autoCount = Number('{{ auto_added_review_count or 0 }}');
+    if (!modeInput) return;
+    e.preventDefault();
+    modeInput.value = 'clear_flags';
+
+    if (autoCount > 0) {
+      const proceed = await showAppConfirm(fmt(T.autoAddedContinue, { count: String(autoCount) }));
+      if (!proceed) return;
+      const deleteRows = await showAppConfirm(T.deleteAutoAdded);
+      modeInput.value = deleteRows ? 'delete_auto_added' : 'clear_flags';
+      form.submit();
+      return;
+    }
+
+    const ok = await showAppConfirm(T.clearReviewFlags);
+    if (ok) form.submit();
+  });
+});
 
 document.querySelectorAll('.btn-spotlight').forEach((btn) => {
   btn.addEventListener('mousemove', (e) => {
@@ -283,6 +380,7 @@ document.querySelectorAll('.btn-spotlight').forEach((btn) => {
     btn.style.setProperty('--y', `${y}px`);
   });
 });
+
 refreshPending();
 </script>
 {% endblock %}
