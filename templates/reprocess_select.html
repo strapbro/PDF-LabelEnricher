@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <section class="card">
   <h2>{{ tr("Reprocess Selected PDFs (Previous Batch)") }}</h2>
@@ -14,8 +14,8 @@
 <section class="card">
   <div class="controls">
     <input id="filterBox" type="text" placeholder="{{ tr('Filter by name, ZIP, tracking, filename') }}">
-    <button id="selectAllBtn" type="button">{{ tr("Select All") }}</button>
-    <button id="clearAllBtn" type="button">{{ tr("Clear") }}</button>
+    <button id="selectAllBtn" class="btn btn-md btn-secondary" type="button">{{ tr("Select All") }}</button>
+    <button id="clearAllBtn" class="btn btn-md btn-outline" type="button">{{ tr("Clear") }}</button>
   </div>
 
   <form action="/process/reprocess-selected" method="post" data-confirm="{{ tr('Reprocess selected labels now? Current staged files will be replaced.') }}">
@@ -55,6 +55,7 @@
 <style>
 .controls { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
 .controls input[type="text"] { min-width: 320px; max-width: 560px; }
+.controls .btn { min-width: 124px; }
 .list-wrap { max-height: 68vh; overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
 .items-table { width: 100%; table-layout: fixed; }
 .items-table td.center { text-align: center; }

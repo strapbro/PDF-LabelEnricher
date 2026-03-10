@@ -229,9 +229,9 @@
 .split-actions > div + div { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #9aa896; }
 body.theme-light .split-actions > div + div { border-top-color: rgba(86, 104, 92, 0.24); }
 body.theme-dark .split-actions > div + div { border-top-color: rgba(130, 153, 203, 0.16); }
-.actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; align-items: stretch; }
-.actions-grid form { margin: 0; width: 100%; }
-.actions-grid .btn, .actions-grid button { width: 100%; min-height: 40px; }
+.actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; align-items: stretch; position: relative; z-index: 2; }
+.actions-grid form { margin: 0; width: 100%; position: relative; z-index: 3; }
+.actions-grid .btn, .actions-grid button { width: 100%; min-height: 40px; position: relative; z-index: 3; pointer-events: auto; }
 
 .tiny-meta { font-size: 13px; color: #3b5645; }
 .staged-file-list ul { margin: 8px 0 0 18px; padding: 0; }
