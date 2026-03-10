@@ -1,0 +1,91 @@
+ui:
+  comic_mode: false
+  language_mode: en
+  font_mode: default
+paths:
+  incoming_batch_folder: incoming/batch
+  manual_incoming_folder: incoming/manual
+  processed_root_folder: processed
+  items_csv_path: items.csv
+  logs_folder: logs
+batch_rules:
+  require_orders_csv: true
+  orders_csv_glob: '*.csv'
+  label_pdf_glob: '*.pdf'
+print_layout:
+  page_mode: half_sheet_top
+  overlay_mode: margin
+  placement_preset: left_margin
+  overlay_safe_rect:
+    x: 350
+    y: 48
+    w: 230
+    h: 700
+  edge_inset_x: 10
+  edge_inset_y: 8
+  margin_box_width: 18
+  margin_box_height: 2000
+  text_align: left
+  wrap_mode: word
+  orientation_mode: rotated_90
+  rotated_primary_preset: left_margin
+  rotated_secondary_preset: right_margin
+  font_name: Helvetica-Bold
+  comic_mode: false
+  font_size: 8
+  backside_font_size: 20
+  line_spacing: 9
+  backside_line_spacing: 24
+  max_lines: 24
+  max_title_length: 120
+  show_field_labels: true
+  overflow_to_backside: true
+  overflow_mode: secondary_margin
+  secondary_anchor: midline
+  secondary_strip_height: 36
+  secondary_strip_gap: 6
+  spill_margin_box_height: 20
+  spill_font_size: 8
+  spill_line_spacing: 9
+  compact_threshold: 4
+  field_order:
+  - qty
+  - label
+  - total
+  - location
+  - title
+  inline_fields_csv: ''
+  inline_separator: ' | '
+  line_groups_csv: qty,label;total,location
+  spill_edge_inset_x: 4
+  spill_edge_inset_y: 4
+new_item_defaults:
+  show_location: true
+  show_label: true
+  show_qty: true
+  show_total_paid: true
+  show_title: false
+admin:
+  archive_retention_days: 14
+csv_mapping_cache:
+  enable: true
+  mapping_file: csv_mapping.json
+output_sort:
+  mode: custom
+  priority_fields:
+  - carrier
+  - label
+  - qty
+  - location
+  enabled_fields:
+    label: true
+    qty: true
+    item_key: false
+    location: true
+    carrier: true
+  directions:
+    label: asc
+    qty: desc
+    item_key: asc
+    location: asc
+    carrier: asc

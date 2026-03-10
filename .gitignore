@@ -23,7 +23,6 @@ backups/
 
 # Local app data (keep sample_data tracked instead)
 items.csv
-config.yaml
 config.local.yaml
 label_location_hints.csv
 
@@ -36,3 +35,4 @@ LabelEnricherLauncher.exe
 # Temp/probe files
 _tmp_*
 *.tmp
+
