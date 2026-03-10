@@ -787,7 +787,8 @@ class BatchManager:
                     report["summary"]["unresolved"] += 1
                     continue
                 out_path = self._render_one_label(label_pdf, order, idx, output_dir)
-                sort_meta = self._sort_meta_for_order(order, idx, label_signals.get("carrier", ""))
+                effective_carrier = self._effective_carrier(order, label_signals.get("carrier", ""))
+                sort_meta = self._sort_meta_for_order(order, idx, effective_carrier)
                 items = list(order.get("items", []) or [])
                 total_paid = 0.0
                 try:
@@ -823,7 +824,7 @@ class BatchManager:
                         "ship_name": m["order"].get("ship_name", ""),
                         "ship_postal": m["order"].get("ship_postal", ""),
                         "tracking_number": m["order"].get("tracking_number", ""),
-                        "carrier": label_signals.get("carrier", ""),
+                        "carrier": effective_carrier,
                         "method": m.get("method", ""),
                         "confidence": m.get("confidence", 0),
                         "output_pdf": str(out_path),
@@ -872,7 +873,8 @@ class BatchManager:
         process_index: int,
     ) -> dict[str, Any]:
         label_signals = extract_label_signals(source_pdf)
-        sort_meta = self._sort_meta_for_order(order, idx, label_signals.get("carrier", ""))
+        effective_carrier = self._effective_carrier(order, label_signals.get("carrier", ""))
+        sort_meta = self._sort_meta_for_order(order, idx, effective_carrier)
         items = list(order.get("items", []) or [])
         total_paid = 0.0
         try:
@@ -911,7 +913,7 @@ class BatchManager:
             "ship_name": order.get("ship_name", ""),
             "ship_postal": order.get("ship_postal", ""),
             "tracking_number": order.get("tracking_number", ""),
-            "carrier": label_signals.get("carrier", ""),
+            "carrier": effective_carrier,
             "method": "manual_queue_resolution",
             "confidence": 1.0,
             "output_pdf": str(output_pdf),
@@ -1105,6 +1107,25 @@ class BatchManager:
             if db_title:
                 return db_title
         return (item.get("title") or "").strip()
+
+
+    def _carrier_from_tracking_number(self, tracking_number: str) -> str:
+        tracking = re.sub(r"[^A-Za-z0-9]", "", str(tracking_number or "").upper())
+        if not tracking:
+            return ""
+        if tracking.startswith("1Z"):
+            return "ups"
+        if tracking.startswith(("92", "93", "94", "95", "96")) and len(tracking) >= 20:
+            return "usps"
+        if tracking.isdigit() and len(tracking) in {12, 15, 20, 22}:
+            return "fedex"
+        return ""
+
+    def _effective_carrier(self, order: dict[str, Any], extracted_carrier: str = "") -> str:
+        carrier = str(extracted_carrier or "").strip().lower()
+        if carrier:
+            return carrier
+        return self._carrier_from_tracking_number(str(order.get("tracking_number", "") or ""))
 
     def _sort_meta_for_order(self, order: dict[str, Any], idx: dict[tuple[str, str], dict[str, str]], carrier: str = "") -> dict[str, Any]:
         items = order.get("items", []) or []
