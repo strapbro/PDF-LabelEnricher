@@ -238,6 +238,78 @@ def _valid_recipient_candidate(line: str, postal: str = "", pdf_name: str = "") 
     return _looks_like_person_name(cand) or _looks_like_single_name(cand)
 
 
+
+def _group_words_into_lines(words: list[tuple[float, float, float, float, str]]) -> list[dict[str, Any]]:
+    sorted_words = sorted(words, key=lambda w: (round(float(w[1]), 1), float(w[0])))
+    lines: list[dict[str, Any]] = []
+    for x0, y0, x1, y1, token in sorted_words:
+        clean = str(token or "").strip()
+        if not clean:
+            continue
+        placed = False
+        for line in lines:
+            if abs(float(line["y"]) - float(y0)) <= 6:
+                line["words"].append((float(x0), clean))
+                line["y"] = min(float(line["y"]), float(y0))
+                line["x0"] = min(float(line["x0"]), float(x0))
+                line["x1"] = max(float(line["x1"]), float(x1))
+                placed = True
+                break
+        if not placed:
+            lines.append({"y": float(y0), "x0": float(x0), "x1": float(x1), "words": [(float(x0), clean)]})
+    out: list[dict[str, Any]] = []
+    for line in sorted(lines, key=lambda ln: (float(ln["y"]), float(ln["x0"]))):
+        words_sorted = [w for _, w in sorted(line["words"], key=lambda item: item[0])]
+        text_line = _normalize_space(" ".join(words_sorted))
+        if text_line:
+            out.append({"text": text_line, "y": float(line["y"]), "x0": float(line["x0"]), "x1": float(line["x1"])})
+    return out
+
+
+def _extract_positioned_shipto_block(pdf_path: Path) -> list[str]:
+    best_block: list[str] = []
+    best_score = -1
+    try:
+        with fitz.open(str(pdf_path)) as doc:
+            if doc.page_count <= 0:
+                return []
+            page = doc[0]
+            for rot in (0, 90, 180, 270):
+                try:
+                    m = fitz.Matrix(1, 1).prerotate(rot)
+                    tp = page.get_textpage(matrix=m)
+                    raw_words = page.get_text("words", textpage=tp) or []
+                except Exception:
+                    continue
+                words: list[tuple[float, float, float, float, str]] = []
+                for w in raw_words:
+                    if len(w) < 5:
+                        continue
+                    words.append((float(w[0]), float(w[1]), float(w[2]), float(w[3]), str(w[4])))
+                if not words:
+                    continue
+                lines = _group_words_into_lines(words)
+                for idx, line in enumerate(lines[:120]):
+                    ll = str(line.get("text", "") or "").lower()
+                    if "ship to" not in ll and ll != "ship to:" and ll != "ship to":
+                        continue
+                    block = [str(ln.get("text", "") or "").strip() for ln in lines[idx + 1 : min(idx + 7, len(lines))] if str(ln.get("text", "") or "").strip()]
+                    if not block:
+                        continue
+                    score = 0
+                    if any(ZIP_RE.search(ln) for ln in block):
+                        score += 3
+                    if any(_valid_recipient_candidate(ln, "", pdf_path.name) for ln in block[:3]):
+                        score += 3
+                    if any(_looks_like_street_line(ln) for ln in block[:4]):
+                        score += 2
+                    if score > best_score:
+                        best_score = score
+                        best_block = block
+    except Exception:
+        return []
+    return best_block
+
 def _recipient_from_shipto_text(text: str, postal: str, pdf_name: str) -> str:
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     for i, line in enumerate(lines):
@@ -314,8 +386,14 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
 
     lines = _candidate_lines(text, words_text)
     shipto_block = _extract_shipto_block(lines)
+    positional_shipto_block = _extract_positioned_shipto_block(pdf_path)
     postal = _pick_zip(shipto_block, search_text)
+    if not postal and positional_shipto_block:
+        postal = _pick_zip(positional_shipto_block, " ".join(positional_shipto_block))
     recipient = _pick_recipient(shipto_block, lines, postal, pdf_path.name, text)
+    if (not recipient) and positional_shipto_block:
+        positional_text = "\n".join(positional_shipto_block)
+        recipient = _pick_recipient(positional_shipto_block, positional_shipto_block + lines, postal, pdf_path.name, positional_text)
     tracking = _extract_tracking(search_text)
     carrier = _detect_carrier(search_text, tracking)
 
