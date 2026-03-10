@@ -129,7 +129,7 @@ def _selected_order_total(order: dict[str, Any], config: dict[str, Any]) -> floa
 def _selected_total_label(config: dict[str, Any]) -> str:
     layout = config.get("print_layout", {}) if isinstance(config, dict) else {}
     mode = str(layout.get("total_display_mode", "grand_total") or "grand_total").strip().lower()
-    return "SUBTOTAL" if mode == "subtotal" else "TOTAL"
+    return "SUBTOTAL" if mode == "subtotal" else "GRAND TOTAL"
 
 
 def _money_line(label: str, value: Any, show_labels: bool) -> str:
@@ -494,8 +494,8 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
     total_label = _selected_total_label(config)
     total_line = _money_line(total_label, total, show_labels)
     subtotal_line = _money_line("SUBTOTAL", order.get("subtotal_paid"), show_labels)
-    item_subtotal_line = _money_line("ITEM SUBTOTAL", order.get("item_subtotal_paid"), show_labels)
-    shipping_subtotal_line = _money_line("SHIPPING SUBTOTAL", order.get("shipping_subtotal_paid"), show_labels)
+    item_subtotal_line = _money_line("ITEM SUB.", order.get("item_subtotal_paid"), show_labels)
+    shipping_subtotal_line = _money_line("SHIP. SUB.", order.get("shipping_subtotal_paid"), show_labels)
 
     location_emitted = False
     total_emitted = False
@@ -1009,6 +1009,7 @@ def get_page_size(pdf_path: Path) -> tuple[float, float]:
     reader = PdfReader(str(pdf_path))
     page = reader.pages[0]
     return float(page.mediabox.width), float(page.mediabox.height)
+
 
 
 
