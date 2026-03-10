@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <section class="card">
   <h2>{{ tr("Batch Spot Check Table") }}</h2>
@@ -16,7 +16,7 @@
     <div class="batch-actions">
       <input id="batchFilter" type="text" placeholder="{{ tr('Filter order/name/item/tracking') }}">
       <button id="openOrderTabsBtn" class="btn btn-primary" type="button">{{ tr("Open All Order Tabs (Current Sort)") }}</button>
-      <button id="openSelectedOrderTabsBtn" class="btn btn-success" type="button">Open Selected Order Tabs</button>
+      <button id="openSelectedOrderTabsBtn" class="btn btn-success" type="button">{{ tr("Open Selected Order Tabs") }}</button>
     </div>
   </div>
 
@@ -76,6 +76,7 @@
 .batch-picker label { font-weight:700; color:#2e4637; display:flex; flex-direction:column; gap:6px; }
 .batch-picker select { min-width: 340px; }
 .batch-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.batch-actions .btn { min-height: 40px; }
 .batch-actions input { min-width: 280px; }
 .batch-summary { margin-top: 10px; display:flex; gap:16px; flex-wrap:wrap; color:#385244; font-size:13px; }
 .batch-select-cell { text-align:center; width:82px; min-width:82px; }

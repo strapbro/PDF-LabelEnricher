@@ -1,8 +1,8 @@
 ui:
-  comic_mode: false
-  language_mode: en
-  font_mode: default
-  theme_mode: light
+  comic_mode: true
+  language_mode: ko
+  font_mode: comic
+  theme_mode: dark
 paths:
   incoming_batch_folder: incoming/batch
   manual_incoming_folder: incoming/manual
