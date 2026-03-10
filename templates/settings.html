@@ -729,7 +729,7 @@
   if (labelSel) labelSel.addEventListener('change', queueRefresh);
 
   updateSortControls();
-  if (totalDisplaySel) {`r`n    totalDisplaySel.addEventListener('change', () => {`r`n      buildFieldPool();`r`n      buildLineRows();`r`n      setSaveDirty(true);`r`n      queueRefresh();`r`n    });`r`n  }`r`n`r`n  if (totalDisplaySel) {
+  if (totalDisplaySel) {
     totalDisplaySel.addEventListener('change', () => {
       buildFieldPool();
       buildLineRows();
@@ -748,6 +748,7 @@
 })();
 </script>
 {% endblock %}
+
 
 
 
