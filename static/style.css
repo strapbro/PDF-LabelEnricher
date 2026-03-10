@@ -1280,3 +1280,133 @@ body.theme-light .btn-upload {
 body.theme-light .btn-attn {
   color: #f2f6ff !important;
 }
+/* ===== Stateful Dashboard + Line Builder Color Restore (from 2e0acb8, adapted) ===== */
+body.theme-light .stat-card.stat-ok {
+  border-color: #b8c9a2 !important;
+  background: rgba(198, 216, 183, 0.44) !important;
+}
+
+body.theme-light .stat-card.stat-miss {
+  border-color: #d8b9aa !important;
+  background: rgba(242, 230, 224, 0.76) !important;
+}
+
+body.theme-light .stat-card.stat-alert {
+  border-color: #cfb987 !important;
+  background: rgba(241, 233, 212, 0.82) !important;
+}
+
+body.theme-dark .stat-card.stat-ok {
+  border-color: rgba(115, 219, 178, 0.36) !important;
+  background:
+    linear-gradient(180deg, rgba(18, 53, 57, 0.92), rgba(13, 35, 41, 0.96)),
+    linear-gradient(135deg, rgba(109, 232, 196, 0.08), rgba(97, 153, 255, 0.06)) !important;
+}
+
+body.theme-dark .stat-card.stat-miss {
+  border-color: rgba(255, 169, 173, 0.34) !important;
+  background:
+    linear-gradient(180deg, rgba(61, 24, 36, 0.92), rgba(39, 16, 24, 0.96)),
+    linear-gradient(135deg, rgba(255, 154, 164, 0.1), rgba(125, 91, 215, 0.05)) !important;
+}
+
+body.theme-dark .stat-card.stat-alert {
+  border-color: rgba(255, 204, 132, 0.38) !important;
+  background:
+    linear-gradient(180deg, rgba(63, 46, 21, 0.92), rgba(42, 31, 14, 0.96)),
+    linear-gradient(135deg, rgba(255, 210, 132, 0.09), rgba(137, 111, 255, 0.05)) !important;
+}
+
+body.theme-dark .stat-card .stat-label { color: var(--pm-ink-muted) !important; }
+body.theme-dark .stat-card .stat-value { color: var(--pm-ink) !important; }
+body.theme-dark .stat-card .stat-sub { color: var(--pm-ink-soft) !important; }
+
+body.theme-light .line-row {
+  border-color: rgba(88, 129, 87, 0.34) !important;
+  background: rgba(244, 249, 245, 0.76) !important;
+}
+
+body.theme-light .line-dropzone {
+  border-color: rgba(88, 129, 87, 0.26) !important;
+  background: rgba(255, 255, 255, 0.64) !important;
+}
+
+body.theme-light .line-dropzone.drag-over {
+  border-color: rgba(53, 166, 103, 0.7) !important;
+  background: rgba(210, 246, 221, 0.6) !important;
+}
+
+body.theme-dark .line-row {
+  border-color: rgba(121, 168, 236, 0.28) !important;
+  background:
+    linear-gradient(180deg, rgba(15, 27, 50, 0.92), rgba(10, 20, 38, 0.96)),
+    linear-gradient(135deg, rgba(126, 218, 255, 0.05), rgba(130, 109, 255, 0.05)) !important;
+}
+
+body.theme-dark .line-dropzone {
+  border-color: rgba(121, 168, 236, 0.26) !important;
+  background: linear-gradient(180deg, rgba(11, 23, 43, 0.94), rgba(9, 18, 34, 0.98)) !important;
+}
+
+body.theme-dark .line-dropzone.drag-over {
+  border-color: rgba(135, 220, 255, 0.5) !important;
+  background:
+    linear-gradient(180deg, rgba(16, 31, 59, 0.98), rgba(11, 24, 46, 0.98)),
+    linear-gradient(135deg, rgba(126, 218, 255, 0.08), rgba(130, 109, 255, 0.07)) !important;
+}
+
+body.theme-light .field-pill--qty {
+  background: linear-gradient(180deg, rgba(232, 244, 237, 0.96), rgba(211, 234, 220, 0.96)) !important;
+  border-color: rgba(98, 149, 121, 0.35) !important;
+}
+
+body.theme-light .field-pill--label {
+  background: linear-gradient(180deg, rgba(235, 242, 250, 0.96), rgba(212, 229, 246, 0.96)) !important;
+  border-color: rgba(101, 136, 184, 0.35) !important;
+}
+
+body.theme-light .field-pill--location {
+  background: linear-gradient(180deg, rgba(243, 239, 250, 0.96), rgba(229, 219, 247, 0.96)) !important;
+  border-color: rgba(138, 112, 186, 0.34) !important;
+}
+
+body.theme-light .field-pill--total,
+body.theme-light .field-pill--subtotal,
+body.theme-light .field-pill--item_subtotal,
+body.theme-light .field-pill--shipping_subtotal {
+  background: linear-gradient(180deg, rgba(252, 241, 228, 0.96), rgba(246, 228, 203, 0.96)) !important;
+  border-color: rgba(182, 129, 74, 0.34) !important;
+}
+
+body.theme-light .field-pill--title {
+  background: linear-gradient(180deg, rgba(238, 241, 239, 0.96), rgba(225, 231, 227, 0.96)) !important;
+  border-color: rgba(114, 127, 120, 0.33) !important;
+}
+
+body.theme-dark .field-pill--qty {
+  background: linear-gradient(180deg, rgba(19, 61, 55, 0.95), rgba(13, 41, 38, 0.98)) !important;
+  border-color: rgba(109, 232, 196, 0.34) !important;
+}
+
+body.theme-dark .field-pill--label {
+  background: linear-gradient(180deg, rgba(18, 41, 72, 0.95), rgba(12, 28, 49, 0.98)) !important;
+  border-color: rgba(126, 190, 255, 0.35) !important;
+}
+
+body.theme-dark .field-pill--location {
+  background: linear-gradient(180deg, rgba(35, 28, 68, 0.95), rgba(22, 18, 45, 0.98)) !important;
+  border-color: rgba(175, 141, 255, 0.35) !important;
+}
+
+body.theme-dark .field-pill--total,
+body.theme-dark .field-pill--subtotal,
+body.theme-dark .field-pill--item_subtotal,
+body.theme-dark .field-pill--shipping_subtotal {
+  background: linear-gradient(180deg, rgba(66, 44, 20, 0.95), rgba(44, 30, 14, 0.98)) !important;
+  border-color: rgba(255, 197, 116, 0.36) !important;
+}
+
+body.theme-dark .field-pill--title {
+  background: linear-gradient(180deg, rgba(41, 47, 64, 0.95), rgba(25, 30, 43, 0.98)) !important;
+  border-color: rgba(158, 171, 204, 0.32) !important;
+}

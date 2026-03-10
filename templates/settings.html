@@ -526,7 +526,7 @@
   function renderFieldPill(field, withRemove) {
     const meta = FIELD_META[field];
     const pill = document.createElement('div');
-    pill.className = 'field-pill';
+    pill.className = `field-pill field-pill--${field}`;
     pill.draggable = true;
     pill.dataset.field = field;
     pill.innerHTML = `<span>${meta.title}</span><small>${meta.hint}</small>${withRemove ? '<button type="button" title="x">x</button>' : ''}`;
@@ -782,18 +782,3 @@
 })();
 </script>
 {% endblock %}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
