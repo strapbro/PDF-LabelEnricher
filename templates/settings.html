@@ -385,8 +385,7 @@
     label: {{ tr("LABEL")|tojson }},
     labelHint: {{ tr("internal label")|tojson }},
     total: {{ tr("Grand total")|tojson }},
-    totalSubtotal: {{ tr("SUBTOTAL")|tojson }},
-    totalHint: {{ tr("buyer total")|tojson }},
+    totalHint: {{ tr("buyer grand total")|tojson }},
     subtotal: {{ tr("SUBTOTAL")|tojson }},
     subtotalHint: {{ tr("order subtotal before tax")|tojson }},
     itemSubtotal: {{ tr("ITEM SUBTOTAL")|tojson }},
@@ -411,15 +410,11 @@
     return out;
   }
 
-  function totalFieldTitle() {
-    const sel = form.querySelector('#total_display_mode');
-    return sel && sel.value === 'subtotal' ? T.totalSubtotal : T.total;
-  }
 
   const FIELD_META = {
     qty: { get title() { return T.qty; }, hint: T.qtyHint },
     label: { get title() { return T.label; }, hint: T.labelHint },
-    total: { get title() { return totalFieldTitle(); }, hint: T.totalHint },
+    total: { get title() { return T.total; }, hint: T.totalHint },
     subtotal: { get title() { return T.subtotal; }, hint: T.subtotalHint },
     item_subtotal: { get title() { return T.itemSubtotal; }, hint: T.itemSubtotalHint },
     shipping_subtotal: { get title() { return T.shippingSubtotal; }, hint: T.shippingSubtotalHint },
