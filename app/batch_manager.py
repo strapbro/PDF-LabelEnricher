@@ -47,6 +47,102 @@ class BatchManager:
         self.item_db = ItemDB(settings.items_csv_path, settings.config.get("new_item_defaults", {}))
         self.unresolved_queue_path = settings.processed_root_folder / "unresolved_queue.json"
 
+    def _batch_resolution_overrides_path(self, batch_dir: Path | None) -> Path | None:
+        if batch_dir is None:
+            return None
+        return batch_dir / "resolution_overrides.json"
+
+    def _load_resolution_overrides(self, batch_dir: Path | None) -> list[dict[str, Any]]:
+        path = self._batch_resolution_overrides_path(batch_dir)
+        if path is None or not path.exists():
+            return []
+        try:
+            rows = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        return rows if isinstance(rows, list) else []
+
+    def _save_resolution_override(self, batch_dir: Path | None, queue_entry: dict[str, Any], order: dict[str, Any]) -> None:
+        path = self._batch_resolution_overrides_path(batch_dir)
+        if path is None:
+            return
+        rows = self._load_resolution_overrides(batch_dir)
+        label_pdf = str(queue_entry.get("label_pdf", "") or "").strip()
+        label_name = Path(label_pdf).name if label_pdf else ""
+        payload = {
+            "label_pdf": label_pdf,
+            "label_name": label_name,
+            "order_id": str(order.get("order_id", "") or "").strip(),
+            "order": copy.deepcopy(order),
+        }
+        kept = [r for r in rows if str(r.get("label_name", "") or "") != label_name]
+        kept.append(payload)
+        atomic_write_json(path, kept)
+
+    def _find_latest_source_pdf_for_label_name(self, label_name: str) -> Path | None:
+        if not label_name:
+            return None
+        queue = self._load_unresolved_queue()
+        for row in queue:
+            current = Path(str(row.get("label_pdf", "") or "")).name
+            if current != label_name:
+                continue
+            src = self._resolve_source_pdf_from_queue_entry(row)
+            if src is not None and src.exists():
+                return src
+        split_dir = self._split_runtime_dir()
+        candidate = split_dir / label_name
+        if candidate.exists():
+            return candidate
+        return None
+
+    def _reapply_resolution_overrides(self, source_batch_dir: Path | None) -> dict[str, Any]:
+        rows = self._load_resolution_overrides(source_batch_dir)
+        if not rows:
+            return {"applied": 0, "remaining": 0}
+
+        latest = self._latest_batch_dir()
+        if latest is None:
+            return {"applied": 0, "remaining": len(rows)}
+
+        idx = self.item_db.index()
+        queue = self._load_unresolved_queue()
+        applied = 0
+        keep_overrides: list[dict[str, Any]] = []
+
+        for row in rows:
+            label_name = str(row.get("label_name", "") or "").strip()
+            order = row.get("order") if isinstance(row.get("order"), dict) else None
+            if not label_name or order is None:
+                continue
+            target = None
+            for entry in queue:
+                if Path(str(entry.get("label_pdf", "") or "")).name == label_name:
+                    target = entry
+                    break
+            if target is None:
+                keep_overrides.append(row)
+                continue
+            source_pdf = self._resolve_source_pdf_from_queue_entry(target)
+            if source_pdf is None or not source_pdf.exists():
+                source_pdf = self._find_latest_source_pdf_for_label_name(label_name)
+            if source_pdf is None or not source_pdf.exists():
+                keep_overrides.append(row)
+                continue
+            try:
+                self.write_resolved_label_into_latest_batch(target, order, source_pdf, idx)
+                queue = [q for q in queue if Path(str(q.get("label_pdf", "") or "")).name != label_name]
+                applied += 1
+            except Exception:
+                logging.exception("Failed to reapply saved queue resolution for %s", label_name)
+                keep_overrides.append(row)
+
+        self._save_unresolved_queue(queue)
+        target_path = self._batch_resolution_overrides_path(latest)
+        if target_path is not None:
+            atomic_write_json(target_path, rows)
+        return {"applied": applied, "remaining": len(keep_overrides)}
+
     def scan_inputs(self) -> dict[str, Any]:
         files = self._all_batch_files()
         labels = self._find_label_pdfs(files)
@@ -893,6 +989,7 @@ class BatchManager:
         report["results"] = results
         self._recount_batch_summary(report)
         atomic_write_json(report_path, report)
+        self._save_resolution_override(latest, queue_entry, order)
         return {"ok": True, "output_pdf": str(out), "batch_updated": True, "batch_dir": str(latest)}
 
     def _build_label_identity(self, label_pdf: Path, signals: dict[str, Any]) -> str:
@@ -1748,9 +1845,13 @@ class BatchManager:
         if copied <= 0:
             return {"ok": False, "error": "Could not restage files from latest archive."}
 
+        source_batch_dir = archive.parent
         result = self.process_batch()
+        reapplied = self._reapply_resolution_overrides(source_batch_dir)
+        result["reapplied_resolutions"] = int(reapplied.get("applied", 0) or 0)
+        result["remaining_resolution_overrides"] = int(reapplied.get("remaining", 0) or 0)
         result["restaged_files"] = copied
-        result["source_batch_dir"] = str(archive.parent)
+        result["source_batch_dir"] = str(source_batch_dir)
         return result
 
     def reprocess_selected_from_latest(self, selected_order_ids: list[str]) -> dict[str, Any]:
@@ -1792,11 +1893,15 @@ class BatchManager:
         if copied <= 0:
             return {"ok": False, "error": "Could not restage files from latest archive."}
 
+        source_batch_dir = archive.parent
         result = self.process_batch()
+        reapplied = self._reapply_resolution_overrides(source_batch_dir)
+        result["reapplied_resolutions"] = int(reapplied.get("applied", 0) or 0)
+        result["remaining_resolution_overrides"] = int(reapplied.get("remaining", 0) or 0)
         result["restaged_files"] = copied
         result["selected_labels"] = len(selected)
         result["selected_order_ids"] = sorted(selected)
-        result["source_batch_dir"] = str(archive.parent)
+        result["source_batch_dir"] = str(source_batch_dir)
 
         combined = self.combine_latest_output_pdfs(order_ids=selected)
         result["combined"] = combined
