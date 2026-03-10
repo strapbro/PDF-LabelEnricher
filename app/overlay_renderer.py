@@ -152,7 +152,8 @@ def _auto_overlay_prefix_text(order: dict[str, Any]) -> str:
     if service_prefix:
         prefixes.append(service_prefix)
 
-    replacement = any(float(item.get("item_subtotal", 0) or 0) <= 0 for item in (order.get("items", []) or []))
+    source = str(order.get("source", "") or "").strip().lower()
+    replacement = (not source.startswith("manual_entry")) and any(float(item.get("item_subtotal", 0) or 0) <= 0 for item in (order.get("items", []) or []))
     if replacement:
         prefixes.append("REPLACEMENT")
 
@@ -502,6 +503,7 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
     subtotal_emitted = False
     item_subtotal_emitted = False
     shipping_subtotal_emitted = False
+    force_item_lines_first = use_numbering
 
     def _flag_on(value: Any, default: bool = True) -> bool:
         if value is None:
@@ -571,7 +573,7 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
 
         for field in field_order:
             if field == "location":
-                if defer_summary_line:
+                if defer_summary_line or force_item_lines_first:
                     continue
                 if inline_location_per_item:
                     loc_text = _format_location_text(item_location)
@@ -595,20 +597,26 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
                 if title_text:
                     chunks.append(("title", f"{prefix}{title_text}" if not label else title_text))
             elif field == "total":
-                if defer_summary_line:
+                if defer_summary_line or force_item_lines_first:
                     continue
                 if total_line and not total_emitted:
                     chunks.append(("total", total_line))
                     total_emitted = True
             elif field == "subtotal":
+                if force_item_lines_first:
+                    continue
                 if subtotal_line and not subtotal_emitted:
                     chunks.append(("subtotal", subtotal_line))
                     subtotal_emitted = True
             elif field == "item_subtotal":
+                if force_item_lines_first:
+                    continue
                 if item_subtotal_line and not item_subtotal_emitted:
                     chunks.append(("item_subtotal", item_subtotal_line))
                     item_subtotal_emitted = True
             elif field == "shipping_subtotal":
+                if force_item_lines_first:
+                    continue
                 if shipping_subtotal_line and not shipping_subtotal_emitted:
                     chunks.append(("shipping_subtotal", shipping_subtotal_line))
                     shipping_subtotal_emitted = True
@@ -626,7 +634,7 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
             _emit_with_inline(chunks)
 
     if not line_groups and not location_emitted and summary_location_line:
-        lines.insert(0, summary_location_line)
+        lines.append(summary_location_line)
 
     if defer_summary_line:
         summary_parts: list[str] = []

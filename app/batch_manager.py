@@ -1702,7 +1702,7 @@ class BatchManager:
             "restage_preview_names": archived_file_names[:12],
         }
 
-    def _restage_from_archive(self, archive: Path, selected_labels: set[Path] | None = None) -> int:
+    def _restage_from_archive(self, archive: Path, selected_label_names: set[str] | None = None) -> int:
         source_files = [p for p in archive.rglob("*") if p.is_file()]
         if not source_files:
             return 0
@@ -1717,7 +1717,7 @@ class BatchManager:
             dst.parent.mkdir(parents=True, exist_ok=True)
 
             is_label = self._is_label_pdf(src)
-            if selected_labels is not None and is_label and src not in selected_labels:
+            if selected_label_names is not None and is_label and src.name not in selected_label_names:
                 continue
 
             if dst.exists():
@@ -1744,7 +1744,7 @@ class BatchManager:
         if archive is None:
             return {"ok": False, "error": "No processed batches found to reprocess."}
 
-        copied = self._restage_from_archive(archive, selected_labels=None)
+        copied = self._restage_from_archive(archive, selected_label_names=None)
         if copied <= 0:
             return {"ok": False, "error": "Could not restage files from latest archive."}
 
@@ -1769,13 +1769,26 @@ class BatchManager:
             except Exception:
                 report = {}
 
-        valid_ids = {str(r.get("order_id", "") or "").strip() for r in (report.get("results", []) if isinstance(report, dict) else []) if str(r.get("status", "")).lower() == "matched"}
+        matched_rows = [
+            r for r in (report.get("results", []) if isinstance(report, dict) else [])
+            if str(r.get("status", "")).lower() == "matched"
+        ]
+        valid_ids = {str(r.get("order_id", "") or "").strip() for r in matched_rows}
         selected = {str(x or "").strip() for x in selected_order_ids if str(x or "").strip()}
         selected = {x for x in selected if x in valid_ids}
         if not selected:
             return {"ok": False, "error": "No valid selected order IDs found in latest batch."}
 
-        copied = self._restage_from_archive(archive, selected_labels=None)
+        selected_label_names = {
+            Path(str(r.get("label_pdf", "") or "").strip()).name
+            for r in matched_rows
+            if str(r.get("order_id", "") or "").strip() in selected and str(r.get("label_pdf", "") or "").strip()
+        }
+        selected_label_names = {name for name in selected_label_names if name}
+        if not selected_label_names:
+            return {"ok": False, "error": "Could not find archived label PDFs for the selected rows."}
+
+        copied = self._restage_from_archive(archive, selected_label_names=selected_label_names)
         if copied <= 0:
             return {"ok": False, "error": "Could not restage files from latest archive."}
 
