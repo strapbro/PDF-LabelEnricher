@@ -17,9 +17,9 @@
             <label><span>{{ tr("Settings language") }}</span>
               <select name="ui_language_mode" id="ui_language_mode">
                 <option value="en" {% if ui.ui_language_mode == 'en' %}selected{% endif %}>{{ tr("English") }}</option>
-                <option value="ko" {% if ui.ui_language_mode == 'ko' %}selected{% endif %}>한국어</option>
-                <option value="zh_cn" {% if ui.ui_language_mode == 'zh_cn' %}selected{% endif %}>中文简体</option>
-                <option value="zh_tw" {% if ui.ui_language_mode == 'zh_tw' %}selected{% endif %}>中文繁體</option>
+                <option value="ko" {% if ui.ui_language_mode == 'ko' %}selected{% endif %}>{{ tr("Korean") }}</option>
+                <option value="zh_cn" {% if ui.ui_language_mode == 'zh_cn' %}selected{% endif %}>{{ tr("Chinese (Simplified)") }}</option>
+                <option value="zh_tw" {% if ui.ui_language_mode == 'zh_tw' %}selected{% endif %}>{{ tr("Chinese (Traditional)") }}</option>
               </select>
             </label>
             <label><span>{{ tr("UI font mode") }}</span>
@@ -35,7 +35,7 @@
                 <option value="light" {% if ui.ui_theme_mode == 'light' %}selected{% endif %}>{{ tr("Light") }}</option>
               </select>
             </label>
-            <p class="builder-help" style="margin-top:8px;">{{ tr("Theme and font mode change the app UI only. Label PDF overlay text stays readable.") }}</p>
+            <p class="builder-help settings-builder-note">{{ tr("Theme and font mode change the app UI only. Label PDF overlay text stays readable.") }}</p>
           </div>
 
           <div class="settings-box">
@@ -131,7 +131,7 @@
             <label>{{ tr("Auto-compact threshold (items)") }}
               <input type="number" name="compact_threshold" id="compact_threshold" value="{{ ui.compact_threshold }}" min="2" max="50">
             </label>
-            <p class="builder-help" style="margin-top:6px;">{{ tr("When item count exceeds this and text overflows all front margins, items are paired 2-per-line to save space.") }}</p>
+            <p class="builder-help settings-builder-note-compact">{{ tr("When item count exceeds this and text overflows all front margins, items are paired 2-per-line to save space.") }}</p>
           </div>
 
           <div class="settings-box">
@@ -339,7 +339,7 @@
     </div>
 
     <div class="settings-right">
-      <h3 style="margin-top:0;">{{ tr("Live Preview") }}</h3>
+      <h3 class="settings-preview-title">{{ tr("Live Preview") }}</h3>
       {% if labels and labels|length > 0 %}
       <label>{{ tr("Preview using label file") }}
         <select id="preview_label_pdf" style="max-width:100%;">

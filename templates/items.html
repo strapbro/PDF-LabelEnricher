@@ -48,7 +48,7 @@
           <span id="stageImportName">{{ tr("No stage import file selected") }}</span>
           <button class="btn btn-primary items-action-btn" type="submit">{{ tr("Stage Import (Review First)") }}</button>
         </form>
-        <div class="flow-sub" style="margin-bottom:0;">
+        <div class="flow-sub stage-flow-sub">
           {% if staged_sync and staged_sync.source_filename %}
           {{ tr("Currently staged: {name}", name=staged_sync.source_filename) }}
           {% elif staged_sync %}

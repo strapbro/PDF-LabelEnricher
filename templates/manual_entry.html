@@ -1,10 +1,10 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <section class="card">
   <h2>{{ tr("Manual Entry (Unified Batch Mode)") }}</h2>
-  <p style="font-size:13px;color:#555;">{{ tr("Use this when you want to process labels manually without full CSV/TXT matching. If one label is staged, this behaves like single-label mode automatically.") }}</p>
-  <p style="font-size:13px;color:#555;">{{ tr("Rules:") }} <strong>{{ tr("Qty required") }}</strong>, <strong>{{ tr("internal label OR item key (eBay item # / Amazon SKU / ASIN) required") }}</strong>.</p>
-  <p style="font-size:13px;color:#555;">{{ tr("Unprocessed queue count:") }} <strong>{{ unresolved_count }}</strong></p>
+  <p class="manual-intro">{{ tr("Use this when you want to process labels manually without full CSV/TXT matching. If one label is staged, this behaves like single-label mode automatically.") }}</p>
+  <p class="manual-intro">{{ tr("Rules:") }} <strong>{{ tr("Qty required") }}</strong>, <strong>{{ tr("internal label OR item key (eBay item # / Amazon SKU / ASIN) required") }}</strong>.</p>
+  <p class="manual-intro">{{ tr("Unprocessed queue count:") }} <strong>{{ unresolved_count }}</strong></p>
 </section>
 
 <section class="card">
@@ -115,6 +115,7 @@
   grid-template-columns: 1fr;
   gap: 12px;
 }
+.manual-intro { font-size:13px; }
 .batch-grid.multi-labels {
   grid-template-columns: repeat(2, minmax(420px, 1fr));
 }
