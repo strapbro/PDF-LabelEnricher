@@ -461,6 +461,7 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
             fields = [x for x in fields if x in allowed]
             if fields:
                 line_groups.append(fields)
+    selected_fields = {field for grp in line_groups for field in grp} if line_groups else set(field_order)
     defer_summary_line = line_groups_raw.replace(" ", "") == "qty,label;total,location"
 
     items = order.get("items", []) or []
@@ -633,26 +634,26 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
         else:
             _emit_with_inline(chunks)
 
-    if not line_groups and not location_emitted and summary_location_line:
+    if not line_groups and "location" in selected_fields and not location_emitted and summary_location_line:
         lines.append(summary_location_line)
 
     if defer_summary_line:
         summary_parts: list[str] = []
-        if total_line:
+        if "total" in selected_fields and total_line:
             summary_parts.append(total_line)
             total_emitted = True
-        if summary_location_line:
+        if "location" in selected_fields and summary_location_line:
             summary_parts.append(summary_location_line)
             location_emitted = True
         if summary_parts:
             lines.append(INLINE_LOCK_PREFIX + inline_sep.join(summary_parts))
-    if total_line and not total_emitted:
+    if "total" in selected_fields and total_line and not total_emitted:
         lines.append(total_line)
-    if subtotal_line and not subtotal_emitted:
+    if "subtotal" in selected_fields and subtotal_line and not subtotal_emitted:
         lines.append(subtotal_line)
-    if item_subtotal_line and not item_subtotal_emitted:
+    if "item_subtotal" in selected_fields and item_subtotal_line and not item_subtotal_emitted:
         lines.append(item_subtotal_line)
-    if shipping_subtotal_line and not shipping_subtotal_emitted:
+    if "shipping_subtotal" in selected_fields and shipping_subtotal_line and not shipping_subtotal_emitted:
         lines.append(shipping_subtotal_line)
 
     manual_prefix = _auto_overlay_prefix_text(order)
