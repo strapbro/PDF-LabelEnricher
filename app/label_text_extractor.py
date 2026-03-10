@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +10,7 @@ import fitz
 from pypdf import PdfReader
 
 
-ZIP_RE = re.compile(r"\b(\d{5})(?:-\d{4})?\b")
+ZIP_RE = re.compile(r"\b(\d{5})(?:-?(\d{4}))?\b")
 TRACKING_USPS_RE = re.compile(r"\b(9[0-9]{19,25})\b")
 TRACKING_UPS_RE = re.compile(r"\b1Z[0-9A-Z]{16}\b", re.IGNORECASE)
 TRACKING_FEDEX_RE = re.compile(r"\b(\d{12}|\d{15}|\d{20}|\d{22})\b")
@@ -16,7 +18,6 @@ AMZ_ORDER_RE = re.compile(r"\b\d{3}-\d{7}-\d{7}\b")
 EBAY_ORDER_RE = re.compile(r"\b\d{2}-\d{5}-\d{5}\b")
 
 BUSINESS_WORDS = {"group", "llc", "inc", "company", "corp", "corporation", "goods", "supply", "supplies", "logistics", "shipping"}
-
 
 
 def _normalize_space(text: str) -> str:
@@ -62,6 +63,66 @@ def _extract_text(pdf_path: Path) -> tuple[str, str]:
         pass
 
     return page_text, words_text
+
+
+def _looks_like_ebay_label_pdf(pdf_path: Path) -> bool:
+    return "ebay-label" in (pdf_path.name or "").lower()
+
+
+def _ocr_windows_image_lines(image_path: Path) -> list[str]:
+    ps_script = f"""
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null = [Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]
+$null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType=WindowsRuntime]
+$null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, ContentType=WindowsRuntime]
+$null = [Windows.Media.Ocr.OcrEngine, Windows.Media.Ocr, ContentType=WindowsRuntime]
+function Await($op, [Type]$resultType) {{
+    $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 }} | Select-Object -First 1
+    $netTask = $asTask.MakeGenericMethod($resultType).Invoke($null, @($op))
+    $netTask.Wait(-1) | Out-Null
+    return $netTask.Result
+}}
+$path = '{str(image_path).replace("'", "''")}'
+$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])
+$stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+$decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+$bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+$result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+($result.Lines | ForEach-Object {{ $_.Text }}) -join "`n"
+"""
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except Exception:
+        return []
+    if proc.returncode != 0:
+        return []
+    return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+
+
+def _ocr_ebay_ups_recipient_block(pdf_path: Path) -> list[str]:
+    try:
+        with fitz.open(str(pdf_path)) as doc:
+            if doc.page_count <= 0:
+                return []
+            page = doc[0]
+            rect = page.rect
+            # Tuned from the provided eBay UPS sample: sender + recipient live in
+            # the upper-right panel of the source label orientation.
+            clip = fitz.Rect(rect.width * 0.60, rect.height * 0.03, rect.width * 0.98, rect.height * 0.52)
+            with tempfile.TemporaryDirectory(prefix="label_ocr_") as tmpdir:
+                out_path = Path(tmpdir) / "ebay_ups_recipient.png"
+                pix = page.get_pixmap(matrix=fitz.Matrix(4, 4).prerotate(270), clip=clip, alpha=False)
+                pix.save(str(out_path))
+                return _ocr_windows_image_lines(out_path)
+    except Exception:
+        return []
 
 
 def _extract_tracking(full_text: str) -> str:
@@ -114,7 +175,7 @@ def _candidate_lines(text: str, words_text: str) -> list[str]:
 
 def _is_noise_line(line: str) -> bool:
     ll = line.lower()
-    noise = [
+    noise_substrings = [
         "ship to",
         "from",
         "tracking",
@@ -131,13 +192,13 @@ def _is_noise_line(line: str) -> bool:
         "no surcharge",
         "surcharge",
         "weight",
-        "lb",
-        "oz",
         "priority mail",
         "ground",
         "label",
     ]
-    return any(t in ll for t in noise)
+    if any(t in ll for t in noise_substrings):
+        return True
+    return bool(re.search(r"\b(?:lb|lbs|oz)\b", ll))
 
 
 def _extract_shipto_block(lines: list[str]) -> list[str]:
@@ -262,7 +323,7 @@ def _group_words_into_lines(words: list[tuple[float, float, float, float, str]])
         words_sorted = [w for _, w in sorted(line["words"], key=lambda item: item[0])]
         text_line = _normalize_space(" ".join(words_sorted))
         if text_line:
-            out.append({"text": text_line, "y": float(line["y"]), "x0": float(line["x0"]), "x1": float(line["x1"])})
+            out.append({"text": text_line, "y": float(line["y"]), "x0": float(line["x0"]), "x1": float(line["x1"])} )
     return out
 
 
@@ -310,6 +371,7 @@ def _extract_positioned_shipto_block(pdf_path: Path) -> list[str]:
         return []
     return best_block
 
+
 def _recipient_from_shipto_text(text: str, postal: str, pdf_name: str) -> str:
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     for i, line in enumerate(lines):
@@ -319,6 +381,7 @@ def _recipient_from_shipto_text(text: str, postal: str, pdf_name: str) -> str:
             if _valid_recipient_candidate(cand, postal, pdf_name):
                 return cand
     return ""
+
 
 def _recipient_from_zip_context(lines: list[str], postal: str, pdf_name: str = "") -> str:
     if not postal:
@@ -367,15 +430,19 @@ def _pick_recipient(block: list[str], all_lines: list[str], postal: str, pdf_nam
     return ""
 
 
+def _format_zip_match(match: re.Match[str]) -> str:
+    return match.group(1) + (f"-{match.group(2)}" if match.group(2) else "")
+
+
 def _pick_zip(block: list[str], all_text: str) -> str:
     for ln in block:
         m = ZIP_RE.search(ln)
         if m:
-            return m.group(1)
+            return _format_zip_match(m)
 
-    all_zips = ZIP_RE.findall(all_text)
+    all_zips = list(ZIP_RE.finditer(all_text))
     if all_zips:
-        return all_zips[-1]
+        return _format_zip_match(all_zips[-1])
     return ""
 
 
@@ -397,13 +464,30 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
     tracking = _extract_tracking(search_text)
     carrier = _detect_carrier(search_text, tracking)
 
+    # eBay UPS labels often have no embedded text; use a tight OCR crop around
+    # the recipient panel only when the normal text pass did not produce usable
+    # recipient or ZIP signals.
+    if _looks_like_ebay_label_pdf(pdf_path) and (not postal or not recipient):
+        ocr_lines = _ocr_ebay_ups_recipient_block(pdf_path)
+        if ocr_lines:
+            ocr_text = "\n".join(ocr_lines)
+            text = "\n".join(part for part in [text, ocr_text] if part.strip())
+            search_text = _normalize_space(f"{search_text} {ocr_text}")
+            lower = search_text.lower()
+            lines = _candidate_lines(text, words_text)
+            shipto_block = _extract_shipto_block(lines)
+            postal = postal or _pick_zip(shipto_block, search_text)
+            recipient = recipient or _pick_recipient(shipto_block, lines, postal, pdf_path.name, text)
+            tracking = tracking or _extract_tracking(search_text)
+            carrier = _detect_carrier(search_text, tracking)
+
     amz_match = AMZ_ORDER_RE.search(search_text)
     ebay_match = EBAY_ORDER_RE.search(search_text)
 
     platform_hint = "unknown"
     if "amazon" in lower or "amzn" in lower:
         platform_hint = "amazon"
-    elif "ebay" in lower or "ebay international shipping" in lower:
+    elif "ebay" in lower or "ebay international shipping" in lower or _looks_like_ebay_label_pdf(pdf_path):
         platform_hint = "ebay"
 
     return {
@@ -417,3 +501,4 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
         "order_id_ebay": ebay_match.group(0) if ebay_match else "",
         "recipient_name": recipient,
     }
+
