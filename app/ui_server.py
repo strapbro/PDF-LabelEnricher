@@ -2050,8 +2050,10 @@ def create_app() -> FastAPI:
 
         combined = result.get("combined", {})
         if isinstance(combined, dict) and combined.get("ok"):
-            settings.open_folder(Path(str(combined.get("path", ""))))
+            combined_path = str(combined.get("path", "") or "")
             parts.append(_ui("Opened combined PDF ({count} files)", count=combined.get("count", 0)))
+            if combined_path:
+                return _redirect_with_message(f"/?open_pdf={quote_plus(combined_path)}", _join_ui_parts(parts))
 
         return _redirect_with_message("/reprocess-select", _join_ui_parts(parts))
 
