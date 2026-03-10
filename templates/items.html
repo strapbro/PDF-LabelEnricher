@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <section class="card">
   <h2>{{ tr("Items Database Sync + Import") }}</h2>
@@ -9,7 +9,6 @@
       <div class="flow-sub">{{ tr("Use this only for swapping in a newer items.csv from another PC or Drive. This is separate from incoming label/PDF batch files.") }}</div>
       <form id="itemsReplaceForm" class="items-replace-form" action="/items/replace" method="post" enctype="multipart/form-data">
         <input id="itemsReplaceInput" type="file" name="items_csv_file" accept=".csv,.txt,.tsv" required hidden>
-        <input id="itemsReplaceLastModified" type="hidden" name="uploaded_last_modified" value="">
         <div id="itemsReplaceDropzone" class="items-replace-dropzone" tabindex="0">
           <div class="items-replace-title">{{ tr("Drop a replacement items.csv here") }}</div>
           <div class="items-replace-sub">{{ tr("or click this box to choose a file") }}</div>
@@ -18,12 +17,9 @@
         <div class="items-replace-actions">
           <button class="btn btn-secondary items-action-btn" type="button" id="itemsReplaceChooseBtn">{{ tr("Choose replacement file") }}</button>
           <button class="btn btn-primary items-action-btn" type="submit">{{ tr("Replace main items.csv") }}</button>
-          <a class="btn btn-primary items-action-btn" href="/items/export">{{ tr("Download items.csv") }}</a>
+          <a class="btn btn-success items-action-btn" href="/items/export">{{ tr("Download items.csv") }}</a>
           <button class="btn btn-secondary items-action-btn" type="button" id="openAppRootBtn">{{ tr("Open Label Enricher Folder") }}</button>
         </div>
-      </form>
-      <form id="openAppRootForm" action="/open" method="post">
-        <input type="hidden" name="target" value="app_root">
       </form>
     </div>
 
@@ -52,23 +48,36 @@
           <span id="stageImportName">{{ tr("No stage import file selected") }}</span>
           <button class="btn btn-primary items-action-btn" type="submit">{{ tr("Stage Import (Review First)") }}</button>
         </form>
+        <div class="flow-sub" style="margin-bottom:0;">
+          {% if staged_sync and staged_sync.source_filename %}
+          {{ tr("Currently staged: {name}", name=staged_sync.source_filename) }}
+          {% elif staged_sync %}
+          {{ tr("A staged import file is currently loaded.") }}
+          {% else %}
+          {{ tr("No staged import is currently loaded.") }}
+          {% endif %}
+        </div>
+        <form action="/items/sync-clear" method="post">
+          <button class="btn btn-outline items-action-btn" type="submit">{{ tr("Clear Staged Import") }}</button>
+        </form>
       </div>
     </div>
 
     <div class="items-flow-box">
       <div class="hint-title">{{ tr("Transitional Label/Location Hints (optional)") }}</div>
-      <div class="hint-sub">{{ tr("Use this for onboarding labels that do not yet have SKU/ASIN/item#. This is separate from replacing the main items.csv.") }}</div>
+      <div class="hint-sub">{{ tr("Use this helper to fill Custom Label and Location for rows that already have a matching eBay item # or Amazon ASIN. Typical columns: label, eBay link, Amazon link, location.") }}</div>
+      <div class="hint-sub">{{ tr("The app extracts the eBay item # / Amazon ASIN from those links. It does not store the full link as the item ID.") }}</div>
       <div class="items-controls hints-actions" style="margin-top:6px;">
         <form id="itemsHintsForm" action="/hints/upload" method="post" enctype="multipart/form-data">
           <input type="hidden" name="from_page" value="items">
           <input id="itemsHintsInput" type="file" name="hints_csv" accept=".csv,.tsv,.txt" required hidden>
-          <button class="btn btn-secondary items-action-btn" type="button" id="itemsHintsChooseBtn">{{ tr("Choose hints file") }}</button>
-          <span id="itemsHintsName">{{ tr("No hints file selected") }}</span>
-          <button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Upload Label/Location Hints") }}</button>
+          <button class="btn btn-secondary items-action-btn" type="button" id="itemsHintsChooseBtn">{{ tr("Choose Hints File") }}</button>
+          <span id="itemsHintsName">{% if label_hints %}{{ tr("Loaded {count} hints", count=label_hints|length) }}{% else %}{{ tr("No hints file selected") }}{% endif %}</span>
+          <button class="btn btn-success items-action-btn" type="submit">{{ tr("Upload Label/Location Hints") }}</button>
         </form>
-        <form action="/hints/clear" method="post" data-confirm="{{ tr('Clear label/location hints file?') }}">
+        <form class="hints-clear-form" action="/hints/clear" method="post" data-confirm="{{ tr('Clear label/location hints file?') }}">
           <input type="hidden" name="from_page" value="items">
-          <button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Clear Hints File") }}</button>
+          <button class="btn btn-outline items-action-btn" type="submit">{{ tr("Clear Hints File") }}</button>
         </form>
       </div>
     </div>
@@ -108,107 +117,147 @@
     </div>
   </div>
   {% endif %}
-  <div class="items-controls items-utility-actions"> 
-    <form id="itemsBackupForm" action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Create Backup Now") }}</button></form>
-    <form action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Open Backups Folder") }}</button></form>
-    <form action="/items/clear-needs-review" method="post">
+
+  <div class="items-controls items-utility-actions">
+    <form id="itemsBackupForm" action="/items/backup" method="post"><input type="hidden" name="from_page" value="items"><button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Create Backup Now") }}</button></form><div class="flow-sub items-backup-microcopy">{{ tr("Creates a backup copy of the current items.csv inside the backups folder.") }}</div>
+    <form id="openBackupsForm" action="/items/open-backups" method="post"><input type="hidden" name="from_page" value="items"><button id="openBackupsBtn" class="btn btn-secondary items-action-btn" type="button">{{ tr("Open Backups Folder") }}</button></form>
+
+  </div>
+</section>
+
+<section class="card">
+  <div class="section-head items-section-head">
+    <h2>{{ tr("Items") }}</h2>
+  </div>
+  <div class="items-review-actions">
+    <form id="clearNeedsReviewFormInline" action="/items/clear-needs-review" method="post">
       <input type="hidden" name="from_page" value="items">
-      <input type="hidden" name="mode" value="clear_flags">
-      <button class="btn btn-secondary items-action-btn" type="submit">{{ tr("Clear Items Needing Review") }}</button>
-      {% if auto_added_review_count and auto_added_review_count > 0 %}<div class="flow-sub" style="margin:6px 0 0 0;">{{ tr("Auto-added review rows currently in DB: {count}. Clear can either remove flags or delete those auto-added rows.", count=auto_added_review_count) }}</div>{% endif %}
+      <input type="hidden" id="clearNeedsReviewModeInline" name="mode" value="clear_flags">
+      <button class="btn btn-soft-danger items-action-btn" type="submit">{{ tr("Clear Items Needing Review") }}</button>
     </form>
   </div>
-</section><section class="card">
-  <h2>{{ tr("Items") }}</h2>
+  {% if auto_added_review_count and auto_added_review_count > 0 %}<div class="flow-sub items-inline-review-note">{{ tr("Auto-added review rows currently in DB: {count}. Clear can either remove flags or delete those auto-added rows.", count=auto_added_review_count) }}</div>{% endif %}
   <div class="items-controls">
     <input id="itemsFilter" type="text" placeholder="{{ tr('Quick filter (SKU, ASIN, title, label, location)') }}">
     <button id="itemsWidthToggle" class="btn btn-secondary items-action-btn" type="button">{{ tr("Wide View") }}</button>
-    <button id="itemsFilterClear" class="btn btn-secondary items-action-btn" type="button">{{ tr("Clear Filter") }}</button>
+    <button id="itemsFilterClear" class="btn btn-outline items-action-btn" type="button">{{ tr("Clear Filter") }}</button>
   </div>
-  <p style="margin-top:8px;color:#555;font-size:13px;">{{ tr("Tip: click column headers to sort. Click again to reverse.") }}</p>
-  <p style="margin-top:4px;color:#555;font-size:13px;">{{ tr("Needs Review is a system status for items that require human attention. Use Clear Needs Review Flags after you verify/fix them.") }}</p>
+  <p class="items-tip">{{ tr("Tip: click column headers to sort. Click again to reverse.") }}</p>
+  <p class="items-tip">{{ tr("Needs Review is a system status for items that require human attention. Merge candidates are suggestions only; nothing merges until you confirm.") }}</p>
 
-  <form action="/items/save" method="post">
+  <form id="itemsSaveForm" action="/items/save" method="post">
     <input type="hidden" name="source_page" value="{{ page_mode or 'items' }}">
     <div class="items-table-wrap">
       <table id="itemsTable" class="items-table mode-compact">
         <thead>
           <tr>
-            <th data-sort="text">{{ tr("Platform") }}</th>
-            <th data-sort="text">{{ tr("eBay Item #") }}</th>
-            <th data-sort="text">{{ tr("Amazon SKU") }}</th>
-            <th data-sort="text">{{ tr("Amazon ASIN") }}</th>
-            <th data-sort="text">{{ tr("Item Title") }}</th>
-            <th data-sort="text">{{ tr("Custom Label") }}</th>
-            <th data-sort="text">{{ tr("Variation Options") }}</th>
-            <th data-sort="text">{{ tr("Location") }}</th>
-            <th data-sort="text">{{ tr("Link Platform") }}</th>
-            <th data-sort="text">{{ tr("Link ID Type") }}</th>
-            <th data-sort="text">{{ tr("Link ID Value") }}</th>
-            <th data-sort="text">{{ tr("Link Preview") }}</th>
-            <th data-sort="text">{{ tr("Status") }}</th>
-            <th data-sort="bool">{{ tr("Show Title") }}</th>
-            <th data-sort="text">{{ tr("Delete Row/Item") }}</th>
+            <th data-sort="text" data-col-key="platform">{{ tr("Platform") }}</th>
+            <th data-sort="text" data-col-key="ebay_item_number">{{ tr("eBay Item #") }}</th>
+            <th data-sort="text" data-col-key="amazon_sku">{{ tr("Amazon SKU") }}</th>
+            <th data-sort="text" data-col-key="amazon_asin">{{ tr("Amazon ASIN") }}</th>
+            <th data-sort="text" data-col-key="item_title">{{ tr("Item Title") }}</th>
+            <th data-sort="text" data-col-key="custom_label">{{ tr("Custom Label") }}</th>
+            <th data-sort="text" data-col-key="variation_options">{{ tr("Variation Options") }}</th>
+            <th data-sort="text" data-col-key="location">{{ tr("Location") }}</th>
+            <th data-sort="text" data-col-key="hint_match">{{ tr("Hint Match") }}</th>
+            <th data-sort="text" data-col-key="merge_with">{{ tr("Merge With") }}</th>
+            <th data-sort="text" data-col-key="status">{{ tr("Status") }}</th>
+            <th data-sort="text" data-col-key="delete">{{ tr("Delete Row/Item") }}</th>
           </tr>
         </thead>
         <tbody>
         {% for row in rows %}
-          {% set has_ebay = (row.ebay_item_number or '') %}
-          {% set has_amazon = (row.amazon_sku or row.amazon_asin or '') %}
-          {% set is_merged = (row.platform == 'both') or (has_ebay and has_amazon) %}
-          {% set default_link_platform = row.linked_platform or ('amazon' if has_ebay and not has_amazon else ('ebay' if has_amazon and not has_ebay else '')) %}
-          {% set default_link_id_type = row.linked_id_type or ('amazon_sku' if default_link_platform == 'amazon' else ('ebay_item_number' if default_link_platform == 'ebay' else '')) %}
-          <tr class="{% if row.needs_review == '1' %}needs-review-row{% endif %}">
-            <td><input type="hidden" name="row_{{ loop.index0 }}_row_key" value="{{ row._row_key or '' }}">{% if row.platform == 'amazon' %}{{ tr("Amazon") }}{% elif row.platform == 'ebay' %}{{ tr("eBay") }}{% elif row.platform == 'both' %}{{ tr("Both") }}{% else %}{{ row.platform }}{% endif %}</td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_ebay_item_number" value="{{ row.ebay_item_number or '' }}"><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_sku" value="{{ row.amazon_sku or '' }}"><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_asin" value="{{ row.amazon_asin or '' }}"><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_item_title" value="{{ row.item_title or '' }}"><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}" list="labelHintsList"><button type="button" class="clear-cell-btn" title="{{ tr("Clear label") }}" aria-label="{{ tr("Clear custom label") }}">X</button><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+          {% set row_key = row._row_key or '' %}
+          {% set hint = hint_matches.get(row_key) if hint_matches else None %}
+          {% set candidates = merge_candidates.get(row_key, []) if merge_candidates else [] %}
+          <tr class="{% if row.needs_review == '1' %}needs-review-row{% endif %}" data-row-key="{{ row_key }}">
+            <td>
+              <input type="hidden" name="row_{{ loop.index0 }}_row_key" value="{{ row_key }}">
+              {% if row.platform == 'amazon' %}{{ tr("Amazon") }}{% elif row.platform == 'ebay' %}{{ tr("eBay") }}{% elif row.platform == 'both' %}{{ tr("Both") }}{% else %}{{ row.platform }}{% endif %}
+            </td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_ebay_item_number" value="{{ row.ebay_item_number or '' }}"><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_sku" value="{{ row.amazon_sku or '' }}"><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_asin" value="{{ row.amazon_asin or '' }}"><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_item_title" value="{{ row.item_title or '' }}"><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}"><button type="button" class="clear-cell-btn" title="{{ tr('Clear label') }}" aria-label="{{ tr('Clear custom label') }}">X</button><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
             <td><input name="row_{{ loop.index0 }}_variation_options" value="{{ row.variation_options or '' }}" placeholder="{{ tr('Option A | Option B | Option C') }}"></td>
-            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"><button type="button" class="copy-btn" title="{{ tr("Copy") }}" aria-label="{{ tr("Copy to clipboard") }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
-            <td class="{% if is_merged %}link-locked{% endif %}">
-              <select class="link-platform" name="row_{{ loop.index0 }}_linked_platform" {% if is_merged %}disabled{% endif %}>
-                <option value="" {% if not default_link_platform %}selected{% endif %}></option>
-                <option value="amazon" {% if default_link_platform == 'amazon' %}selected{% endif %}>{{ tr("Amazon") }}</option>
-                <option value="ebay" {% if default_link_platform == 'ebay' %}selected{% endif %}>{{ tr("eBay") }}</option>
-              </select>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td>
+              {% if hint %}
+                <div class="assist-box">
+                  <div class="assist-title">{{ hint.label or tr("Hint available") }}</div>
+                  <div class="assist-sub">{{ tr("Will fill missing label/location and missing ID fields only.") }}</div>
+                  <div class="assist-meta">{{ [hint.location, hint.ebay_item_number, hint.asin]|select|join(' | ') }}</div>
+                  <div class="inline-action-form apply-hint-action" data-row-key="{{ row_key }}" data-source-page="{{ page_mode or 'items' }}">
+                    <button type="button" class="btn btn-secondary items-action-btn btn-compact apply-hint-btn">{{ tr("Apply Hint") }}</button>
+                  </div>
+                </div>
+              {% else %}
+                <span class="muted">{{ tr("No matching hint") }}</span>
+              {% endif %}
             </td>
-            <td class="{% if is_merged %}link-locked{% endif %}">
-              <select class="link-id-type" name="row_{{ loop.index0 }}_linked_id_type" {% if is_merged %}disabled{% endif %}>
-                <option value="" {% if not default_link_id_type %}selected{% endif %}></option>
-                <option value="amazon_sku" {% if default_link_id_type == 'amazon_sku' %}selected{% endif %}>{{ tr("Amazon SKU") }}</option>
-                <option value="amazon_asin" {% if default_link_id_type == 'amazon_asin' %}selected{% endif %}>{{ tr("Amazon ASIN") }}</option>
-                <option value="ebay_item_number" {% if default_link_id_type == 'ebay_item_number' %}selected{% endif %}>{{ tr("eBay Item #") }}</option>
-                <option value="item_id" {% if default_link_id_type == 'item_id' %}selected{% endif %}>{{ tr("Item ID") }}</option>
-              </select>
+            <td>
+              {% if candidates %}
+                <div class="merge-form inline-action-form" data-row-key="{{ row_key }}" data-source-page="{{ page_mode or 'items' }}">
+                  <select name="target_key" class="merge-select" required>
+                    <option value="">{{ tr("Choose merge target...") }}</option>
+                    {% for c in candidates %}
+                      <option value="{{ c.row_key }}" data-preview="{{ c.preview }}">{{ c.label }} | {{ c.preview }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="button" class="btn btn-success items-action-btn btn-compact merge-btn">{{ tr("Merge") }}</button>
+                </div>
+              {% else %}
+                <span class="muted">{{ tr("No strong merge candidate") }}</span>
+              {% endif %}
             </td>
-            <td class="{% if is_merged %}link-locked{% endif %}"><input class="link-id-value" name="row_{{ loop.index0 }}_linked_id_value" value="{{ row.linked_id_value or '' }}" list="linkTargetsList" {% if is_merged %}disabled{% endif %}></td>
-            <td class="link-preview-cell">{% if is_merged %}{{ tr("Merged row") }}{% endif %}</td>
             <td class="status-cell">{% if row.needs_review == '1' %}<span class="status-review">{{ row.needs_review_reason or tr("Needs human review") }}</span>{% else %}<span class="status-ok">{{ tr("OK") }}</span>{% endif %}</td>
-            <td class="center"><input type="checkbox" name="row_{{ loop.index0 }}_show_title" {% if row.show_title == '1' %}checked{% endif %}></td>
             <td class="center">
               <input type="hidden" class="delete-flag" name="row_{{ loop.index0 }}_delete_row" value="">
-              <button type="button" class="delete-row-btn" title="{{ tr("Delete row") }}">X</button>
+              <button type="button" class="delete-row-btn" title="{{ tr('Delete row') }}">X</button>
               <button type="button" class="undo-row-btn" style="display:none;">{{ tr("Undo") }}</button>
             </td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
-      <datalist id="linkTargetsList">
-        {% for t in link_targets %}
-          <option value="{{ t.id_value }}">{% if t.platform == 'amazon' %}{{ tr("Amazon") }}{% elif t.platform == 'ebay' %}{{ tr("eBay") }}{% else %}{{ t.platform }}{% endif %} | {% if t.id_type == 'amazon_sku' %}{{ tr("Amazon SKU") }}{% elif t.id_type == 'amazon_asin' %}{{ tr("Amazon ASIN") }}{% elif t.id_type == 'ebay_item_number' %}{{ tr("eBay Item #") }}{% elif t.id_type == 'item_id' %}{{ tr("Item ID") }}{% else %}{{ t.id_type }}{% endif %} | {{ t.title }}</option>
-        {% endfor %}
-      </datalist>
     </div>
-    <div id="itemsStickyScrollbar" class="items-sticky-scroll" aria-hidden="true">
-      <div id="itemsStickyScrollbarInner"></div>
-    </div>
+    <div id="itemsStickyScrollbar" class="items-sticky-scroll" aria-hidden="true"><div id="itemsStickyScrollbarInner"></div></div>
     <button id="saveChangesBtn" class="btn btn-secondary save-btn save-passive" type="submit" style="margin-top:10px;">{{ tr("Save Changes") }}</button>
   </form>
 </section>
 
+<div id="mergePreviewModal" class="merge-preview-modal" hidden>
+  <div class="merge-preview-dialog">
+    <div class="merge-preview-head">
+      <h3>{{ tr("Merge Preview") }}</h3>
+      <button type="button" id="mergePreviewClose" class="merge-preview-close" aria-label="{{ tr('Close') }}">X</button>
+    </div>
+    <div class="merge-preview-sub">{{ tr("Red rows will be replaced. Green row is the final merged item that will be kept.") }}</div>
+    <div class="merge-preview-table-wrap">
+      <table class="merge-preview-table">
+        <thead>
+          <tr>
+            <th>{{ tr("Version") }}</th>
+            <th>{{ tr("Platform") }}</th>
+            <th>{{ tr("eBay Item #") }}</th>
+            <th>{{ tr("Amazon SKU") }}</th>
+            <th>{{ tr("Amazon ASIN") }}</th>
+            <th>{{ tr("Item Title") }}</th>
+            <th>{{ tr("Custom Label") }}</th>
+            <th>{{ tr("Variation Options") }}</th>
+            <th>{{ tr("Location") }}</th>
+          </tr>
+        </thead>
+        <tbody id="mergePreviewBody"></tbody>
+      </table>
+    </div>
+    <div class="merge-preview-actions">
+      <button type="button" id="mergePreviewCancel" class="btn btn-secondary items-action-btn">{{ tr("Cancel") }}</button>
+      <button type="button" id="mergePreviewConfirm" class="btn btn-success items-action-btn">{{ tr("Confirm Merge") }}</button>
+    </div>
+  </div>
+</div>
 <style>
 .items-top-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
 .items-flow-box { border: 1px solid rgba(88, 129, 87, 0.18); border-radius: 14px; padding: 14px; background: rgba(248, 251, 249, 0.78); }
@@ -227,19 +276,17 @@
 .items-replace-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .compact-gap { gap: 10px; }
 .hints-actions form { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.hints-clear-form { margin-top: 8px; }
+.items-review-actions { margin: 8px 0 4px; }
 .items-utility-actions { margin-top: 12px; }
+.items-backup-microcopy { margin-top: 6px; }
+.items-inline-review-note { margin: 0 4px 0 0; }
 .stage-top-box { margin-bottom: 12px; }
 @media (max-width: 1000px) { .items-top-grid { grid-template-columns: 1fr; } }
-
 .items-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .items-actions-stack { display: flex; flex-direction: column; gap: 8px; }
 .items-sync-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .items-shared-link { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.items-shared-link form { margin: 0; }
-.items-sync-steps { border: 1px solid rgba(88, 129, 87, 0.18); border-radius: 10px; padding: 10px 12px; background: rgba(248, 251, 249, 0.78); }
-.items-sync-steps ol { margin: 8px 0 0 20px; padding: 0; }
-.items-sync-steps li { margin: 0 0 8px; color: #405847; line-height: 1.45; }
-.items-sync-steps li:last-child { margin-bottom: 0; }
 .items-shared-link input[type="text"] { min-width: 360px; max-width: 780px; width: 100%; }
 .items-stage-box { border: 1px solid rgba(80,100,90,0.22); border-radius: 10px; padding: 10px; background: rgba(248,251,249,0.75); }
 .items-stage-head { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
@@ -250,49 +297,35 @@
 .items-stage-table th, .items-stage-table td { border:1px solid #d8e0d8; padding:6px; text-align:left; vertical-align:top; }
 .items-stage-table th { background:#eef3ef; position: sticky; top: 0; z-index: 1; }
 .items-action-btn { min-height: 38px; }
-.items-hints-box { border: 1px solid rgba(80,100,90,0.2); border-radius: 10px; padding: 10px; background: rgba(247,250,247,0.8); }
 .hint-title { font-weight: 700; }
 .hint-sub { font-size: 12px; color: #4f5b4f; margin-top: 3px; }
 .items-controls input[type="text"] { min-width: 320px; max-width: 520px; }
+.items-tip { margin-top:8px; color:#555; font-size:13px; }
 .items-table-wrap { max-height: calc(100vh - 300px); overflow: auto; padding-bottom: 8px; }
 .items-table-wrap::-webkit-scrollbar { height: 18px; }
 .items-table-wrap::-webkit-scrollbar-track { background: rgba(180, 190, 180, 0.28); border-radius: 999px; }
 .items-table-wrap::-webkit-scrollbar-thumb { background: rgba(74, 110, 88, 0.58); border-radius: 999px; }
-.items-sticky-scroll {
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  overflow-x: auto;
-  overflow-y: hidden;
-  height: 18px;
-  background: rgba(241, 247, 243, 0.92);
-  border: 1px solid rgba(115, 143, 126, 0.22);
-  border-radius: 999px;
-  margin-top: 6px;
-  display: none;
-  scrollbar-width: auto;
-  scrollbar-color: rgba(74, 110, 88, 0.72) rgba(180, 190, 180, 0.28);
-}
+.items-sticky-scroll { position: sticky; bottom: 0; z-index: 4; overflow-x: auto; overflow-y: hidden; height: 18px; background: rgba(241, 247, 243, 0.92); border: 1px solid rgba(115, 143, 126, 0.22); border-radius: 999px; margin-top: 6px; display: none; scrollbar-width: auto; scrollbar-color: rgba(74, 110, 88, 0.72) rgba(180, 190, 180, 0.28); }
 .items-sticky-scroll::-webkit-scrollbar { height: 18px; }
 .items-sticky-scroll::-webkit-scrollbar-track { background: rgba(180, 190, 180, 0.28); border-radius: 999px; }
 .items-sticky-scroll::-webkit-scrollbar-thumb { background: rgba(74, 110, 88, 0.72); border-radius: 999px; }
 .items-sticky-scroll > div { height: 1px; }
 .items-table { table-layout: fixed; }
-.items-table.mode-compact { min-width: 2140px; }
-.items-table.mode-wide { min-width: 3160px; table-layout: auto; }
+.items-table.mode-compact { min-width: 2200px; }
+.items-table.mode-wide { min-width: 3200px; table-layout: auto; }
 .items-table th { user-select: none; cursor: pointer; white-space: nowrap; word-break: normal; line-height: 1.05; background: #f7f9fb; position: sticky; top: 0; z-index: 3; font-size: 14px; padding: 8px 8px; }
 .items-table th.sort-asc::after { content: " \2191"; }
 .items-table th.sort-desc::after { content: " \2193"; }
+.items-table th.is-dragging { opacity: 0.45; }
+.items-table th.drag-target-left { box-shadow: inset 4px 0 0 #4a6e58; }
+.items-table th.drag-target-right { box-shadow: inset -4px 0 0 #4a6e58; }
+.col-resize-handle { position:absolute; top:0; right:-4px; width:10px; height:100%; cursor:col-resize; z-index:5; }
 .items-table td.center { text-align: center; }
-.items-table td.center input[type="checkbox"] { width: auto; margin: 0; }
 .items-table input, .items-table select { width: 100%; }
-.items-table td { word-break: break-word; }
+.items-table td { word-break: break-word; vertical-align: top; }
 .status-cell { font-size: 12px; line-height: 1.25; }
 .status-ok { color: #2b7a0b; font-weight: 700; }
 .status-review { color: #b26a00; font-weight: 700; }
-.items-table td.link-locked { background: #f3f3f3; }
-.items-table td.link-locked input,
-.items-table td.link-locked select { background: #f3f3f3; color: #888; cursor: not-allowed; }
 .items-table tr.needs-review-row td { background: #fff8e1; }
 .items-table tr.pending-delete td { background: #ffe3e3 !important; opacity: 0.75; }
 .delete-row-btn { background:#d62828; color:#fff; border:0; border-radius:6px; padding:4px 10px; cursor:pointer; font-weight:700; }
@@ -305,106 +338,114 @@
 .copy-btn { flex:0 0 auto; width:30px; height:30px; padding:0; border:1px solid #c9d4e3; background:#f8fbff; color:#234; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
 .copy-btn:hover { background:#eaf2ff; }
 .copy-btn svg { width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
-
-.items-table.mode-compact th:nth-child(1), .items-table.mode-compact td:nth-child(1) { width: 90px; }
-.items-table.mode-compact th:nth-child(2), .items-table.mode-compact td:nth-child(2) { width: 150px; }
-.items-table.mode-compact th:nth-child(3), .items-table.mode-compact td:nth-child(3) { width: 170px; }
-.items-table.mode-compact th:nth-child(4), .items-table.mode-compact td:nth-child(4) { width: 140px; }
-.items-table.mode-compact th:nth-child(5), .items-table.mode-compact td:nth-child(5) { width: 330px; }
-.items-table.mode-compact th:nth-child(6), .items-table.mode-compact td:nth-child(6) { width: 250px; }
-.items-table.mode-compact th:nth-child(7), .items-table.mode-compact td:nth-child(7) { width: 120px; }
-.items-table.mode-compact th:nth-child(8), .items-table.mode-compact td:nth-child(8) { width: 130px; }
-.items-table.mode-compact th:nth-child(9), .items-table.mode-compact td:nth-child(9) { width: 160px; }
-.items-table.mode-compact th:nth-child(10), .items-table.mode-compact td:nth-child(10) { width: 180px; }
-.items-table.mode-compact th:nth-child(11), .items-table.mode-compact td:nth-child(11) { width: 320px; }
-.items-table.mode-compact th:nth-child(12), .items-table.mode-compact td:nth-child(12) { width: 230px; }
-.items-table.mode-compact th:nth-child(13), .items-table.mode-compact td:nth-child(13) { width: 95px; }
-.items-table.mode-compact th:nth-child(14), .items-table.mode-compact td:nth-child(14) { width: 170px; }
-
-.items-table.mode-wide th:nth-child(1), .items-table.mode-wide td:nth-child(1) { width: 110px; }
-.items-table.mode-wide th:nth-child(2), .items-table.mode-wide td:nth-child(2) { width: 200px; }
-.items-table.mode-wide th:nth-child(3), .items-table.mode-wide td:nth-child(3) { width: 220px; }
-.items-table.mode-wide th:nth-child(4), .items-table.mode-wide td:nth-child(4) { width: 180px; }
-.items-table.mode-wide th:nth-child(5), .items-table.mode-wide td:nth-child(5) { width: 520px; }
-.items-table.mode-wide th:nth-child(6), .items-table.mode-wide td:nth-child(6) { width: 420px; }
-.items-table.mode-wide th:nth-child(7), .items-table.mode-wide td:nth-child(7) { width: 180px; }
-.items-table.mode-wide th:nth-child(8), .items-table.mode-wide td:nth-child(8) { width: 160px; }
-.items-table.mode-wide th:nth-child(9), .items-table.mode-wide td:nth-child(9) { width: 200px; }
-.items-table.mode-wide th:nth-child(10), .items-table.mode-wide td:nth-child(10) { width: 260px; }
-.items-table.mode-wide th:nth-child(11), .items-table.mode-wide td:nth-child(11) { width: 560px; }
-.items-table.mode-wide th:nth-child(12), .items-table.mode-wide td:nth-child(12) { width: 360px; }
-.items-table.mode-wide th:nth-child(13), .items-table.mode-wide td:nth-child(13) { width: 120px; }
-.items-table.mode-wide th:nth-child(14), .items-table.mode-wide td:nth-child(14) { width: 190px; }
+.assist-box { border: 1px solid rgba(88,129,87,0.18); border-radius: 10px; padding: 8px; background: rgba(248,251,249,0.8); }
+.assist-title { font-weight: 700; color: #294234; }
+.assist-sub, .assist-meta { font-size: 12px; color: #506355; margin-top: 4px; }
+.inline-action-form { display:flex; flex-direction:column; gap:6px; }
+.btn-compact { min-height: 32px; }
+.merge-select { min-width: 280px; }
+.muted { color:#6b756d; font-size:12px; }
 .save-btn { min-width: 150px; }
 .save-passive { opacity: 0.68; filter: saturate(0.72); }
+.merge-preview-modal { position: fixed; inset: 0; background: rgba(16, 24, 19, 0.42); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 1200; }
+.merge-preview-modal[hidden] { display: none !important; }
+.merge-preview-dialog { width: min(1300px, 96vw); max-height: 90vh; overflow: auto; background: rgba(247, 250, 247, 0.96); border: 1px solid rgba(88, 129, 87, 0.22); border-radius: 18px; box-shadow: 0 24px 64px rgba(18, 34, 22, 0.18); padding: 18px; }
+.merge-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.merge-preview-head h3 { margin: 0; color: #274032; }
+.merge-preview-close { width: 36px; height: 36px; border: 1px solid rgba(88, 129, 87, 0.24); border-radius: 10px; background: rgba(235, 244, 236, 0.96); color: #294234; cursor: pointer; font-weight: 900; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; box-shadow: inset 0 1px 0 rgba(255,255,255,0.45); }
+.merge-preview-close:hover { background: rgba(221, 237, 224, 0.98); }
+.merge-preview-sub { font-size: 13px; color: #4f6555; margin-bottom: 12px; }
+.merge-preview-table-wrap { overflow: auto; border: 1px solid rgba(88,129,87,0.14); border-radius: 12px; }
+.merge-preview-table { width: 100%; min-width: 1100px; border-collapse: collapse; font-size: 13px; }
+.merge-preview-table th, .merge-preview-table td { border: 1px solid #d8e0d8; padding: 8px; text-align: left; vertical-align: top; }
+.merge-preview-table thead th { background: #eef3ef; position: sticky; top: 0; z-index: 1; }
+.merge-preview-row-old td { background: #fff0f0; }
+.merge-preview-row-new td { background: #edf9ef; font-weight: 600; }
+.merge-preview-version-old { color: #a33a3a; font-weight: 800; }
+.merge-preview-version-new { color: #2b7a3f; font-weight: 800; }
+.merge-preview-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.items-table.mode-compact th:nth-child(1), .items-table.mode-compact td:nth-child(1) { width: 90px; }
+.items-table.mode-compact th:nth-child(2), .items-table.mode-compact td:nth-child(2) { width: 155px; }
+.items-table.mode-compact th:nth-child(3), .items-table.mode-compact td:nth-child(3) { width: 170px; }
+.items-table.mode-compact th:nth-child(4), .items-table.mode-compact td:nth-child(4) { width: 145px; }
+.items-table.mode-compact th:nth-child(5), .items-table.mode-compact td:nth-child(5) { width: 330px; }
+.items-table.mode-compact th:nth-child(6), .items-table.mode-compact td:nth-child(6) { width: 260px; }
+.items-table.mode-compact th:nth-child(7), .items-table.mode-compact td:nth-child(7) { width: 180px; }
+.items-table.mode-compact th:nth-child(8), .items-table.mode-compact td:nth-child(8) { width: 145px; }
+.items-table.mode-compact th:nth-child(9), .items-table.mode-compact td:nth-child(9) { width: 260px; }
+.items-table.mode-compact th:nth-child(10), .items-table.mode-compact td:nth-child(10) { width: 320px; }
+.items-table.mode-compact th:nth-child(11), .items-table.mode-compact td:nth-child(11) { width: 230px; }
+.items-table.mode-compact th:nth-child(12), .items-table.mode-compact td:nth-child(12) { width: 120px; }
+.items-table.mode-wide th:nth-child(5), .items-table.mode-wide td:nth-child(5) { width: 520px; }
+.items-table.mode-wide th:nth-child(6), .items-table.mode-wide td:nth-child(6) { width: 420px; }
+.items-table.mode-wide th:nth-child(9), .items-table.mode-wide td:nth-child(9) { width: 320px; }
+.items-table.mode-wide th:nth-child(10), .items-table.mode-wide td:nth-child(10) { width: 480px; }
 </style>
 
-<datalist id="labelHintsList">
-{% for h in (label_hints or []) %}
-  <option value="{{ h.label }}">{{ h.label }}{% if h.location %} | {{ tr("LOC") }} {{ h.location }}{% endif %}{% if h.asin %} | {{ tr("ASIN") }} {{ h.asin }}{% endif %}</option>
-{% endfor %}
-</datalist>
-<script id="labelHintsData" type="application/json">{{ (label_hints or [])|tojson }}</script>
-<script id="linkTargetsData" type="application/json">{{ link_targets|tojson }}</script>
 <script>
 (function () {
-  const STORAGE_KEY = 'label_enricher_items_table_prefs_v1';
+  const STORAGE_KEY = 'label_enricher_items_table_prefs_v2';
   const SHARED_LINK_KEY = 'label_enricher_shared_sheet_link_v1';
   const table = document.getElementById('itemsTable');
+  if (!table) return;
   const wrap = document.querySelector('.items-table-wrap');
   const stickyScroll = document.getElementById('itemsStickyScrollbar');
   const stickyInner = document.getElementById('itemsStickyScrollbarInner');
-  const sharedLinkInput = document.getElementById('sharedSheetLink');
-  const saveSharedLinkBtn = document.getElementById('saveSharedSheetLink');
-  const openSharedLinkBtn = document.getElementById('openSharedSheetLink');
+  const filterInput = document.getElementById('itemsFilter');
+  const filterClearBtn = document.getElementById('itemsFilterClear');
+  const widthBtn = document.getElementById('itemsWidthToggle');
+  const saveBtn = document.getElementById('saveChangesBtn');
   const itemsReplaceForm = document.getElementById('itemsReplaceForm');
   const itemsReplaceInput = document.getElementById('itemsReplaceInput');
-  const itemsReplaceLastModified = document.getElementById('itemsReplaceLastModified');
   const itemsReplaceDropzone = document.getElementById('itemsReplaceDropzone');
   const itemsReplaceSelected = document.getElementById('itemsReplaceSelected');
   const itemsReplaceChooseBtn = document.getElementById('itemsReplaceChooseBtn');
   const openAppRootBtn = document.getElementById('openAppRootBtn');
-  const openAppRootForm = document.getElementById('openAppRootForm');
   const stageImportInput = document.getElementById('stageImportInput');
   const stageImportChooseBtn = document.getElementById('stageImportChooseBtn');
   const stageImportName = document.getElementById('stageImportName');
   const itemsHintsInput = document.getElementById('itemsHintsInput');
   const itemsHintsChooseBtn = document.getElementById('itemsHintsChooseBtn');
   const itemsHintsName = document.getElementById('itemsHintsName');
-  const filterInput = document.getElementById('itemsFilter');
-  const filterClearBtn = document.getElementById('itemsFilterClear');
-  const widthBtn = document.getElementById('itemsWidthToggle');
-  const dataEl = document.getElementById('linkTargetsData');
-  const hintsEl = document.getElementById('labelHintsData');
-  const saveBtn = document.getElementById('saveChangesBtn');
-  const saveForm = table ? table.closest('form') : null;
-  const currentItemsCsvPath = {{ items_csv_path|tojson }};
-  const currentItemsCsvModified = {{ items_csv_mtime_iso|tojson }};
-  const rawPageMessage = {{ (message or '')|tojson }};
-  const translatedPageMessage = {{ (tr(message) if message else '')|tojson }};
+  const clearNeedsReviewForm = document.getElementById('clearNeedsReviewFormInline');
+  const clearNeedsReviewMode = document.getElementById('clearNeedsReviewModeInline');
+  const openBackupsForm = document.getElementById('openBackupsForm');
+  const openBackupsBtn = document.getElementById('openBackupsBtn');
+  const sharedLinkInput = document.getElementById('sharedSheetLink');
+  const saveSharedSheetLink = document.getElementById('saveSharedSheetLink');
+  const openSharedSheetLink = document.getElementById('openSharedSheetLink');
   let isDirty = false;
-  if (!table) return;
 
   const T = {
     currentMainFile: {{ tr("Current main file: {path}", path="__PATH__")|tojson }},
-    selectedReplacement: {{ tr("Selected replacement: {name} | Downloaded/modified: {modified}", name="__NAME__", modified="__MODIFIED__")|tojson }},
+    selectedReplacement: {{ tr("Selected replacement: {name}", name="__NAME__")|tojson }},
     noStageImport: {{ tr("No stage import file selected")|tojson }},
     noHints: {{ tr("No hints file selected")|tojson }},
-    compactView: {{ tr("Compact View")|tojson }},
     wideView: {{ tr("Wide View")|tojson }},
-    mergedRow: {{ tr("Merged row")|tojson }},
-    noTargetFound: {{ tr("No target found")|tojson }},
-    hintConflictLocation: {{ tr('Hint conflict for location. Current: "{current}" | Hint: "{hint}". Use hint location?', current='__CURRENT__', hint='__HINT__')|tojson }},
-    hintConflictAsin: {{ tr('Hint conflict for ASIN. Current: "{current}" | Hint: "{hint}". Use hint ASIN?', current='__CURRENT__', hint='__HINT__')|tojson }},
+    compactView: {{ tr("Compact View")|tojson }},
     confirmDeleteRow: {{ tr("Mark this row for deletion when you save?")|tojson }},
-    chooseReplacementFirst: {{ tr("Choose an items.csv replacement file first.")|tojson }},
-    replaceMainConfirm: {{ tr("Replace this PC's main items.csv?\n\nIncoming file: {name}\nIncoming modified/downloaded: {incoming}\nCurrent main items.csv modified: {current}\n\nThis will overwrite the main items.csv and create a backup first.", name='__NAME__', incoming='__INCOMING__', current='__CURRENT__')|tojson }},
-    pasteLinkFirst: {{ tr("Paste a link first.")|tojson }},
+    chooseTarget: {{ tr("Choose a merge target first.")|tojson }},
+    mergePreview: {{ tr("Merge this row into:\n\n{preview}\n\nThis keeps one combined row with shared label/location and both platform IDs.", preview="__PREVIEW__")|tojson }},
+    mergePreviewError: {{ tr("Could not build merge preview")|tojson }},
+    mergeOldA: {{ tr("Old Row A")|tojson }},
+    mergeOldB: {{ tr("Old Row B")|tojson }},
+    mergeNew: {{ tr("Merged Result")|tojson }},
+    platformAmazon: {{ tr("Amazon")|tojson }},
+    platformEbay: {{ tr("eBay")|tojson }},
+    platformBoth: {{ tr("Both")|tojson }},
     clearReviewProceed: {{ tr("Proceed with clearing review rows?")|tojson }},
     deleteAutoAdded: {{ tr("Also delete auto-added rows from items.csv? Click Cancel to keep rows and only clear flags.")|tojson }},
-    unknown: {{ tr("Unknown")|tojson }},
+    pasteLinkFirst: {{ tr("Paste a link first.")|tojson }},
+    chooseReplacementFirst: {{ tr("Choose an items.csv replacement file first.")|tojson }},
+    appliedHint: {{ tr("Applied hint to item row")|tojson }},
+    noNewHintFields: {{ tr("Hint matched, but there was nothing new to fill in")|tojson }},
+    noMatchingHint: {{ tr("No matching hint")|tojson }},
+    hintAppliedTitle: {{ tr("Hint Applied")|tojson }},
+    hintAppliedSub: {{ tr("Filled this row locally. Press Save Changes when you are ready.")|tojson }},
+    undoHint: {{ tr("Undo")|tojson }},
+    undoHintEmpty: {{ tr("Nothing to undo for that hint")|tojson }},
+    openFolderFailed: {{ tr("Could not open folder from app")|tojson }},
   };
-
   function fmt(template, vars) {
     let out = String(template || '');
     Object.keys(vars || {}).forEach((key) => {
@@ -414,473 +455,528 @@
     return out;
   }
 
-  let targets = [];
-  try { targets = JSON.parse((dataEl && dataEl.textContent) || '[]'); } catch (e) { targets = []; }
-  let labelHints = [];
-  try { labelHints = JSON.parse((hintsEl && hintsEl.textContent) || '[]'); } catch (e) { labelHints = []; }
-
-  const headers = Array.from(table.querySelectorAll('thead th[data-sort]'));
-  const tbody = table.querySelector('tbody');
-  const prefs = { sortCol: -1, sortDir: 'asc', widthMode: 'compact', filterText: '' };
-
-  function formatLocalDate(value) {
-    if (!value) return T.unknown;
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
-  }
-
-  function bindFriendlyFileInput(input, chooseBtn, nameEl, emptyText) {
-    if (!input || !chooseBtn || !nameEl) return;
-    const update = () => {
-      const file = input.files && input.files[0];
-      nameEl.textContent = file ? file.name : emptyText;
-    };
-    chooseBtn.addEventListener('click', () => input.click());
-    input.addEventListener('change', update);
-    update();
-  }
-
-  function describeReplaceFile(file) {
-    if (!file) {
-      if (itemsReplaceSelected) itemsReplaceSelected.textContent = fmt(T.currentMainFile, { path: currentItemsCsvPath });
-      if (itemsReplaceLastModified) itemsReplaceLastModified.value = '';
-      return;
+  function markDirty() {
+    if (isDirty) return;
+    isDirty = true;
+    if (saveBtn) {
+      saveBtn.classList.remove('btn-secondary', 'save-passive');
+      saveBtn.classList.add('btn-success');
     }
-    const lastModifiedText = formatLocalDate(file.lastModified);
-    if (itemsReplaceSelected) {
-      itemsReplaceSelected.textContent = fmt(T.selectedReplacement, { name: file.name, modified: lastModifiedText });
-    }
-    if (itemsReplaceLastModified) itemsReplaceLastModified.value = String(file.lastModified || '');
   }
 
-  function loadPrefs() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      if (typeof saved.sortCol === 'number') prefs.sortCol = saved.sortCol;
-      if (saved.sortDir === 'asc' || saved.sortDir === 'desc') prefs.sortDir = saved.sortDir;
-      if (saved.widthMode === 'compact' || saved.widthMode === 'wide') prefs.widthMode = saved.widthMode;
-      if (typeof saved.filterText === 'string') prefs.filterText = saved.filterText;
-    } catch (e) {}
-  }
-
-  function savePrefs() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs)); } catch (e) {}
-  }
-
-  function setSaveDirty(dirty) {
-    isDirty = !!dirty;
-    if (!saveBtn) return;
-    saveBtn.classList.toggle('save-passive', !isDirty);
-    saveBtn.classList.toggle('btn-secondary', !isDirty);
-    saveBtn.classList.toggle('btn-primary', isDirty);
-  }
-
-  function clearHeaderIndicators() {
-    headers.forEach((h) => {
-      h.classList.remove('sort-asc');
-      h.classList.remove('sort-desc');
-    });
-  }
-
-  function cellValue(row, colIndex, sortType) {
-    const cell = row.cells[colIndex];
-    if (!cell) return '';
-    const checkbox = cell.querySelector('input[type="checkbox"]');
-    if (sortType === 'bool') return checkbox && checkbox.checked ? 1 : 0;
-    const input = cell.querySelector('input, select, textarea');
-    if (input) return (input.value || '').toLowerCase().trim();
-    return (cell.textContent || '').toLowerCase().trim();
-  }
-
-  function sortBy(colIndex, preserveDir) {
-    const th = headers[colIndex];
-    if (!th) return;
-    const sortType = th.dataset.sort || 'text';
-
-    if (preserveDir) {
-      prefs.sortCol = colIndex;
-    } else if (prefs.sortCol === colIndex) {
-      prefs.sortDir = prefs.sortDir === 'asc' ? 'desc' : 'asc';
-    } else {
-      prefs.sortCol = colIndex;
-      prefs.sortDir = 'asc';
-    }
-
-    const rows = Array.from(tbody.querySelectorAll('tr'));
-    rows.sort((a, b) => {
-      const av = cellValue(a, colIndex, sortType);
-      const bv = cellValue(b, colIndex, sortType);
-      if (av < bv) return prefs.sortDir === 'asc' ? -1 : 1;
-      if (av > bv) return prefs.sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
-    rows.forEach((r) => tbody.appendChild(r));
-
-    clearHeaderIndicators();
-    th.classList.add(prefs.sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
-    savePrefs();
-  }
-
-  function rowText(row) {
-    const inputs = Array.from(row.querySelectorAll('input[type="text"], input:not([type]), textarea, select'));
-    const parts = inputs.map((i) => (i.value || '').toLowerCase());
-    parts.push((row.textContent || '').toLowerCase());
-    return parts.join(' ');
-  }
-
-  function applyFilter(text) {
-    const needle = (text || '').toLowerCase().trim();
-    Array.from(tbody.querySelectorAll('tr')).forEach((row) => {
-      row.style.display = (!needle || rowText(row).includes(needle)) ? '' : 'none';
-    });
-    prefs.filterText = text || '';
-    savePrefs();
-  }
-
-  function applyWidthMode(mode) {
-    const safe = mode === 'wide' ? 'wide' : 'compact';
-    table.classList.remove('mode-compact', 'mode-wide');
-    table.classList.add(safe === 'wide' ? 'mode-wide' : 'mode-compact');
-    prefs.widthMode = safe;
-    if (widthBtn) widthBtn.textContent = safe === 'wide' ? T.compactView : T.wideView;
-    savePrefs();
-    syncStickyScrollbar();
-  }
-
-  let syncingFromWrap = false;
-  let syncingFromSticky = false;
   function syncStickyScrollbar() {
     if (!wrap || !stickyScroll || !stickyInner) return;
-    const hasOverflow = wrap.scrollWidth > wrap.clientWidth + 1;
-    if (!hasOverflow) {
-      stickyScroll.style.display = 'none';
-      stickyInner.style.width = '1px';
-      return;
-    }
-    stickyScroll.style.display = '';
-    stickyInner.style.width = `${wrap.scrollWidth}px`;
-    if (!syncingFromWrap) stickyScroll.scrollLeft = wrap.scrollLeft;
-  }
-
-  function setDefaultTypeForPlatform(platEl, typeEl) {
-    if (!platEl || !typeEl || platEl.disabled || typeEl.disabled) return;
-    if ((typeEl.value || '').trim()) return;
-    const p = (platEl.value || '').toLowerCase();
-    if (p === 'amazon') typeEl.value = 'amazon_sku';
-    if (p === 'ebay') typeEl.value = 'ebay_item_number';
-  }
-
-  function toggleDeleteRow(row, markDelete) {
-    if (!row) return;
-    const flag = row.querySelector('.delete-flag');
-    const delBtn = row.querySelector('.delete-row-btn');
-    const undoBtn = row.querySelector('.undo-row-btn');
-    if (!flag || !delBtn || !undoBtn) return;
-    if (markDelete) {
-      flag.value = 'on';
-      row.classList.add('pending-delete');
-      delBtn.style.display = 'none';
-      undoBtn.style.display = '';
+    const scrollWidth = wrap.scrollWidth;
+    const clientWidth = wrap.clientWidth;
+    if (scrollWidth > clientWidth + 4) {
+      stickyScroll.style.display = 'block';
+      stickyInner.style.width = `${scrollWidth}px`;
     } else {
-      flag.value = '';
-      row.classList.remove('pending-delete');
-      delBtn.style.display = '';
-      undoBtn.style.display = 'none';
+      stickyScroll.style.display = 'none';
     }
   }
-
-  function updateLinkPreviews() {
-    Array.from(tbody.querySelectorAll('tr')).forEach((row) => {
-      const platEl = row.querySelector('.link-platform');
-      const typeEl = row.querySelector('.link-id-type');
-      const valEl = row.querySelector('.link-id-value');
-      const prevEl = row.querySelector('.link-preview-cell');
-      if (!platEl || !typeEl || !valEl || !prevEl) return;
-      if (platEl.disabled || typeEl.disabled || valEl.disabled) {
-        prevEl.textContent = T.mergedRow;
-        return;
-      }
-
-      const plat = (platEl.value || '').toLowerCase();
-      const typ = (typeEl.value || '').toLowerCase();
-      const raw = (valEl.value || '').trim();
-      if (!plat || !raw) {
-        prevEl.textContent = '';
-        return;
-      }
-      const key = (plat === 'amazon' && (typ === 'amazon_asin' || typ === 'item_id')) ? raw.toUpperCase() : raw;
-      const hit = targets.find((t) =>
-        (t.platform || '').toLowerCase() === plat &&
-        (t.id_value || '') === key &&
-        (!typ || (t.id_type || '').toLowerCase() === typ)
-      );
-      prevEl.textContent = hit ? `${hit.platform} | ${hit.id_type} | ${hit.title || ''}` : T.noTargetFound;
-    });
-  }
-
-  function findHint(labelValue) {
-    const text = (labelValue || '').trim().toLowerCase();
-    if (!text) return null;
-    return labelHints.find((h) => ((h.label || '').trim().toLowerCase() === text)) || null;
-  }
-
-  async function maybeApplyHintToRow(row, labelValue) {
-    if (!row) return;
-    const hint = findHint(labelValue);
-    if (!hint) return;
-    const locInput = row.querySelector('input[name$="_location"]');
-    const asinInput = row.querySelector('input[name$="_amazon_asin"]');
-    if (locInput && (hint.location || '').trim()) {
-      const nextLoc = (hint.location || '').trim();
-      const curLoc = (locInput.value || '').trim();
-      if (!curLoc) {
-        locInput.value = nextLoc;
-      } else if (curLoc.toLowerCase() !== nextLoc.toLowerCase()) {
-        const okLoc = await showAppConfirm(fmt(T.hintConflictLocation, { current: curLoc, hint: nextLoc }));
-        if (okLoc) locInput.value = nextLoc;
-      }
-    }
-    if (asinInput && (hint.asin || '').trim()) {
-      const nextAsin = (hint.asin || '').trim().toUpperCase();
-      const curAsin = (asinInput.value || '').trim().toUpperCase();
-      if (!curAsin) {
-        asinInput.value = nextAsin;
-      } else if (curAsin !== nextAsin) {
-        const okAsin = await showAppConfirm(fmt(T.hintConflictAsin, { current: curAsin, hint: nextAsin }));
-        if (okAsin) asinInput.value = nextAsin;
-      }
-    }
-  }
-
-  headers.forEach((th, index) => th.addEventListener('click', () => sortBy(index, false)));
-  if (filterInput) filterInput.addEventListener('input', (e) => applyFilter(e.target.value || ''));
-  if (filterClearBtn) filterClearBtn.addEventListener('click', () => {
-    if (filterInput) filterInput.value = '';
-    applyFilter('');
-  });
-  if (widthBtn) widthBtn.addEventListener('click', () => applyWidthMode(prefs.widthMode === 'wide' ? 'compact' : 'wide'));
-  if (saveForm) {
-    saveForm.addEventListener('input', (e) => {
-      if (e.target && e.target.id === 'itemsFilter') return;
-      setSaveDirty(true);
-    });
-    saveForm.addEventListener('change', () => setSaveDirty(true));
-  }
-
-  tbody.addEventListener('input', (e) => {
-    if (e.target.classList && (e.target.classList.contains('link-platform') || e.target.classList.contains('link-id-type') || e.target.classList.contains('link-id-value'))) {
-      if (e.target.classList.contains('link-platform')) {
-        const row = e.target.closest('tr');
-        setDefaultTypeForPlatform(row ? row.querySelector('.link-platform') : null, row ? row.querySelector('.link-id-type') : null);
-      }
-      updateLinkPreviews();
-    }
-    if (e.target && e.target.name && e.target.name.endsWith('_custom_label')) {
-      const row = e.target.closest('tr');
-      void maybeApplyHintToRow(row, e.target.value || '');
-    }
-    setSaveDirty(true);
-  });
-
-  async function copyTextSafe(text) {
-    const val = (text || '').trim();
-    if (!val) return;
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(val);
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = val;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        ta.remove();
-      }
-    } catch (err) {}
-  }
-
-  tbody.addEventListener('click', async (e) => {
-    const clearBtn = e.target.closest('.clear-cell-btn');
-    if (clearBtn) {
-      const field = clearBtn.closest('.copy-field');
-      const input = field ? field.querySelector('input,textarea') : null;
-      if (input) {
-        input.value = '';
-        input.focus();
-        setSaveDirty(true);
-      }
-      return;
-    }
-
-    const copyBtn = e.target.closest('.copy-btn');
-    if (copyBtn) {
-      const field = copyBtn.closest('.copy-field');
-      const input = field ? field.querySelector('input,textarea') : null;
-      await copyTextSafe(input ? input.value : '');
-      return;
-    }
-
-    const delBtn = e.target.closest('.delete-row-btn');
-    if (delBtn) {
-      const row = delBtn.closest('tr');
-      if (await showAppConfirm(T.confirmDeleteRow)) {
-        toggleDeleteRow(row, true);
-        setSaveDirty(true);
-      }
-      return;
-    }
-
-    const undoBtn = e.target.closest('.undo-row-btn');
-    if (undoBtn) {
-      const row = undoBtn.closest('tr');
-      toggleDeleteRow(row, false);
-      setSaveDirty(true);
-    }
-  });
-
-  loadPrefs();
-  applyWidthMode(prefs.widthMode);
-  if (filterInput) filterInput.value = prefs.filterText;
-  applyFilter(prefs.filterText);
-  Array.from(tbody.querySelectorAll('tr')).forEach((row) => {
-    setDefaultTypeForPlatform(row.querySelector('.link-platform'), row.querySelector('.link-id-type'));
-  });
-  updateLinkPreviews();
-  setSaveDirty(false);
 
   if (wrap && stickyScroll) {
     wrap.addEventListener('scroll', () => {
-      if (syncingFromSticky) return;
-      syncingFromWrap = true;
-      stickyScroll.scrollLeft = wrap.scrollLeft;
-      syncingFromWrap = false;
+      if (Math.abs(stickyScroll.scrollLeft - wrap.scrollLeft) > 2) stickyScroll.scrollLeft = wrap.scrollLeft;
     });
     stickyScroll.addEventListener('scroll', () => {
-      if (syncingFromWrap) return;
-      syncingFromSticky = true;
-      wrap.scrollLeft = stickyScroll.scrollLeft;
-      syncingFromSticky = false;
+      if (Math.abs(wrap.scrollLeft - stickyScroll.scrollLeft) > 2) wrap.scrollLeft = stickyScroll.scrollLeft;
+    });
+    window.addEventListener('resize', syncStickyScrollbar);
+    syncStickyScrollbar();
+  }
+
+  let prefs = {};
+  try { prefs = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch {}
+  const wide = !!prefs.wide;
+  table.classList.toggle('mode-wide', wide);
+  table.classList.toggle('mode-compact', !wide);
+  if (widthBtn) widthBtn.textContent = wide ? T.compactView : T.wideView;
+  widthBtn?.addEventListener('click', () => {
+    const isWide = table.classList.toggle('mode-wide');
+    table.classList.toggle('mode-compact', !isWide);
+    widthBtn.textContent = isWide ? T.compactView : T.wideView;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...prefs, wide: isWide }));
+    syncStickyScrollbar();
+  });
+
+  const rows = Array.from(table.querySelectorAll('tbody tr'));
+  function applyFilter() {
+    const q = (filterInput?.value || '').trim().toLowerCase();
+    rows.forEach((row) => {
+      row.style.display = !q || row.textContent.toLowerCase().includes(q) ? '' : 'none';
     });
   }
-  window.addEventListener('resize', syncStickyScrollbar);
-  syncStickyScrollbar();
+  filterInput?.addEventListener('input', applyFilter);
+  filterClearBtn?.addEventListener('click', () => { if (filterInput) filterInput.value = ''; applyFilter(); });
 
-  if (rawPageMessage.toLowerCase().startsWith('backup created:') && translatedPageMessage) {
-    showAppAlert(translatedPageMessage);
-  }
-
-  if (prefs.sortCol >= 0) sortBy(prefs.sortCol, true);
-
-  function normalizeLink(raw) {
-    const text = (raw || '').trim();
-    if (!text) return '';
-    if (/^https?:\/\//i.test(text)) return text;
-    return `https://${text}`;
+  function visibleRows() {
+    return Array.from(table.tBodies[0]?.rows || []).filter((row) => row.style.display !== 'none');
   }
 
-  if (sharedLinkInput) {
-    try {
-      const saved = localStorage.getItem(SHARED_LINK_KEY) || '';
-      if (saved) sharedLinkInput.value = saved;
-    } catch (e) {}
+  function focusCellInput(row, cellIndex) {
+    const cell = row?.cells?.[cellIndex];
+    const input = cell?.querySelector('input, textarea, select');
+    if (!input) return;
+    input.focus();
+    if (typeof input.select === 'function') input.select();
   }
 
-  bindFriendlyFileInput(stageImportInput, stageImportChooseBtn, stageImportName, T.noStageImport);
-  bindFriendlyFileInput(itemsHintsInput, itemsHintsChooseBtn, itemsHintsName, T.noHints);
+  table.addEventListener('keydown', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    const cell = target.closest('td');
+    const row = target.closest('tr');
+    if (!cell || !row) return;
+    event.preventDefault();
+    const rowsNow = visibleRows();
+    const rowIndex = rowsNow.indexOf(row);
+    if (rowIndex < 0 || !rowsNow.length) return;
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    const nextIndex = (rowIndex + direction + rowsNow.length) % rowsNow.length;
+    focusCellInput(rowsNow[nextIndex], cell.cellIndex);
+  });
 
-  if (itemsReplaceChooseBtn && itemsReplaceInput) {
-    itemsReplaceChooseBtn.addEventListener('click', () => itemsReplaceInput.click());
-  }
-  if (itemsReplaceDropzone && itemsReplaceInput) {
-    itemsReplaceDropzone.addEventListener('click', () => itemsReplaceInput.click());
-    itemsReplaceDropzone.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        itemsReplaceInput.click();
-      }
-    });
-    itemsReplaceDropzone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      itemsReplaceDropzone.classList.add('drag-over');
-    });
-    itemsReplaceDropzone.addEventListener('dragleave', () => itemsReplaceDropzone.classList.remove('drag-over'));
-    itemsReplaceDropzone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      itemsReplaceDropzone.classList.remove('drag-over');
-      const files = e.dataTransfer && e.dataTransfer.files;
-      if (!files || !files.length) return;
-      itemsReplaceInput.files = files;
-      describeReplaceFile(files[0]);
-    });
-  }
-  if (itemsReplaceInput) {
-    itemsReplaceInput.addEventListener('change', () => describeReplaceFile(itemsReplaceInput.files && itemsReplaceInput.files[0]));
-    describeReplaceFile(itemsReplaceInput.files && itemsReplaceInput.files[0]);
-  }
-  if (itemsReplaceForm && itemsReplaceInput) {
-    itemsReplaceForm.addEventListener('submit', async (e) => {
-      const file = itemsReplaceInput.files && itemsReplaceInput.files[0];
-      if (!file) {
-        e.preventDefault();
-        showAppAlert(T.chooseReplacementFirst);
-        return;
-      }
-      const incomingTime = formatLocalDate(file.lastModified);
-      const currentTime = formatLocalDate(currentItemsCsvModified);
-      const ok = await showAppConfirm(fmt(T.replaceMainConfirm, { name: file.name, incoming: incomingTime, current: currentTime }));
-      if (!ok) e.preventDefault();
-    });
-  }
-  if (openAppRootBtn && openAppRootForm) {
-    openAppRootBtn.addEventListener('click', () => openAppRootForm.submit());
-  }
-  if (saveSharedLinkBtn && sharedLinkInput) {
-    saveSharedLinkBtn.addEventListener('click', () => {
-      const normalized = normalizeLink(sharedLinkInput.value);
-      if (!normalized) {
-        showAppAlert(T.pasteLinkFirst);
-        return;
-      }
-      sharedLinkInput.value = normalized;
-      try { localStorage.setItem(SHARED_LINK_KEY, normalized); } catch (e) {}
-    });
-  }
-
-  document.querySelectorAll('form[action="/items/clear-needs-review"]').forEach((form) => {
-    form.addEventListener('submit', async (e) => {
-      const modeInput = form.querySelector('input[name="mode"]');
-      const autoCount = Number('{{ auto_added_review_count or 0 }}');
-      if (!modeInput) return;
-      e.preventDefault();
-      if (autoCount > 0) {
-        const proceed = await showAppConfirm(T.clearReviewProceed);
-        if (!proceed) return;
-        const deleteAuto = await showAppConfirm(T.deleteAutoAdded);
-        modeInput.value = deleteAuto ? 'delete_auto_added' : 'clear_flags';
-      } else {
-        modeInput.value = 'clear_flags';
-      }
-      form.submit();
+  Array.from(table.querySelectorAll('th[data-sort]')).forEach((th, index) => {
+    th.addEventListener('click', () => {
+      const tbody = table.tBodies[0];
+      const dir = th.classList.contains('sort-asc') ? 'desc' : 'asc';
+      Array.from(table.querySelectorAll('th')).forEach((x) => x.classList.remove('sort-asc', 'sort-desc'));
+      th.classList.add(dir === 'asc' ? 'sort-asc' : 'sort-desc');
+      Array.from(tbody.rows).sort((a, b) => {
+        const av = (a.cells[index]?.querySelector('input,select')?.value || a.cells[index]?.textContent || '').trim().toLowerCase();
+        const bv = (b.cells[index]?.querySelector('input,select')?.value || b.cells[index]?.textContent || '').trim().toLowerCase();
+        return dir === 'asc' ? av.localeCompare(bv, undefined, { numeric: true }) : bv.localeCompare(av, undefined, { numeric: true });
+      }).forEach((row) => tbody.appendChild(row));
     });
   });
 
-  if (openSharedLinkBtn && sharedLinkInput) {
-    openSharedLinkBtn.addEventListener('click', () => {
-      const normalized = normalizeLink(sharedLinkInput.value);
-      if (!normalized) {
-        showAppAlert(T.pasteLinkFirst);
-        return;
-      }
-      sharedLinkInput.value = normalized;
-      try { localStorage.setItem(SHARED_LINK_KEY, normalized); } catch (e) {}
-      window.open(normalized, '_blank', 'noopener');
+  const columnStateKey = STORAGE_KEY + ':columns';
+  function getColumnState() {
+    try { return JSON.parse(localStorage.getItem(columnStateKey) || '{}'); } catch { return {}; }
+  }
+  function saveColumnState(state) {
+    try { localStorage.setItem(columnStateKey, JSON.stringify(state)); } catch {}
+  }
+  function moveColumn(fromIndex, toIndex) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    Array.from(table.rows).forEach((row) => {
+      const cells = Array.from(row.children);
+      if (fromIndex >= cells.length || toIndex >= cells.length) return;
+      const moving = cells[fromIndex];
+      const anchor = cells[toIndex];
+      if (!moving || !anchor || moving === anchor) return;
+      if (fromIndex < toIndex) anchor.after(moving);
+      else anchor.before(moving);
+    });
+    syncStickyScrollbar();
+  }
+  function persistColumnOrder() {
+    const state = getColumnState();
+    state.order = Array.from(table.querySelectorAll('thead th')).map((th) => th.dataset.colKey || '');
+    saveColumnState(state);
+  }
+  function applySavedColumnOrder() {
+    const order = Array.isArray(getColumnState().order) ? getColumnState().order : [];
+    if (!order.length) return;
+    order.forEach((key, targetIndex) => {
+      const currentHeaders = Array.from(table.querySelectorAll('thead th'));
+      const fromIndex = currentHeaders.findIndex((th) => th.dataset.colKey === key);
+      if (fromIndex >= 0) moveColumn(fromIndex, targetIndex);
     });
   }
+  function setColumnWidth(index, width) {
+    const safeWidth = Math.max(120, Math.round(width));
+    Array.from(table.rows).forEach((row) => {
+      const cell = row.children[index];
+      if (!cell) return;
+      cell.style.width = `${safeWidth}px`;
+      cell.style.minWidth = `${safeWidth}px`;
+    });
+    syncStickyScrollbar();
+  }
+  function applySavedColumnWidths() {
+    const widths = getColumnState().widths || {};
+    Array.from(table.querySelectorAll('thead th')).forEach((th, index) => {
+      const width = Number(widths[th.dataset.colKey || '']);
+      if (width > 0) setColumnWidth(index, width);
+    });
+  }
+  applySavedColumnOrder();
+  applySavedColumnWidths();
+
+  let dragColKey = '';
+  table.querySelectorAll('thead th').forEach((th) => {
+    th.draggable = true;
+    const resizeHandle = document.createElement('span');
+    resizeHandle.className = 'col-resize-handle';
+    th.appendChild(resizeHandle);
+
+    th.addEventListener('dragstart', (event) => {
+      dragColKey = th.dataset.colKey || '';
+      th.classList.add('is-dragging');
+      event.dataTransfer?.setData('text/plain', dragColKey);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+    });
+    th.addEventListener('dragend', () => {
+      dragColKey = '';
+      table.querySelectorAll('thead th').forEach((header) => header.classList.remove('is-dragging', 'drag-target-left', 'drag-target-right'));
+    });
+    th.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      if (!dragColKey || dragColKey === th.dataset.colKey) return;
+      const rect = th.getBoundingClientRect();
+      const before = (event.clientX - rect.left) < (rect.width / 2);
+      th.classList.toggle('drag-target-left', before);
+      th.classList.toggle('drag-target-right', !before);
+    });
+    th.addEventListener('dragleave', () => {
+      th.classList.remove('drag-target-left', 'drag-target-right');
+    });
+    th.addEventListener('drop', (event) => {
+      event.preventDefault();
+      const sourceKey = dragColKey || event.dataTransfer?.getData('text/plain') || '';
+      const headers = Array.from(table.querySelectorAll('thead th'));
+      const fromIndex = headers.findIndex((header) => header.dataset.colKey === sourceKey);
+      const rawToIndex = headers.findIndex((header) => header === th);
+      if (fromIndex < 0 || rawToIndex < 0) return;
+      const rect = th.getBoundingClientRect();
+      const before = (event.clientX - rect.left) < (rect.width / 2);
+      const toIndex = before ? rawToIndex : rawToIndex + 1 - (fromIndex < rawToIndex ? 1 : 0);
+      moveColumn(fromIndex, Math.max(0, Math.min(headers.length - 1, toIndex)));
+      persistColumnOrder();
+      table.querySelectorAll('thead th').forEach((header) => header.classList.remove('drag-target-left', 'drag-target-right'));
+    });
+
+    resizeHandle.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const startX = event.clientX;
+      const startWidth = th.getBoundingClientRect().width;
+      const colKey = th.dataset.colKey || '';
+      const headerIndex = Array.from(table.querySelectorAll('thead th')).indexOf(th);
+      const onMove = (moveEvent) => setColumnWidth(headerIndex, startWidth + (moveEvent.clientX - startX));
+      const onUp = (upEvent) => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        const state = getColumnState();
+        state.widths = state.widths || {};
+        state.widths[colKey] = Math.max(120, Math.round(startWidth + (upEvent.clientX - startX)));
+        saveColumnState(state);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
+
+  table.querySelectorAll('input, select, textarea').forEach((el) => {
+    el.addEventListener('input', markDirty);
+    el.addEventListener('change', markDirty);
+  });
+
+  table.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const input = btn.parentElement?.querySelector('input');
+      if (!input) return;
+      try { await navigator.clipboard.writeText(input.value || ''); } catch {}
+    });
+  });
+
+  table.querySelectorAll('.clear-cell-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const input = btn.parentElement?.querySelector('input');
+      if (!input) return;
+      input.value = '';
+      input.focus();
+      markDirty();
+    });
+  });
+
+  table.querySelectorAll('.delete-row-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const row = btn.closest('tr');
+      const flag = row?.querySelector('.delete-flag');
+      const undo = row?.querySelector('.undo-row-btn');
+      if (!row || !flag || !undo) return;
+      const ok = await window.showAppConfirm(T.confirmDeleteRow);
+      if (!ok) return;
+      flag.value = 'on';
+      row.classList.add('pending-delete');
+      btn.style.display = 'none';
+      undo.style.display = 'inline-block';
+      markDirty();
+    });
+  });
+
+  table.querySelectorAll('.undo-row-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const row = btn.closest('tr');
+      const flag = row?.querySelector('.delete-flag');
+      const del = row?.querySelector('.delete-row-btn');
+      if (!row || !flag || !del) return;
+      flag.value = '';
+      row.classList.remove('pending-delete');
+      btn.style.display = 'none';
+      del.style.display = 'inline-block';
+      markDirty();
+    });
+  });
+  document.addEventListener('click', async (e) => {
+    const hintBtn = e.target.closest('.apply-hint-btn');
+    if (hintBtn) {
+      const actionWrap = hintBtn.closest('.apply-hint-action');
+      const row = hintBtn.closest('tr');
+      if (!actionWrap || !row) return;
+      const previousHintHtml = hintBtn.closest('td') ? hintBtn.closest('td').innerHTML : '';
+      const previousValues = {
+        custom_label: row.querySelector('[name$="_custom_label"]')?.value || '',
+        location: row.querySelector('[name$="_location"]')?.value || '',
+        ebay_item_number: row.querySelector('[name$="_ebay_item_number"]')?.value || '',
+        amazon_asin: row.querySelector('[name$="_amazon_asin"]')?.value || '',
+      };
+      const setField = (name, value) => {
+        const input = row.querySelector('[name$="_' + name + '"]');
+        if (input && typeof value === 'string') input.value = value;
+      };
+      hintBtn.disabled = true;
+      hintBtn.classList.add('btn-disabled');
+      try {
+        const formData = new FormData();
+        formData.append('row_key', actionWrap.dataset.rowKey || '');
+        formData.append('source_page', actionWrap.dataset.sourcePage || 'items');
+        const response = await fetch('/items/apply-hint', {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          body: formData,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) {
+          await window.showAppAlert(data.error || T.noNewHintFields);
+          hintBtn.disabled = false;
+          hintBtn.classList.remove('btn-disabled');
+          return;
+        }
+        const updated = data.updated || {};
+        setField('custom_label', updated.custom_label ?? previousValues.custom_label);
+        setField('location', updated.location ?? previousValues.location);
+        setField('ebay_item_number', updated.ebay_item_number ?? previousValues.ebay_item_number);
+        setField('amazon_asin', updated.amazon_asin ?? previousValues.amazon_asin);
+        if (updated.platform) {
+          const platformCell = row.cells[0];
+          if (platformCell) {
+            platformCell.lastChild.textContent = updated.platform === 'amazon' ? T.platformAmazon : updated.platform === 'ebay' ? T.platformEbay : updated.platform === 'both' ? T.platformBoth : updated.platform;
+          }
+        }
+        const hintCell = hintBtn.closest('td');
+        if (hintCell) {
+          hintCell.innerHTML = '<div class="assist-box"><div class="assist-title">' + T.hintAppliedTitle + '</div><div class="assist-sub">' + T.hintAppliedSub + '</div><button type="button" class="btn btn-outline items-action-btn btn-compact undo-hint-btn">' + T.undoHint + '</button></div>';
+          markDirty();
+          const undoBtn = hintCell.querySelector('.undo-hint-btn');
+          undoBtn?.addEventListener('click', async () => {
+            setField('custom_label', previousValues.custom_label);
+            setField('location', previousValues.location);
+            setField('ebay_item_number', previousValues.ebay_item_number);
+            setField('amazon_asin', previousValues.amazon_asin);
+            hintCell.innerHTML = previousHintHtml;
+            markDirty();
+          });
+        }
+      } catch (err) {
+        await window.showAppAlert(T.noNewHintFields);
+        hintBtn.disabled = false;
+        hintBtn.classList.remove('btn-disabled');
+      }
+      return;
+    }
+
+    const mergeBtn = e.target.closest('.merge-btn');
+    if (!mergeBtn) return;
+    const form = mergeBtn.closest('.merge-form');
+    if (!form) return;
+    const select = form.querySelector('.merge-select');
+    if (!select || !select.value) {
+      await window.showAppAlert(T.chooseTarget);
+      return;
+    }
+    const rowKey = String(form.dataset.rowKey || '');
+    const targetKey = String(select.value || '');
+    try {
+      const params = new URLSearchParams({ row_key: rowKey, target_key: targetKey });
+      const response = await fetch('/items/merge-preview?' + params.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok || !data.preview) {
+        await window.showAppAlert(data.error || T.mergePreviewError);
+        return;
+      }
+      const preview = data.preview;
+      if (mergePreviewBody) {
+        mergePreviewBody.innerHTML = [
+          mergeRowHtml(T.mergeOldA, 'merge-preview-row-old', preview.primary || {}),
+          mergeRowHtml(T.mergeOldB, 'merge-preview-row-old', preview.secondary || {}),
+          mergeRowHtml(T.mergeNew, 'merge-preview-row-new', preview.merged || {}),
+        ].join('');
+      }
+      pendingMergePayload = { rowKey, targetKey, sourcePage: String(form.dataset.sourcePage || 'items') };
+      if (mergePreviewModal) mergePreviewModal.hidden = false;
+    } catch (err) {
+      await window.showAppAlert(T.mergePreviewError);
+    }
+  });
+
+  const mergePreviewModal = document.getElementById('mergePreviewModal');
+  const mergePreviewBody = document.getElementById('mergePreviewBody');
+  const mergePreviewClose = document.getElementById('mergePreviewClose');
+  const mergePreviewCancel = document.getElementById('mergePreviewCancel');
+  const mergePreviewConfirm = document.getElementById('mergePreviewConfirm');
+  let pendingMergePayload = null;
+
+  function platformLabel(value) {
+    if (value === 'amazon') return T.platformAmazon;
+    if (value === 'ebay') return T.platformEbay;
+    if (value === 'both') return T.platformBoth;
+    return value || '';
+  }
+
+  function mergeRowHtml(versionLabel, cssClass, row) {
+    const safe = (value) => String(value || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+    return `
+      <tr class="${cssClass}">
+        <td class="${cssClass === 'merge-preview-row-new' ? 'merge-preview-version-new' : 'merge-preview-version-old'}">${safe(versionLabel)}</td>
+        <td>${safe(platformLabel(row.platform || ''))}</td>
+        <td>${safe(row.ebay_item_number || '')}</td>
+        <td>${safe(row.amazon_sku || '')}</td>
+        <td>${safe(row.amazon_asin || '')}</td>
+        <td>${safe(row.item_title || '')}</td>
+        <td>${safe(row.custom_label || '')}</td>
+        <td>${safe(row.variation_options || '')}</td>
+        <td>${safe(row.location || '')}</td>
+      </tr>`;
+  }
+
+  function closeMergePreview() {
+    pendingMergePayload = null;
+    if (mergePreviewBody) mergePreviewBody.innerHTML = '';
+    if (mergePreviewModal) mergePreviewModal.hidden = true;
+  }
+
+  mergePreviewClose?.addEventListener('click', closeMergePreview);
+  mergePreviewCancel?.addEventListener('click', closeMergePreview);
+  mergePreviewModal?.addEventListener('click', (e) => {
+    if (e.target === mergePreviewModal) closeMergePreview();
+  });
+  mergePreviewConfirm?.addEventListener('click', () => {
+    const payload = pendingMergePayload;
+    closeMergePreview();
+    if (!payload) return;
+    const submitForm = document.createElement('form');
+    submitForm.method = 'POST';
+    submitForm.action = '/items/merge';
+    submitForm.style.display = 'none';
+    [
+      ['row_key', payload.rowKey],
+      ['target_key', payload.targetKey],
+      ['source_page', payload.sourcePage],
+    ].forEach(([name, value]) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value || '';
+      submitForm.appendChild(input);
+    });
+    document.body.appendChild(submitForm);
+    submitForm.submit();
+  });
+
+
+
+  if (clearNeedsReviewForm) {
+    clearNeedsReviewForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const ok = await window.showAppConfirm(T.clearReviewProceed);
+      if (!ok) return;
+      const autoCount = Number('{{ auto_added_review_count or 0 }}');
+      clearNeedsReviewMode.value = 'clear_flags';
+      if (autoCount > 0) {
+        const deleteAuto = await window.showAppConfirm(T.deleteAutoAdded);
+        clearNeedsReviewMode.value = deleteAuto ? 'delete_auto_added' : 'clear_flags';
+      }
+      clearNeedsReviewForm.submit();
+    });
+  }
+
+  function bindChooser(input, button, labelEl, emptyText) {
+    button?.addEventListener('click', () => input?.click());
+    input?.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (labelEl) labelEl.textContent = file ? file.name : emptyText;
+    });
+  }
+  bindChooser(stageImportInput, stageImportChooseBtn, stageImportName, T.noStageImport);
+  bindChooser(itemsHintsInput, itemsHintsChooseBtn, itemsHintsName, T.noHints);
+  bindChooser(itemsReplaceInput, itemsReplaceChooseBtn, itemsReplaceSelected, fmt(T.currentMainFile, { path: {{ items_csv_path|tojson }} }));
+
+  itemsReplaceDropzone?.addEventListener('click', () => itemsReplaceInput?.click());
+  itemsReplaceDropzone?.addEventListener('dragover', (e) => { e.preventDefault(); itemsReplaceDropzone.classList.add('drag-over'); });
+  itemsReplaceDropzone?.addEventListener('dragleave', () => itemsReplaceDropzone.classList.remove('drag-over'));
+  itemsReplaceDropzone?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    itemsReplaceDropzone.classList.remove('drag-over');
+    const file = e.dataTransfer?.files?.[0];
+    if (!file || !itemsReplaceInput) return;
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    itemsReplaceInput.files = dt.files;
+    itemsReplaceSelected.textContent = fmt(T.selectedReplacement, { name: file.name });
+  });
+  itemsReplaceForm?.addEventListener('submit', async (e) => {
+    if (!itemsReplaceInput?.files?.length) {
+      e.preventDefault();
+      await window.showAppAlert(T.chooseReplacementFirst);
+    }
+  });
+
+  openAppRootBtn?.addEventListener('click', async () => {
+    try {
+      const resp = await fetch('/open', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: new URLSearchParams({ target: 'app_root' }) });
+      if (!resp.ok) await window.showAppAlert(T.openFolderFailed);
+    } catch (err) {
+      await window.showAppAlert(T.openFolderFailed);
+    }
+  });
+
+  openBackupsBtn?.addEventListener('click', async () => {
+    try {
+      const resp = await fetch('/items/open-backups', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: new URLSearchParams({ from_page: 'items' }) });
+      if (!resp.ok) await window.showAppAlert(T.openFolderFailed);
+    } catch (err) {
+      await window.showAppAlert(T.openFolderFailed);
+    }
+  });
+
+  try {
+    const saved = localStorage.getItem(SHARED_LINK_KEY) || '';
+    if (sharedLinkInput && saved) sharedLinkInput.value = saved;
+  } catch {}
+  saveSharedSheetLink?.addEventListener('click', () => {
+    if (!sharedLinkInput) return;
+    try { localStorage.setItem(SHARED_LINK_KEY, sharedLinkInput.value || ''); } catch {}
+  });
+  openSharedSheetLink?.addEventListener('click', async () => {
+    const value = (sharedLinkInput?.value || '').trim();
+    if (!value) {
+      await window.showAppAlert(T.pasteLinkFirst);
+      return;
+    }
+    window.open(value, '_blank', 'noopener');
+  });
 })();
 </script>
 {% endblock %}
+
+
 
 
 

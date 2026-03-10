@@ -1,18 +1,18 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <section class="card">
   <h2>{{ tr("Unprocessed Label Queue") }}</h2>
-  <p style="margin:4px 0 10px;color:#4e6355;font-size:13px;">
+  <p style="margin:4px 0 6px;color:#4e6355;font-size:13px;">
     {{ tr("Variation-choice items are shown separately from regular match issues.") }}
+  </p>
+  <p style="margin:0 0 10px;color:#4e6355;font-size:13px;">
+    {{ tr("Resolved outputs go straight back into the latest batch. Once this queue reaches 0, head back to the dashboard and click Open Combined PDF.") }}
   </p>
 
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-    <form id="variationSaveAllForm" action="/resolve/save-all-variations" method="post">
+    <form id="variationSaveAllForm" action="/resolve/save-process-all-variations" method="post">
       <div id="variationHiddenInputs"></div>
-      <button class="btn btn-md btn-primary" type="submit">{{ tr("Save All Variation Choices") }}</button>
-    </form>
-    <form action="/resolve/generate-selected-variations" method="post">
-      <button class="btn btn-md btn-primary" type="submit">{{ tr("Generate Outputs For Saved Variation Choices") }}</button>
+      <button class="btn btn-md btn-primary" type="submit">{{ tr("Save and Process All Variation Choices") }}</button>
     </form>
     <form action="/resolve/clear" method="post" data-confirm="{{ tr('Clear all unresolved queue items?') }}">
       <button class="btn btn-md btn-secondary" type="submit">{{ tr("Clear Queue") }}</button>
@@ -45,9 +45,8 @@
               <option value="{{ opt }}" {% if row.selected_variation == opt %}selected{% endif %}>{{ opt }}</option>
               {% endfor %}
             </select>
-            <button class="btn btn-sm btn-primary variation-confirm" type="button" {% if row.selected_variation %}style="display:none;"{% endif %}>{{ tr("Confirm") }}</button>
-            <span class="variation-confirmed" style="{% if not row.selected_variation %}display:none;{% endif %}color:#2f6b45;font-weight:700;">{{ tr("Confirm") }}</span>
-            <button class="btn btn-sm btn-secondary variation-undo" type="button" style="{% if not row.selected_variation %}display:none;{% endif %}">x</button>
+            <span class="variation-confirmed" style="{% if not row.selected_variation %}display:none;{% endif %}color:#2f6b45;font-weight:700;">{{ tr("Saved") }}</span>
+            <button class="btn btn-sm variation-undo" type="button" style="{% if not row.selected_variation %}display:none;{% endif %}background:#c63a3a;color:#fff;border:1px solid #a52828;">X</button>
           </div>
           <form action="/resolve/remove" method="post" data-confirm="{{ tr('Remove this queue item?') }}" style="margin-top:6px;">
             <input type="hidden" name="label_pdf" value="{{ row.label_pdf }}">
@@ -136,37 +135,49 @@
   document.querySelectorAll('.variation-row').forEach((row) => {
     const orderSel = row.querySelector('.variation-order');
     const choiceSel = row.querySelector('.variation-choice');
-    const confirmBtn = row.querySelector('.variation-confirm');
     const undoBtn = row.querySelector('.variation-undo');
     const confirmed = row.querySelector('.variation-confirmed');
     const labelPdf = row.getAttribute('data-label-pdf') || '';
+
+    function applyChoice() {
+      const orderId = orderSel ? orderSel.value : '';
+      const choice = choiceSel ? choiceSel.value : '';
+      if (!choice) {
+        setHidden(labelPdf, '', '');
+        if (confirmed) confirmed.style.display = 'none';
+        if (undoBtn) undoBtn.style.display = 'none';
+        if (orderSel) orderSel.disabled = false;
+        if (choiceSel) choiceSel.disabled = false;
+        return;
+      }
+      if (orderSel) orderSel.disabled = true;
+      if (choiceSel) choiceSel.disabled = true;
+      if (confirmed) confirmed.style.display = '';
+      if (undoBtn) undoBtn.style.display = '';
+      setHidden(labelPdf, orderId, choice);
+    }
 
     const initOrder = row.getAttribute('data-initial-order') || (orderSel ? orderSel.value : '');
     const initChoice = row.getAttribute('data-initial-choice') || (choiceSel ? choiceSel.value : '');
     if (initChoice) setHidden(labelPdf, initOrder, initChoice);
 
-    if (confirmBtn) {
-      confirmBtn.addEventListener('click', () => {
-        const orderId = orderSel ? orderSel.value : '';
-        const choice = choiceSel ? choiceSel.value : '';
-        if (!choice) {
+    if (choiceSel) {
+      choiceSel.addEventListener('change', () => {
+        if (!choiceSel.value) {
           showAppAlert(chooseVariationMessage);
           return;
         }
-        if (orderSel) orderSel.disabled = true;
-        if (choiceSel) choiceSel.disabled = true;
-        confirmBtn.style.display = 'none';
-        if (confirmed) confirmed.style.display = '';
-        if (undoBtn) undoBtn.style.display = '';
-        setHidden(labelPdf, orderId, choice);
+        applyChoice();
       });
     }
 
     if (undoBtn) {
       undoBtn.addEventListener('click', () => {
         if (orderSel) orderSel.disabled = false;
-        if (choiceSel) choiceSel.disabled = false;
-        if (confirmBtn) confirmBtn.style.display = '';
+        if (choiceSel) {
+          choiceSel.disabled = false;
+          choiceSel.value = '';
+        }
         if (confirmed) confirmed.style.display = 'none';
         undoBtn.style.display = 'none';
         setHidden(labelPdf, '', '');

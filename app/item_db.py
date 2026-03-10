@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import csv
 import json
@@ -181,7 +181,7 @@ def _merge_two_rows(base: dict[str, str], other: dict[str, str]) -> dict[str, st
             out[key] = other[key]
 
     # Prefer populated business fields.
-    for key in ["custom_label", "location", "linked_platform", "linked_id_type", "linked_id_value", "needs_review_reason"]:
+    for key in ["custom_label", "location", "needs_review_reason"]:
         if not out.get(key) and other.get(key):
             out[key] = other[key]
     if not out.get("variation_options") and other.get("variation_options"):
@@ -435,12 +435,6 @@ class ItemDB:
             if legacy:
                 if row.get("platform") in ("ebay", "both"):
                     idx[("ebay", legacy)] = row
-
-            # Explicit manual cross-platform link alias.
-            lp = (row.get("linked_platform") or "").strip().lower()
-            lv = (row.get("linked_id_value") or "").strip()
-            if lp in ("amazon", "ebay") and lv:
-                idx[(lp, lv.upper() if lp == "amazon" else lv)] = row
         return idx
 
     def _find_row(self, rows: list[dict[str, str]], platform: str, ident: str) -> dict[str, str] | None:
@@ -509,7 +503,6 @@ class ItemDB:
 
     def update_rows_from_form(self, form: dict[str, str]) -> tuple[int, int]:
         rows = self.load_rows()
-        toggles = ["show_title"]
         kept: list[dict[str, str]] = [dict(r) for r in rows]
         deleted = 0
         source_page = (form.get("source_page", "") or "").strip().lower()
@@ -543,9 +536,6 @@ class ItemDB:
                 row["custom_label"] = form.get(prefix + "_custom_label", row.get("custom_label", "")).strip()
                 row["variation_options"] = form.get(prefix + "_variation_options", row.get("variation_options", "")).strip()
                 row["location"] = form.get(prefix + "_location", row.get("location", "")).strip()
-                row["linked_platform"] = form.get(prefix + "_linked_platform", row.get("linked_platform", "")).strip().lower()
-                row["linked_id_type"] = form.get(prefix + "_linked_id_type", row.get("linked_id_type", "")).strip().lower()
-                row["linked_id_value"] = form.get(prefix + "_linked_id_value", row.get("linked_id_value", "")).strip()
                 row["needs_review_reason"] = form.get(prefix + "_needs_review_reason", row.get("needs_review_reason", "")).strip()
                 row["show_label"] = "1"
                 row["show_qty"] = "1"
@@ -554,8 +544,6 @@ class ItemDB:
                 if source_page == "review":
                     row["needs_review"] = "0"
                     row["needs_review_reason"] = ""
-                for t in toggles:
-                    row[t] = "1" if form.get(prefix + "_" + t) == "on" else "0"
                 row.update(_normalize_row(row))
 
             if delete_keys:
@@ -577,9 +565,6 @@ class ItemDB:
                 row["custom_label"] = form.get(prefix + "custom_label", row.get("custom_label", "")).strip()
                 row["variation_options"] = form.get(prefix + "variation_options", row.get("variation_options", "")).strip()
                 row["location"] = form.get(prefix + "location", row.get("location", "")).strip()
-                row["linked_platform"] = form.get(prefix + "linked_platform", row.get("linked_platform", "")).strip().lower()
-                row["linked_id_type"] = form.get(prefix + "linked_id_type", row.get("linked_id_type", "")).strip().lower()
-                row["linked_id_value"] = form.get(prefix + "linked_id_value", row.get("linked_id_value", "")).strip()
                 row["needs_review_reason"] = form.get(prefix + "needs_review_reason", row.get("needs_review_reason", "")).strip()
                 row["show_label"] = "1"
                 row["show_qty"] = "1"
@@ -588,13 +573,95 @@ class ItemDB:
                 if source_page == "review":
                     row["needs_review"] = "0"
                     row["needs_review_reason"] = ""
-                for t in toggles:
-                    row[t] = "1" if form.get(prefix + t) == "on" else "0"
                 row.update(_normalize_row(row))
                 fallback_kept.append(row)
             kept = fallback_kept
         self.save_rows(kept)
         return len(kept), deleted
+
+    def apply_hint_to_row(self, row_key: str, hint: dict[str, str]) -> dict[str, Any] | None:
+        rows = self.load_rows()
+        changed_fields: dict[str, str] = {}
+        for row in rows:
+            if self._row_identity(row) != row_key:
+                continue
+            label = str(hint.get("label", "") or "").strip()
+            location = str(hint.get("location", "") or "").strip()
+            ebay = self._extract_ebay_id(str(hint.get("ebay_item_number", "") or ""))
+            asin = self._extract_asin_any(str(hint.get("asin", "") or ""), "")
+
+            if label and not str(row.get("custom_label", "") or "").strip():
+                row["custom_label"] = label
+                changed_fields["custom_label"] = label
+            if location and not str(row.get("location", "") or "").strip():
+                row["location"] = location
+                changed_fields["location"] = location
+            if ebay and not str(row.get("ebay_item_number", "") or "").strip():
+                row["ebay_item_number"] = ebay
+                changed_fields["ebay_item_number"] = ebay
+            if asin and not str(row.get("amazon_asin", "") or "").strip():
+                row["amazon_asin"] = asin
+                changed_fields["amazon_asin"] = asin
+            row.update(_normalize_row(row))
+            if changed_fields:
+                changed_fields["platform"] = str(row.get("platform", "") or "")
+                changed_fields["item_title"] = str(row.get("item_title", "") or "")
+            break
+        if changed_fields:
+            self.save_rows(rows, action="apply_hint")
+            return changed_fields
+        return None
+    def restore_hint_fields(self, row_key: str, previous: dict[str, str]) -> dict[str, Any] | None:
+        rows = self.load_rows()
+        restored: dict[str, str] = {}
+        for row in rows:
+            if self._row_identity(row) != row_key:
+                continue
+            for field in ("custom_label", "location", "ebay_item_number", "amazon_asin"):
+                if field not in previous:
+                    continue
+                value = str(previous.get(field, "") or "")
+                if str(row.get(field, "") or "") != value:
+                    row[field] = value
+                    restored[field] = value
+            row.update(_normalize_row(row))
+            if restored:
+                restored["platform"] = str(row.get("platform", "") or "")
+                restored["item_title"] = str(row.get("item_title", "") or "")
+            break
+        if restored:
+            self.save_rows(rows, action="undo_hint")
+            return restored
+        return None
+    def preview_merge_by_keys(self, primary_key: str, secondary_key: str) -> dict[str, dict[str, str]] | None:
+        rows = self.load_rows()
+        primary = next((dict(r) for r in rows if self._row_identity(r) == primary_key), None)
+        secondary = next((dict(r) for r in rows if self._row_identity(r) == secondary_key), None)
+        if primary is None or secondary is None:
+            return None
+        merged = _merge_two_rows(primary, secondary)
+        return {"primary": primary, "secondary": secondary, "merged": merged}
+
+    def merge_rows_by_keys(self, primary_key: str, secondary_key: str) -> bool:
+        if not primary_key or not secondary_key or primary_key == secondary_key:
+            return False
+        rows = self.load_rows()
+        primary = next((r for r in rows if self._row_identity(r) == primary_key), None)
+        secondary = next((r for r in rows if self._row_identity(r) == secondary_key), None)
+        if primary is None or secondary is None:
+            return False
+        merged = _merge_two_rows(dict(primary), dict(secondary))
+        kept: list[dict[str, str]] = []
+        for row in rows:
+            ident = self._row_identity(row)
+            if ident == primary_key:
+                kept.append(merged)
+            elif ident == secondary_key:
+                continue
+            else:
+                kept.append(row)
+        self.save_rows(kept, action="manual_merge_rows")
+        return True
 
     def _norm_key(self, key: str) -> str:
         return re.sub(r"[^a-z0-9]+", "", (key or "").strip().lower())
@@ -1055,6 +1122,11 @@ class ItemDB:
         if cleared or deleted:
             self.save_rows(kept, action=("clear_needs_review_delete_auto" if delete_auto else "clear_needs_review_flags"))
         return {"cleared": cleared, "deleted": deleted}
+
+
+
+
+
 
 
 

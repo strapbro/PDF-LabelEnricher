@@ -5,7 +5,7 @@ title Label Enricher - Stop
 
 echo Stopping Label Enricher if running...
 set "FOUND=0"
-for %%P in (8081 8082 8083 8090 9000 10080) do (
+for %%P in (8080 8081 8082 8083 8090 9000 10080) do (
   for /f "tokens=5" %%A in ('netstat -ano ^| findstr /R /C:":%%P .*LISTENING"') do (
     echo Found listener on port %%P with PID %%A
     taskkill /PID %%A /F
@@ -18,6 +18,8 @@ if "%FOUND%"=="0" (
 ) else (
   echo Stop command completed.
 )
+
+if /I "%LABEL_ENRICHER_NO_PAUSE%"=="1" goto :eof
 
 echo.
 pause

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
@@ -66,7 +66,7 @@ KO_TRANSLATIONS: dict[str, str] = {
     "Choose a variation first.": "먼저 옵션을 선택하세요.",
     "Choose an items.csv replacement file first.": "먼저 items.csv 교체 파일을 선택하세요.",
     "Choose Files": "파일 선택",
-    "Choose hints file": "힌트 파일 선택",
+    "Choose Hints File": "힌트 파일 선택",
     "Choose replacement file": "교체 파일 선택",
     "Choose stage import file": "가져오기 스테이징 파일 선택",
     "Choose variation...": "옵션 선택...",
@@ -82,7 +82,7 @@ KO_TRANSLATIONS: dict[str, str] = {
     "Clear label": "라벨 지우기",
     "Clear label/location hints file?": "라벨/위치 힌트 파일을 비우시겠습니까?",
     "Clear line": "줄 비우기",
-    "Clear manual staging files": "수동 스테이징 파일 비우기",
+    "Clear Manual Staging Files": "수동 스테이징 파일 비우기",
     "Clear Queue": "대기열 비우기",
     "Clear Staged Files": "스테이징 파일 비우기",
     "Clear Staged Import": "스테이징 가져오기 비우기",
@@ -417,7 +417,7 @@ KO_TRANSLATIONS: dict[str, str] = {
     "Upload Label/Location Hints": "라벨/위치 힌트 업로드",
     "Upload PDFs or ZIP files on Dashboard first. Then reopen this page.": "먼저 대시보드에서 PDF나 ZIP 파일을 업로드한 뒤 이 페이지를 다시 여세요.",
     "Upload to incoming/batch": "incoming/batch로 업로드",
-    "Upload to manual staging": "수동 스테이징으로 업로드",
+    "Upload to Manual Staging": "수동 스테이징으로 업로드",
     "Uploaded {count} file(s). Batch complete.": "파일 {count}개 업로드 완료. 배치 완료.",
     "Use Carrier": "배송사 사용",
     "Use Label": "라벨 사용",
@@ -507,7 +507,7 @@ ZH_CN_TRANSLATIONS: dict[str, str] = {
     "Choose a variation first.": "请先选择变体。",
     "Choose an items.csv replacement file first.": "请先选择一个 items.csv 替换文件。",
     "Choose Files": "选择文件",
-    "Choose hints file": "选择提示文件",
+    "Choose Hints File": "选择提示文件",
     "Choose replacement file": "选择替换文件",
     "Choose stage import file": "选择暂存导入文件",
     "Choose variation...": "选择变体...",
@@ -523,7 +523,7 @@ ZH_CN_TRANSLATIONS: dict[str, str] = {
     "Clear label": "清除标签",
     "Clear label/location hints file?": "清除标签/位置提示文件吗？",
     "Clear line": "清除此行",
-    "Clear manual staging files": "清除手动暂存文件",
+    "Clear Manual Staging Files": "清除手动暂存文件",
     "Clear Queue": "清除队列",
     "Clear Staged Files": "清除暂存文件",
     "Clear Staged Import": "清除暂存导入",
@@ -898,7 +898,7 @@ ZH_CN_TRANSLATIONS: dict[str, str] = {
     "Upload Label/Location Hints": "上传标签/位置提示",
     "Upload PDFs or ZIP files on Dashboard first. Then reopen this page.": "请先在仪表盘上传 PDF 或 ZIP 文件，然后重新打开此页面。",
     "Upload to incoming/batch": "上传到 incoming/batch",
-    "Upload to manual staging": "上传到手动暂存区",
+    "Upload to Manual Staging": "上传到手动暂存区",
     "Uploaded {count} file(s) to manual staging": "已将 {count} 个文件上传到手动暂存区",
     "Uploaded {count} file(s) to staging": "已将 {count} 个文件上传到暂存区",
     "Uploaded {count} file(s). Batch complete.": "已上传 {count} 个文件。批次完成。",
@@ -992,7 +992,7 @@ ZH_TW_TRANSLATIONS: dict[str, str] = {
     "Choose a variation first.": "請先選擇變體。",
     "Choose an items.csv replacement file first.": "請先選擇一个 items.csv 替换檔案。",
     "Choose Files": "選擇檔案",
-    "Choose hints file": "選擇提示檔案",
+    "Choose Hints File": "選擇提示檔案",
     "Choose replacement file": "選擇替換檔案",
     "Choose stage import file": "選擇暫存匯入檔案",
     "Choose variation...": "選擇變體...",
@@ -1008,7 +1008,7 @@ ZH_TW_TRANSLATIONS: dict[str, str] = {
     "Clear label": "清除標籤",
     "Clear label/location hints file?": "清除標籤/位置提示檔案吗？",
     "Clear line": "清除此行",
-    "Clear manual staging files": "清除手動暫存檔案",
+    "Clear Manual Staging Files": "清除手動暫存檔案",
     "Clear Queue": "清除佇列",
     "Clear Staged Files": "清除暫存檔案",
     "Clear Staged Import": "清除暫存匯入",
@@ -1383,7 +1383,7 @@ ZH_TW_TRANSLATIONS: dict[str, str] = {
     "Upload Label/Location Hints": "上傳標籤/位置提示",
     "Upload PDFs or ZIP files on Dashboard first. Then reopen this page.": "請先在儀表板上传 PDF 或 ZIP 檔案，然後重新開啟此頁面。",
     "Upload to incoming/batch": "上传到 incoming/batch",
-    "Upload to manual staging": "上传到手动暫存区",
+    "Upload to Manual Staging": "上传到手动暫存区",
     "Uploaded {count} file(s) to manual staging": "已将 {count} 个檔案上传到手动暫存区",
     "Uploaded {count} file(s) to staging": "已将 {count} 个檔案上传到暫存区",
     "Uploaded {count} file(s). Batch complete.": "已上傳 {count} 個檔案。批次完成。",
@@ -1423,6 +1423,52 @@ UI_TRANSLATIONS: dict[str, dict[str, str]] = {
     "zh_cn": ZH_CN_TRANSLATIONS,
     "zh_tw": ZH_TW_TRANSLATIONS,
 }
+
+
+def _mojibake_score(text: str) -> int:
+    if not text:
+        return 0
+    bad_markers = [
+        "Ã", "Â", "â", "ä", "å", "æ", "ç", "è", "é", "ê", "ë", "ì", "í", "î", "ï",
+        "ð", "ñ", "ò", "ó", "ô", "õ", "ö", "ø", "ù", "ú", "û", "ü", "ý", "þ", "ÿ",
+        "œ", "ž", "Ÿ", "¤", "�",
+    ]
+    score = 0
+    for marker in bad_markers:
+        score += text.count(marker) * 3
+    if "ì" in text or "ë" in text or "å" in text or "ç" in text:
+        score += 8
+    return score
+
+
+def _repair_mojibake(text: str) -> str:
+    current = text
+    for _ in range(3):
+        best = current
+        best_score = _mojibake_score(current)
+        for enc in ("cp1252", "latin1"):
+            try:
+                candidate = current.encode(enc).decode("utf-8")
+            except Exception:
+                continue
+            candidate_score = _mojibake_score(candidate)
+            if candidate_score < best_score:
+                best = candidate
+                best_score = candidate_score
+        if best == current:
+            break
+        current = best
+    return current
+
+
+def _normalize_translation_map(data: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
+    for lang, mapping in data.items():
+        out[lang] = {key: _repair_mojibake(value) for key, value in mapping.items()}
+    return out
+
+
+UI_TRANSLATIONS = _normalize_translation_map(UI_TRANSLATIONS)
 
 
 def translate_ui(text: str | None, lang: str = "en", **kwargs: Any) -> str:

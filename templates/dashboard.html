@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <section class="card upload-card">
   <div class="section-head">
@@ -26,6 +26,7 @@
           <input id="autoPrintAfterProcess" type="checkbox" name="auto_print_after_process" value="1">
           {{ tr("Auto-print after processing") }}
         </label>
+        <div class="quick-microcopy">{{ tr("Auto-print only works with Adobe Acrobat.") }}</div>
       </div>
       <button class="btn btn-lg btn-upload" type="submit" name="quick_action" value="upload_only">{{ tr("Upload to incoming/batch") }}</button>
     </div>
@@ -65,7 +66,7 @@
     <h3>{{ tr("Primary Actions") }}</h3>
     {% if stale_open %}
     <div class="stale-warning">
-      <strong>{{ tr("Layout settings changed since last batch.") }}</strong> {{ tr("Reprocess before opening so the print file matches current layout.") }}
+      <strong>{{ tr("Layout settings or items.csv changed since last batch.") }}</strong> {{ tr("Reprocess before opening so the print file matches current data and layout.") }}
       <div class="stale-warning-actions">
         <form action="/batch/open-combined-latest" method="post">
           <input type="hidden" name="reprocess_if_stale" value="1">
@@ -205,6 +206,7 @@
 .inline-check { display:flex; align-items:center; gap:8px; margin: 6px 0; font-size:14px; color:#20392d; font-weight: 700; }
 .inline-check input[type="checkbox"] { width:auto; margin:0; accent-color:#3a5a40; }
 .quick-inline-check { margin-top: 8px; }
+.quick-microcopy { margin-top: 2px; color: #5a6d5e; font-size: 12px; line-height: 1.35; max-width: 520px; }
 .quick-primary-stack { display:flex; flex-direction:column; align-items:stretch; }
 .upload-quick-actions { display:grid; grid-template-columns: 1.2fr 1fr; gap:10px; margin-top: 4px; align-items: start; }
 .upload-quick-actions .btn { width: 100%; }
@@ -252,6 +254,8 @@ const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 const pendingCount = document.getElementById('pendingCount');
 const pendingFileList = document.getElementById('pendingFileList');
+const autoPrintCheckbox = document.getElementById('autoPrintAfterProcess');
+const AUTO_PRINT_KEY = 'label_enricher_auto_print_after_process_v1';
 
 const T = {
   pending: {{ tr("Pending selection: {count} file(s)", count="__COUNT__")|tojson }},
@@ -310,6 +314,18 @@ function refreshPending() {
   pendingFileList.innerHTML = `<ul>${items}</ul>`;
 }
 
+try {
+  const savedAutoPrint = localStorage.getItem(AUTO_PRINT_KEY);
+  if (autoPrintCheckbox && savedAutoPrint !== null) {
+    autoPrintCheckbox.checked = savedAutoPrint === '1';
+  }
+} catch (err) {}
+
+autoPrintCheckbox?.addEventListener('change', () => {
+  try {
+    localStorage.setItem(AUTO_PRINT_KEY, autoPrintCheckbox.checked ? '1' : '0');
+  } catch (err) {}
+});
 function addFiles(fileList) {
   for (const f of fileList) dt.items.add(f);
   fileInput.files = dt.files;
@@ -384,3 +400,5 @@ document.querySelectorAll('.btn-spotlight').forEach((btn) => {
 refreshPending();
 </script>
 {% endblock %}
+
+

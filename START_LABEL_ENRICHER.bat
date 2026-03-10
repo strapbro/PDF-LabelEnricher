@@ -17,7 +17,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 set "PORT="
-for %%P in (8081 8082 8083 8090 9000 10080) do (
+for %%P in (8080 8081 8082 8083 8090 9000 10080) do (
   netstat -ano | findstr /R /C:":%%P .*LISTENING" >nul
   if errorlevel 1 (
     set "PORT=%%P"
@@ -38,4 +38,5 @@ start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Millis
 python -m uvicorn app.ui_server:app --host 127.0.0.1 --port %PORT%
 
 echo.
+
 

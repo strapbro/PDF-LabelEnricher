@@ -3,7 +3,7 @@
 <section class="card">
   <h2>{{ tr("Manual Entry (Unified Batch Mode)") }}</h2>
   <p style="font-size:13px;color:#555;">{{ tr("Use this when you want to process labels manually without full CSV/TXT matching. If one label is staged, this behaves like single-label mode automatically.") }}</p>
-  <p style="font-size:13px;color:#555;">{{ tr("Rules:") }} <strong>{{ tr("Qty required") }}</strong>, <strong>{{ tr("name/tracking reference required") }}</strong>, and <strong>{{ tr("internal label OR item key") }}</strong> {{ tr("required.") }}</p>
+  <p style="font-size:13px;color:#555;">{{ tr("Rules:") }} <strong>{{ tr("Qty required") }}</strong>, <strong>{{ tr("internal label OR item key (eBay item # / Amazon SKU / ASIN) required") }}</strong>.</p>
   <p style="font-size:13px;color:#555;">{{ tr("Unprocessed queue count:") }} <strong>{{ unresolved_count }}</strong></p>
 </section>
 
@@ -19,92 +19,120 @@
     <div id="manualPendingCount" class="pending-count">{{ tr("Pending selection: {count} file(s)", count=0) }}</div>
     <div id="manualPendingFileList" class="pending-file-list"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button class="btn btn-md btn-success" type="submit">{{ tr("Upload to manual staging") }}</button>
+      <button class="btn btn-md btn-success" type="submit">{{ tr("Upload to Manual Staging") }}</button>
     </div>
   </form>
   <form action="/manual-entry/clear-staged" method="post" data-confirm="{{ tr('Clear all manual staging files?') }}" style="margin-top:8px;">
-    <button class="btn btn-md btn-secondary" type="submit">{{ tr("Clear manual staging files") }}</button>
+    <button class="btn btn-md btn-secondary" type="submit">{{ tr("Clear Manual Staging Files") }}</button>
   </form>
 </section>
 
 <section class="card">
-  <h3>{{ tr("2) Label/Location Hints (Optional Helper)") }}</h3>
-  <p style="font-size:13px;color:#555;">{{ tr("Transition helper for labels not yet mapped to SKU/ASIN/item# in items.csv.") }}</p>
-  <div class="items-controls">
-    <form id="manualHintsForm" action="/hints/upload" method="post" enctype="multipart/form-data" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-      <input type="hidden" name="from_page" value="manual">
-      <input id="manualHintsInput" type="file" name="hints_csv" accept=".csv,.tsv,.txt" required hidden>
-      <button class="btn btn-md btn-secondary" id="manualHintsChooseBtn" type="button">{{ tr("Choose hints file") }}</button>
-      <span id="manualHintsName">{{ tr("No hints file selected") }}</span>
-      <button class="btn btn-md btn-secondary" type="submit">{{ tr("Upload Label/Location Hints") }}</button>
-    </form>
-    <form action="/hints/clear" method="post" data-confirm="{{ tr('Clear label/location hints file?') }}">
-      <input type="hidden" name="from_page" value="manual">
-      <button class="btn btn-md btn-secondary" type="submit">{{ tr("Clear Hints File") }}</button>
-    </form>
-  </div>
-</section>
-
-<section class="card">
-  <h3>{{ tr("3) Parse + Create Manual Output") }}</h3>
-  <form action="/manual-entry/parse-text-batch" method="post">
+  <h3>{{ tr("2) Parse + Create Manual Output") }}</h3>
+  <form id="manualBatchForm" action="/manual-entry/parse-text-batch" method="post">
     <div class="batch-grid">
       {% for row in prefill.batch_entries %}
-      <div class="batch-row card">
-        <h4>{{ tr("Label {count}", count=loop.index) }}</h4>
-        <label>{{ tr("Label PDF") }}
-          <select name="row_{{ loop.index0 }}_label_pdf">
-            <option value="">{{ tr("Select label...") }}</option>
-            {% for l in labels %}
-            <option value="{{ l.path }}" {% if row.label_pdf == l.path %}selected{% endif %}>{{ l.label }}</option>
-            {% endfor %}
-          </select>
-        </label>
-
-        <label>{{ tr("Paste text for this label (optional but recommended)") }}
-          <textarea class="manual-paste" name="row_{{ loop.index0 }}_messy_text" rows="8" placeholder="{{ tr('Paste one order text block here...') }}">{{ row.messy_text or '' }}</textarea>
-        </label>
-
-        <label>{{ tr("Platform") }}
-          <select name="row_{{ loop.index0 }}_platform">
-            <option value="amazon" {% if row.platform == 'amazon' %}selected{% endif %}>{{ tr("Amazon") }}</option>
-            <option value="ebay" {% if row.platform == 'ebay' %}selected{% endif %}>{{ tr("eBay") }}</option>
-          </select>
-        </label>
-        <label>{{ tr("Item # / SKU / ASIN") }} <input name="row_{{ loop.index0 }}_item_key" value="{{ row.item_key or '' }}"></label>
-        <label>{{ tr("Name or Tracking*") }} <input name="row_{{ loop.index0 }}_label_ref" value="{{ row.label_ref or '' }}" placeholder="{{ tr('Name or tracking from order') }}"></label>
-        <label>{{ tr("Qty") }} <input type="number" min="1" step="1" name="row_{{ loop.index0 }}_quantity" value="{{ row.quantity or '1' }}"></label>
-        <label>{{ tr("Internal Label") }} <input name="row_{{ loop.index0 }}_custom_label" list="manualLabelHintsList" value="{{ row.custom_label or '' }}"></label>
-        <label>{{ tr("Title") }} <input name="row_{{ loop.index0 }}_title" value="{{ row.title or '' }}"></label>
-        <label>{{ tr("Total") }} <input name="row_{{ loop.index0 }}_total_paid" value="{{ row.total_paid or '' }}"></label>
-        <label>{{ tr("Location") }} <input name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"></label>
-        <label><input type="checkbox" name="row_{{ loop.index0 }}_use_title_as_label" {% if row.use_title_as_label != '0' %}checked{% endif %} style="width:auto;"> {{ tr("Use title as label if label blank") }}</label>
+      {% if loop.first or row.group_id != loop.previtem.group_id %}
+      <div class="batch-row card" data-group-id="{{ row.group_id or ('manual-group-' ~ loop.index) }}">
+        <h4 class="manual-row-heading">{{ tr("Label {count}", count=(row.group_order or loop.index)) }}</h4>
+        <div class="manual-order-block">
+          <div class="manual-block-title">{{ tr("Order Details") }}</div>
+          <label>{{ tr("Label PDF") }}
+            <div class="label-pdf-row">
+              <select class="manual-shared-field manual-label-select" data-shared-key="label_pdf">
+                <option value="">{{ tr("Select label...") }}</option>
+                {% for l in labels %}
+                <option value="{{ l.path }}" {% if row.label_pdf == l.path %}selected{% endif %}>{{ l.label }}</option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-sm btn-secondary clear-manual-label-btn" type="button">{{ tr("Clear Label") }}</button>
+            </div>
+          </label>
+          <label>{{ tr("Paste text for this label (optional but recommended)") }}
+            <textarea class="manual-paste manual-shared-field" data-shared-key="messy_text" rows="8" placeholder="{{ tr('Paste one order text block here...') }}">{{ row.messy_text or '' }}</textarea>
+          </label>
+          <label>{{ tr("Platform") }}
+            <select class="manual-shared-field" data-shared-key="platform">
+              <option value="amazon" {% if row.platform == 'amazon' %}selected{% endif %}>{{ tr("Amazon") }}</option>
+              <option value="ebay" {% if row.platform == 'ebay' %}selected{% endif %}>{{ tr("eBay") }}</option>
+            </select>
+          </label>
+          <label>{{ tr("Name or Tracking") }} <input class="manual-shared-field" data-shared-key="label_ref" value="{{ row.label_ref or '' }}" placeholder="{{ tr('Optional: will auto-fill from label PDF when available') }}"></label>
+          <label>{{ tr("Total") }} <input class="manual-shared-field" data-shared-key="total_paid" value="{{ row.total_paid or '' }}"></label>
+        </div>
+        <div class="manual-items-wrap">
+      {% endif %}
+          <div class="manual-item-block" data-item-index="{{ loop.index0 }}">
+            <input type="hidden" class="manual-item-group" name="row_{{ loop.index0 }}_group_id" value="{{ row.group_id or ('manual-group-' ~ loop.index) }}">
+            <div class="manual-item-header">
+              <div class="manual-block-title manual-item-title">{{ tr("Item Details") }} {% if (row.group_item_count or '1')|int > 1 %}{{ tr("{count}", count=(row.group_item_index or loop.index)) }}{% endif %}</div>
+              <div class="manual-row-actions">
+                <button class="btn btn-sm btn-success add-manual-item-btn" type="button">{{ tr("Add Item") }}</button>
+                <button class="btn btn-sm btn-danger remove-manual-item-btn" type="button">{{ tr("Remove Item") }}</button>
+              </div>
+            </div>
+            <div class="manual-item-grid">
+              <label><strong>{{ tr("Item # / SKU / ASIN") }}</strong> <input class="manual-item-field manual-item-key" data-item-key="item_key" name="row_{{ loop.index0 }}_item_key" value="{{ row.item_key or '' }}" autocomplete="off" list="manual_lookup_{{ loop.index0 }}"></label>
+              <label><strong>{{ tr("Qty") }}</strong> <input class="manual-item-field" data-item-key="quantity" type="number" min="1" step="1" name="row_{{ loop.index0 }}_quantity" value="{{ row.quantity or '1' }}"></label>
+              <label><strong>{{ tr("Internal Label") }}</strong> <input class="manual-item-field" data-item-key="custom_label" name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}"></label>
+              <label>{{ tr("Title") }} <input class="manual-item-field" data-item-key="title" name="row_{{ loop.index0 }}_title" value="{{ row.title or '' }}"></label>
+              <label>{{ tr("Location") }} <input class="manual-item-field" data-item-key="location" name="row_{{ loop.index0 }}_location" value="{{ row.location or '' }}"></label>
+              <input type="hidden" class="manual-item-field" data-item-key="order_id" name="row_{{ loop.index0 }}_order_id" value="{{ row.order_id or '' }}">
+              <input type="hidden" class="manual-item-field" data-item-key="item_asin" name="row_{{ loop.index0 }}_item_asin" value="{{ row.item_asin or '' }}">
+            </div>
+                        <datalist class="manual-lookup-list" id="manual_lookup_{{ loop.index0 }}"></datalist>
+            <div class="manual-prefix-wrap">
+              <div class="manual-prefix-title">{{ tr("Speed Prefix (optional)") }}</div>
+              <label><input type="checkbox" class="manual-prefix-box" data-prefix-key="shipping_sd" name="row_{{ loop.index0 }}_shipping_sd" {% if row.manual_prefix == 'SD' %}checked{% endif %} style="width:auto;"> SD</label>
+              <label><input type="checkbox" class="manual-prefix-box" data-prefix-key="shipping_standard" name="row_{{ loop.index0 }}_shipping_standard" {% if row.manual_prefix == 'Standard' %}checked{% endif %} style="width:auto;"> {{ tr("Standard") }}</label>
+              <label><input type="checkbox" class="manual-prefix-box" data-prefix-key="shipping_two_day" name="row_{{ loop.index0 }}_shipping_two_day" {% if row.manual_prefix == 'Two-Day' %}checked{% endif %} style="width:auto;"> {{ tr("Two-Day") }}</label>
+              <label><input type="checkbox" class="manual-prefix-box" data-prefix-key="shipping_overnight" name="row_{{ loop.index0 }}_shipping_overnight" {% if row.manual_prefix == 'Overnight' %}checked{% endif %} style="width:auto;"> {{ tr("Overnight") }}</label>
+              <label><input type="checkbox" class="manual-prefix-box" data-prefix-key="shipping_replacement" name="row_{{ loop.index0 }}_shipping_replacement" {% if row.manual_prefix == 'REPLACEMENT' %}checked{% endif %} style="width:auto;"> Replacement</label>
+            </div>
+            <label><input type="checkbox" class="manual-item-field" data-item-key="use_title_as_label" name="row_{{ loop.index0 }}_use_title_as_label" {% if row.use_title_as_label != '0' %}checked{% endif %} style="width:auto;"> {{ tr("Use title as label if label blank") }}</label>
+          </div>
+      {% if loop.last or row.group_id != loop.nextitem.group_id %}
+        </div>
       </div>
+      {% endif %}
       {% endfor %}
     </div>
 
     <label><input type="checkbox" name="write_to_items" {% if prefill.write_to_items == '1' %}checked{% endif %} style="width:auto;"> {{ tr("Write/update items.csv during batch (off by default)") }}</label>
+    <input type="hidden" name="open_combined" id="open_combined" value="0">
+    <div class="manual-warning">{{ tr("ALWAYS DOUBLE CHECK QUANTITY AND INTERNAL LABEL BEFORE OPENING PDF") }}</div>
     <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
       <button class="btn btn-md btn-secondary" type="submit">{{ tr("Parse Row Text Blocks") }}</button>
-      <button class="btn btn-lg btn-primary" type="submit" formaction="/manual-entry/create-batch">{{ tr("Create Combined Manual Output PDF") }}</button>
+      <button class="btn btn-md btn-secondary" type="submit" formaction="/manual-entry/create-batch" onclick="document.getElementById('open_combined').value='1';">{{ tr("Create Combined Manual Output PDF") }}</button>
+      <button class="btn btn-lg btn-success" type="submit" formaction="/manual-entry/create-batch" name="auto_parse_text" value="1" onclick="document.getElementById('open_combined').value='1';">{{ tr("Parse Text and Open Combined PDF") }}</button>
     </div>
   </form>
 </section>
 
-<datalist id="manualLabelHintsList">
-{% for h in (label_hints or []) %}
-  <option value="{{ h.label }}">{{ h.label }}{% if h.location %} | {{ tr("LOC") }} {{ h.location }}{% endif %}{% if h.asin %} | {{ tr("ASIN") }} {{ h.asin }}{% endif %}</option>
-{% endfor %}
-</datalist>
-<script id="manualLabelHintsData" type="application/json">{{ (label_hints or [])|tojson }}</script>
-
 <style>
 .batch-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 10px;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.batch-grid.multi-labels {
+  grid-template-columns: repeat(2, minmax(420px, 1fr));
+}
+@media (max-width: 1100px) {
+  .batch-grid.multi-labels {
+    grid-template-columns: 1fr;
+  }
 }
 .batch-row h4 { margin: 0 0 8px; }
+.manual-row-actions { display:flex; gap:8px; justify-content:flex-end; }
+.remove-manual-item-btn { background:#c63a3a !important; color:#fff !important; border:1px solid #a52828 !important; }
+.add-manual-item-btn { background:#2f9e44 !important; color:#fff !important; border:1px solid #247a35 !important; }
+.manual-order-block, .manual-item-block { border:1px solid rgba(92, 108, 130, 0.18); border-radius:10px; padding:10px; background:#fbfcfe; margin-top:8px; }
+.manual-items-wrap { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:10px; margin-top:8px; }
+.manual-block-title { font-size:12px; font-weight:800; letter-spacing:0.03em; color:#536273; margin-bottom:8px; text-transform:uppercase; }
+.manual-item-header { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; }
+.manual-item-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:8px; }
+.manual-item-block { position:relative; }
 .drop-zone {
   border: 2px dashed #7d8a99;
   border-radius: 10px;
@@ -137,6 +165,21 @@
   min-height: 150px;
   box-sizing: border-box;
 }
+.manual-warning {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(180, 58, 58, 0.35);
+  background: rgba(190, 66, 66, 0.12);
+  color: #9d1f1f;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.label-pdf-row { display:flex; gap:8px; align-items:center; }
+.label-pdf-row select { flex:1 1 auto; }
+.manual-prefix-wrap { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+.manual-prefix-title { font-size:12px; font-weight:700; color:#49614f; min-width:100%; }
 </style>
 
 <script>
@@ -146,23 +189,19 @@
   const pendingCount = document.getElementById('manualPendingCount');
   const pendingFileList = document.getElementById('manualPendingFileList');
   const uploadForm = document.getElementById('manualUploadForm');
-  const hintsEl = document.getElementById('manualLabelHintsData');
-  const hintsInput = document.getElementById('manualHintsInput');
-  const hintsChooseBtn = document.getElementById('manualHintsChooseBtn');
-  const hintsName = document.getElementById('manualHintsName');
+  const batchGrid = document.querySelector('.batch-grid');
   const T = {
-    pending: {{ tr("Pending selection: {count} file(s)", count="__COUNT__")|tojson }},
-    amazonZip: {{ tr("Amazon ZIP")|tojson }},
-    zip: {{ tr("ZIP")|tojson }},
-    ebayPdf: {{ tr("eBay PDF")|tojson }},
-    amazonPdf: {{ tr("Amazon PDF")|tojson }},
-    pdf: {{ tr("PDF")|tojson }},
-    amazonTxt: {{ tr("Amazon TXT")|tojson }},
-    csv: {{ tr("CSV")|tojson }},
-    file: {{ tr("File")|tojson }},
-    noHints: {{ tr("No hints file selected")|tojson }},
-    hintConflict: {{ tr('Hint conflict for location. Current: "{current}" | Hint: "{hint}". Use hint location?', current='__CURRENT__', hint='__HINT__')|tojson }},
+    pending: {{ tr('Pending selection: {count} file(s)', count='__COUNT__')|tojson }},
+    amazonZip: {{ tr('Amazon ZIP')|tojson }},
+    zip: {{ tr('ZIP')|tojson }},
+    ebayPdf: {{ tr('eBay PDF')|tojson }},
+    amazonPdf: {{ tr('Amazon PDF')|tojson }},
+    pdf: {{ tr('PDF')|tojson }},
+    amazonTxt: {{ tr('Amazon TXT')|tojson }},
+    csv: {{ tr('CSV')|tojson }},
+    file: {{ tr('File')|tojson }},
   };
+
   function fmt(template, vars) {
     let out = String(template || '');
     Object.keys(vars || {}).forEach((key) => {
@@ -170,8 +209,8 @@
     });
     return out;
   }
-  let hints = []; try { hints = JSON.parse((hintsEl && hintsEl.textContent) || '[]'); } catch (e) { hints = []; }
-  if (!dropZone || !fileInput || !pendingCount || !uploadForm) return;
+
+  if (!dropZone || !fileInput || !pendingCount || !uploadForm || !batchGrid) return;
 
   let dt = new DataTransfer();
 
@@ -209,19 +248,15 @@
       fileInput.click();
     }
   });
-
-  ['dragenter','dragover'].forEach(evt => dropZone.addEventListener(evt, e => {
+  ['dragenter', 'dragover'].forEach((evt) => dropZone.addEventListener(evt, (e) => {
     e.preventDefault();
     dropZone.classList.add('active');
   }));
-
-  ['dragleave','drop'].forEach(evt => dropZone.addEventListener(evt, e => {
+  ['dragleave', 'drop'].forEach((evt) => dropZone.addEventListener(evt, (e) => {
     e.preventDefault();
     dropZone.classList.remove('active');
   }));
-
-  dropZone.addEventListener('drop', e => addFiles(e.dataTransfer.files));
-
+  dropZone.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
   uploadForm.addEventListener('submit', () => {
     setTimeout(() => {
       dt = new DataTransfer();
@@ -230,44 +265,270 @@
     }, 0);
   });
 
-  function findHint(label) {
-    const t = (label || '').trim().toLowerCase();
-    if (!t) return null;
-    return hints.find(h => ((h.label || '').trim().toLowerCase() === t)) || null;
-  }
-
-  async function applyHintFromLabelInput(input) {
-    if (!input) return;
-    const hint = findHint(input.value || '');
-    if (!hint) return;
-    const section = input.closest('.card') || document;
-    const loc = section.querySelector('input[name="location"], input[name$="_location"]');
-    if (loc && (hint.location || '').trim()) {
-      const nextLoc = (hint.location || '').trim();
-      const curLoc = (loc.value || '').trim();
-      if (!curLoc) loc.value = nextLoc;
-      else if (curLoc.toLowerCase() !== nextLoc.toLowerCase()) {
-        if (await showAppConfirm(fmt(T.hintConflict, { current: curLoc, hint: nextLoc }))) loc.value = nextLoc;
-      }
-    }
-    const itemKey = section.querySelector('input[name="item_key"], input[name$="_item_key"]');
-    if (itemKey && !itemKey.value && (hint.asin || '').trim()) itemKey.value = (hint.asin || '').trim().toUpperCase();
-  }
-
-  document.addEventListener('input', (e) => {
-    const t = e.target;
-    if (!(t instanceof HTMLInputElement)) return;
-    const n = t.name || '';
-    if (n === 'custom_label' || n.endsWith('_custom_label')) void applyHintFromLabelInput(t);
-  });
-
-  if (hintsChooseBtn && hintsInput && hintsName) {
-    hintsChooseBtn.addEventListener('click', () => hintsInput.click());
-    hintsInput.addEventListener('change', () => {
-      const file = hintsInput.files && hintsInput.files[0];
-      hintsName.textContent = file ? file.name : T.noHints;
+  function syncSharedFields(card) {
+    const firstItem = card.querySelector('.manual-item-block');
+    if (!firstItem) return;
+    const firstIndex = Array.from(document.querySelectorAll('.manual-item-block')).indexOf(firstItem);
+    card.querySelectorAll('.manual-shared-field').forEach((field) => {
+      const key = field.getAttribute('data-shared-key');
+      if (!key) return;
+      field.setAttribute('name', `row_${firstIndex}_${key}`);
     });
   }
+
+  function refreshBatchGridLayout() {
+    const cardCount = batchGrid.querySelectorAll('.batch-row').length;
+    batchGrid.classList.toggle('multi-labels', cardCount > 1);
+  }
+
+  function resetLookup(block) {
+    if (!block) return;
+    const list = block.querySelector('.manual-lookup-list');
+    if (!list) return;
+    list.innerHTML = '';
+  }
+
+  function renumberManualRows() {
+    const itemBlocks = Array.from(document.querySelectorAll('.manual-item-block'));
+    itemBlocks.forEach((block, index) => {
+      block.setAttribute('data-item-index', String(index));
+      const groupHidden = block.querySelector('.manual-item-group');
+      if (groupHidden) groupHidden.setAttribute('name', `row_${index}_group_id`);
+      const keyInput = block.querySelector('.manual-item-key');
+      const lookupList = block.querySelector('.manual-lookup-list');
+      if (keyInput && lookupList) {
+        const lookupId = `manual_lookup_${index}`;
+        keyInput.setAttribute('list', lookupId);
+        lookupList.id = lookupId;
+      }
+      block.querySelectorAll('.manual-item-field').forEach((field) => {
+        const key = field.getAttribute('data-item-key');
+        if (key) field.setAttribute('name', `row_${index}_${key}`);
+      });
+      block.querySelectorAll('.manual-prefix-box').forEach((field) => {
+        const key = field.getAttribute('data-prefix-key');
+        if (key) field.setAttribute('name', `row_${index}_${key}`);
+      });
+    });
+    document.querySelectorAll('.batch-row').forEach((card, groupIndex) => {
+      const items = Array.from(card.querySelectorAll('.manual-item-block'));
+      const heading = card.querySelector('.manual-row-heading');
+      if (heading) heading.textContent = `Label ${groupIndex + 1}`;
+      items.forEach((item, itemIndex) => {
+        const title = item.querySelector('.manual-item-title');
+        if (title) title.textContent = items.length > 1 ? `Item Details ${itemIndex + 1}` : 'Item Details';
+        const removeBtn = item.querySelector('.remove-manual-item-btn');
+        if (removeBtn) removeBtn.disabled = items.length <= 1;
+      });
+      syncSharedFields(card);
+    });
+    refreshBatchGridLayout();
+  }
+
+  function clearItemFields(block) {
+    block.querySelectorAll('.manual-item-field').forEach((field) => {
+      const key = field.getAttribute('data-item-key');
+      if (!key || key === 'group_id') return;
+      if (field instanceof HTMLInputElement && field.type === 'checkbox') {
+        field.checked = key === 'use_title_as_label';
+      } else if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+        field.value = key === 'quantity' ? '1' : '';
+      }
+    });
+    block.querySelectorAll('.manual-prefix-box').forEach((field) => {
+      field.checked = false;
+    });
+    resetLookup(block);
+  }
+
+  function detectPlatformFromLabelPath(value) {
+    const raw = String(value || '').toLowerCase();
+    if (!raw) return '';
+    if (raw.includes('ebay')) return 'ebay';
+    if (raw.includes('amznbulklabels') || raw.includes('amazon') || raw.includes('amzn')) return 'amazon';
+    if (/\d{3}-\d{7}-\d{7}/.test(raw)) return 'amazon';
+    return '';
+  }
+
+  function syncPlatformFromLabel(card) {
+    if (!card) return;
+    const select = card.querySelector('.manual-label-select');
+    const platformSel = card.querySelector('[data-shared-key="platform"]');
+    if (!select || !platformSel) return;
+    const detected = detectPlatformFromLabelPath(select.value);
+    if (detected && platformSel.value !== detected) {
+      platformSel.value = detected;
+    }
+  }
+
+  function preferredLookupKey(row, platform) {
+    if (platform === 'ebay') {
+      return row.ebay_item_number || row.item_id || row.amazon_sku || row.amazon_asin || '';
+    }
+    return row.amazon_sku || row.amazon_asin || row.item_id || row.ebay_item_number || '';
+  }
+
+  function applyLookupRow(block, row) {
+    if (!block || !row) return;
+    const card = block.closest('.batch-row');
+    const platformSel = card && card.querySelector('[data-shared-key="platform"]');
+    const platform = platformSel ? platformSel.value : 'amazon';
+    const keyInput = block.querySelector('.manual-item-key');
+    const labelInput = block.querySelector('[data-item-key="custom_label"]');
+    const locationInput = block.querySelector('[data-item-key="location"]');
+    const asinInput = block.querySelector('[data-item-key="item_asin"]');
+    const titleInput = block.querySelector('[data-item-key="title"]');
+    const chosenKey = preferredLookupKey(row, platform);
+    if (keyInput) keyInput.value = chosenKey;
+    if (labelInput && row.custom_label) labelInput.value = row.custom_label;
+    if (locationInput && row.location) locationInput.value = row.location;
+    if (asinInput) asinInput.value = row.amazon_asin || '';
+    if (titleInput && row.item_title && !String(titleInput.value || '').trim()) titleInput.value = row.item_title;
+    resetLookup(block);
+  }
+
+  function addManualItemBlock(sourceBlock) {
+    const clone = sourceBlock.cloneNode(true);
+    const sourceGroup = sourceBlock.querySelector('.manual-item-group');
+    const cloneGroup = clone.querySelector('.manual-item-group');
+    if (cloneGroup && sourceGroup) cloneGroup.value = sourceGroup.value;
+    clearItemFields(clone);
+    sourceBlock.parentNode.insertBefore(clone, sourceBlock.nextSibling);
+    renumberManualRows();
+  }
+
+  function removeManualItemBlock(block) {
+    const wrap = block.closest('.manual-items-wrap');
+    if (!wrap) return;
+    if (wrap.querySelectorAll('.manual-item-block').length <= 1) return;
+    block.remove();
+    renumberManualRows();
+  }
+
+  async function fetchLookupSuggestions(input) {
+    const block = input.closest('.manual-item-block');
+    const card = input.closest('.batch-row');
+    const list = block && block.querySelector('.manual-lookup-list');
+    const platformSel = card && card.querySelector('[data-shared-key="platform"]');
+    const query = String(input.value || '').trim();
+    if (!block || !list || query.length < 2) {
+      resetLookup(block);
+      return;
+    }
+    const platform = platformSel ? platformSel.value : 'amazon';
+    const res = await fetch(`/manual-entry/item-lookup?query=${encodeURIComponent(query)}&platform=${encodeURIComponent(platform)}`);
+    const payload = await res.json();
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    if (!rows.length) {
+      resetLookup(block);
+      return;
+    }
+    list.innerHTML = '';
+    rows.forEach((row) => {
+      const option = document.createElement('option');
+      const value = preferredLookupKey(row, platform);
+      option.value = value;
+      option.label = `${row.custom_label || '-'} | ${row.location || '-'}`;
+      option.dataset.lookupRow = JSON.stringify(row);
+      list.appendChild(option);
+    });
+    if (typeof input.showPicker === 'function') {
+      try { input.showPicker(); } catch (_err) {}
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.classList.contains('clear-manual-label-btn')) {
+      const row = target.closest('.label-pdf-row');
+      const select = row && row.querySelector('.manual-label-select');
+      if (select) {
+        select.value = '';
+        syncPlatformFromLabel(target.closest('.batch-row'));
+      }
+      return;
+    }
+    if (target.classList.contains('add-manual-item-btn')) {
+      const block = target.closest('.manual-item-block');
+      if (block) addManualItemBlock(block);
+      return;
+    }
+    if (target.classList.contains('remove-manual-item-btn')) {
+      const block = target.closest('.manual-item-block');
+      if (block) removeManualItemBlock(block);
+      return;
+    }
+    if (!target.closest('.manual-item-block')) {
+      document.querySelectorAll('.manual-item-block').forEach((block) => resetLookup(block));
+    }
+  });
+
+  document.addEventListener('focusin', (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (target.classList.contains('manual-item-key') && String(target.value || '').trim().length >= 2) {
+      fetchLookupSuggestions(target);
+    }
+  });
+
+  document.addEventListener('input', (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.classList.contains('manual-item-key')) {
+      fetchLookupSuggestions(target);
+    }
+  });
+
+  document.addEventListener('change', (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.classList.contains('manual-label-select')) {
+      syncPlatformFromLabel(target.closest('.batch-row'));
+      return;
+    }
+    if (target.classList.contains('manual-item-key') && target instanceof HTMLInputElement) {
+      const block = target.closest('.manual-item-block');
+      const list = block && block.querySelector('.manual-lookup-list');
+      const value = String(target.value || '').trim();
+      if (!block || !list || !value) return;
+      const option = Array.from(list.options).find((opt) => opt.value === value && opt.dataset.lookupRow);
+      if (!option) return;
+      try {
+        applyLookupRow(block, JSON.parse(option.dataset.lookupRow));
+      } catch (_err) {
+        resetLookup(block);
+      }
+      return;
+    }
+    if (target.classList.contains('manual-prefix-box') && target instanceof HTMLInputElement && target.checked) {
+      const wrap = target.closest('.manual-prefix-wrap');
+      if (!wrap) return;
+      wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+        if (cb !== target) cb.checked = false;
+      });
+    }
+  });
+
+  renumberManualRows();
+  document.querySelectorAll('.batch-row').forEach((card) => syncPlatformFromLabel(card));
 })();
 </script>
 {% endblock %}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

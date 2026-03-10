@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import csv
 import re
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,52 @@ SKU_LINE_RE = re.compile(r"\bsku\b\s*[:#-]?\s*([A-Z0-9][A-Z0-9._-]{1,63})\b", re
 ASIN_LINE_RE = re.compile(r"\basin\b\s*[:#-]?\s*(B[0-9A-Z]{9})\b", re.IGNORECASE)
 STREET_SUFFIX_RE = re.compile(r"\b(st|street|rd|road|ave|avenue|dr|drive|ln|lane|blvd|boulevard|ct|court|cir|circle|way|pkwy|parkway|trl|trail)\b", re.IGNORECASE)
 CITY_STATE_ZIP_RE = re.compile(r"\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b")
+SCIENTIFIC_NOTATION_ID_RE = re.compile(r"^\d+(?:\.\d+)?E[+-]?\d+$", re.IGNORECASE)
+
+
+def _normalize_ebay_item_number(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if re.fullmatch(r"\d{10,14}", raw):
+        return raw
+    if SCIENTIFIC_NOTATION_ID_RE.fullmatch(raw):
+        try:
+            dec = Decimal(raw)
+            if dec == dec.to_integral_value():
+                normalized = format(dec.quantize(Decimal("1")), "f")
+                normalized = normalized.replace(".", "").strip()
+                if re.fullmatch(r"\d{10,14}", normalized):
+                    return normalized
+        except (InvalidOperation, ValueError):
+            return ""
+        return ""
+    return raw
+
+
+def _normalize_ebay_variation_details(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    bracketed = re.findall(r"\[([^\]]+)\]", raw)
+    if bracketed:
+        parts: list[str] = []
+        for part in bracketed:
+            chunk = str(part or "").strip()
+            if not chunk:
+                continue
+            if ":" in chunk:
+                _, value = chunk.split(":", 1)
+                chunk = value.strip()
+            if chunk and chunk not in parts:
+                parts.append(chunk)
+        if parts:
+            return " / ".join(parts)
+    clean = raw.strip().strip("[]")
+    if ":" in clean:
+        _, value = clean.split(":", 1)
+        clean = value.strip()
+    return clean
 
 
 def _money(value: Any) -> float:
@@ -369,9 +416,10 @@ def _detect_ebay_header_row(path: Path) -> int:
     return 0
 
 
-def parse_ebay_csv(path: Path) -> dict[str, dict[str, Any]]:
+def parse_ebay_csv(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     header_row = _detect_ebay_header_row(path)
     records: dict[str, dict[str, Any]] = {}
+    scientific_notation_rows = 0
 
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         for _ in range(header_row):
@@ -392,10 +440,16 @@ def parse_ebay_csv(path: Path) -> dict[str, dict[str, Any]]:
                     "tracking_number": str(row.get("Tracking Number", "")).strip(),
                     "items": [],
                     "total_paid": 0.0,
+                    "_explicit_total": 0.0,
+                    "_item_total_sum": 0.0,
+                    "_summary_qty": 0,
                 },
             )
 
-            item_id = str(row.get("Item Number", "")).strip()
+            raw_item_number = str(row.get("Item Number", "")).strip()
+            item_id = _normalize_ebay_item_number(raw_item_number)
+            if raw_item_number and not item_id and SCIENTIFIC_NOTATION_ID_RE.fullmatch(raw_item_number):
+                scientific_notation_rows += 1
             title = str(row.get("Item Title", "")).strip()
             qty_raw = str(row.get("Quantity", "1")).strip() or "1"
             try:
@@ -403,9 +457,25 @@ def parse_ebay_csv(path: Path) -> dict[str, dict[str, Any]]:
             except Exception:
                 qty = 1
 
-            line_total = _money(row.get("Total Price"))
+            explicit_total = _money(row.get("Total Price"))
+            sold_for = _money(row.get("Sold For"))
+            shipping = _money(row.get("Shipping And Handling"))
+            is_summary_only_row = not item_id and not title
+            if is_summary_only_row:
+                if explicit_total > 0:
+                    rec["_explicit_total"] = max(float(rec.get("_explicit_total", 0.0) or 0.0), explicit_total)
+                try:
+                    rec["_summary_qty"] = max(int(rec.get("_summary_qty", 0) or 0), qty)
+                except Exception:
+                    pass
+                continue
+
+            line_total = explicit_total
             if line_total <= 0:
                 line_total = _money(row.get("Sold For")) + _money(row.get("Shipping And Handling"))
+
+            variation_details_raw = str(row.get("Variation Details", "") or "").strip()
+            variation_detail = _normalize_ebay_variation_details(variation_details_raw)
 
             rec["items"].append(
                 {
@@ -414,18 +484,40 @@ def parse_ebay_csv(path: Path) -> dict[str, dict[str, Any]]:
                     "title": title,
                     "quantity": qty,
                     "line_total": line_total,
+                    "variation_details": variation_details_raw,
+                    "variation_detail": variation_detail,
                 }
             )
-            rec["total_paid"] += line_total
+            rec["_item_total_sum"] += line_total
 
-    return records
+    for rec in records.values():
+        explicit_total = float(rec.pop("_explicit_total", 0.0) or 0.0)
+        item_total_sum = float(rec.pop("_item_total_sum", 0.0) or 0.0)
+        summary_qty = int(rec.pop("_summary_qty", 0) or 0)
+        detail_qty = 0
+        for item in rec.get("items", []) or []:
+            try:
+                detail_qty += int(item.get("quantity", 1) or 1)
+            except Exception:
+                detail_qty += 1
 
+        missing_qty = max(0, summary_qty - detail_qty)
+        if missing_qty > 0:
+            for idx in range(missing_qty):
+                rec.setdefault("items", []).append(
+                    {
+                        "item_id": f"EBAY-SUMMARY-MISSING-{idx + 1}",
+                        "ebay_item_number": "",
+                        "title": "eBay item details missing from OrdersReport",
+                        "quantity": 1,
+                        "line_total": 0.0,
+                    }
+                )
 
+        rec["total_paid"] = explicit_total if explicit_total > 0 else item_total_sum
 
-
-
-
-
+    warnings = {"scientific_notation_item_numbers": scientific_notation_rows} if scientific_notation_rows else {}
+    return records, warnings
 
 
 

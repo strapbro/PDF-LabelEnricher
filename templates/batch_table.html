@@ -15,7 +15,8 @@
     </form>
     <div class="batch-actions">
       <input id="batchFilter" type="text" placeholder="{{ tr('Filter order/name/item/tracking') }}">
-      <button id="openOrderTabsBtn" class="btn btn-primary" type="button">{{ tr("Open Order Tabs (Current Sort)") }}</button>
+      <button id="openOrderTabsBtn" class="btn btn-primary" type="button">{{ tr("Open All Order Tabs (Current Sort)") }}</button>
+      <button id="openSelectedOrderTabsBtn" class="btn btn-success" type="button">Open Selected Order Tabs</button>
     </div>
   </div>
 
@@ -32,6 +33,7 @@
     <table id="batchTable" class="items-table mode-compact">
       <thead>
         <tr>
+          <th data-sort="none"><label style="display:flex;align-items:center;justify-content:center;gap:6px;"><input id="batchSelectAll" type="checkbox" aria-label="{{ tr('Select all visible rows') }}"> <span>{{ tr("Select") }}</span></label></th>
           <th data-sort="text">{{ tr("Order #") }}</th>
           <th data-sort="num">{{ tr("Processed #") }}</th>
           <th data-sort="text">{{ tr("Platform") }}</th>
@@ -49,6 +51,7 @@
       <tbody>
         {% for r in rows %}
         <tr data-order-link="{{ r.order_link }}">
+          <td class="batch-select-cell"><input type="checkbox" class="batch-row-select" aria-label="{{ tr('Select row') }}"></td>
           <td>{{ r.order_id }}</td>
           <td>{{ r.process_index }}</td>
           <td>{{ r.platform }}</td>
@@ -75,6 +78,9 @@
 .batch-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .batch-actions input { min-width: 280px; }
 .batch-summary { margin-top: 10px; display:flex; gap:16px; flex-wrap:wrap; color:#385244; font-size:13px; }
+.batch-select-cell { text-align:center; width:82px; min-width:82px; }
+.batch-row-selected td { background: rgba(122, 190, 148, 0.25); }
+.batch-row-select { width: 18px; height: 18px; cursor: pointer; }
 </style>
 
 <script>
@@ -82,8 +88,10 @@
   const table = document.getElementById('batchTable');
   const filter = document.getElementById('batchFilter');
   const openBtn = document.getElementById('openOrderTabsBtn');
+  const openSelectedBtn = document.getElementById('openSelectedOrderTabsBtn');
   const T = {
     noLinks: {{ tr("No order links available in current view.")|tojson }},
+    noSelectedLinks: {{ tr("No selected rows with order links.")|tojson }},
     blocked: {{ tr("Opened {opened}/{total}. Your browser blocked some popups.", opened="__OPENED__", total="__TOTAL__")|tojson }},
   };
   function fmt(template, vars) {
@@ -97,8 +105,11 @@
 
   const tbody = table.querySelector('tbody');
   const headers = Array.from(table.querySelectorAll('thead th'));
-  let sortCol = 1;
+  const selectAllBox = document.getElementById('batchSelectAll');
+  let sortCol = 2;
   let sortAsc = true;
+  const selectedRows = new Set();
+  let lastClickedVisibleIndex = null;
 
   function textValue(td){ return (td.textContent || '').trim().toLowerCase(); }
   function numValue(td){
@@ -109,6 +120,7 @@
 
   function sortTable(col, asc){
     const type = headers[col].dataset.sort || 'text';
+    if (type === 'none') return;
     const rows = Array.from(tbody.querySelectorAll('tr'));
     rows.sort((a,b)=>{
       const av = a.children[col];
@@ -122,6 +134,8 @@
   }
 
   headers.forEach((th, idx)=>{
+    const type = th.dataset.sort || 'text';
+    if (type === 'none') return;
     th.style.cursor = 'pointer';
     th.addEventListener('click', ()=>{
       if (sortCol === idx) sortAsc = !sortAsc;
@@ -138,12 +152,105 @@
     });
   }
 
-  filter?.addEventListener('input', applyFilter);
+  function visibleRows(){
+    return Array.from(tbody.querySelectorAll('tr')).filter((tr)=>tr.style.display !== 'none');
+  }
+
+  function syncRowStyles(){
+    const visible = visibleRows();
+    let visibleSelected = 0;
+    Array.from(tbody.querySelectorAll('tr')).forEach((tr)=>{
+      const isSelected = selectedRows.has(tr);
+      tr.classList.toggle('batch-row-selected', isSelected);
+      const cb = tr.querySelector('.batch-row-select');
+      if (cb) cb.checked = isSelected;
+      if (isSelected && tr.style.display !== 'none') visibleSelected += 1;
+    });
+    if (selectAllBox) {
+      const totalVisible = visible.length;
+      selectAllBox.checked = totalVisible > 0 && visibleSelected === totalVisible;
+      selectAllBox.indeterminate = visibleSelected > 0 && visibleSelected < totalVisible;
+    }
+  }
+
+  function selectSingle(tr){
+    selectedRows.clear();
+    selectedRows.add(tr);
+  }
+
+  function toggleOne(tr){
+    if (selectedRows.has(tr)) selectedRows.delete(tr);
+    else selectedRows.add(tr);
+  }
+
+  function selectRange(fromIndex, toIndex){
+    const rows = visibleRows();
+    if (!rows.length) return;
+    const start = Math.max(0, Math.min(fromIndex, toIndex));
+    const end = Math.min(rows.length - 1, Math.max(fromIndex, toIndex));
+    selectedRows.clear();
+    for (let i = start; i <= end; i += 1) selectedRows.add(rows[i]);
+  }
+
+  filter?.addEventListener('input', ()=>{
+    applyFilter();
+    syncRowStyles();
+  });
+
+  tbody.addEventListener('click', (e)=>{
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('a')) return;
+    const tr = target.closest('tr');
+    if (!tr) return;
+
+    const rows = visibleRows();
+    const visibleIndex = rows.indexOf(tr);
+    if (visibleIndex < 0) return;
+
+    const isShift = !!e.shiftKey;
+    const isToggle = !!(e.ctrlKey || e.metaKey);
+
+    if (isShift && lastClickedVisibleIndex !== null) {
+      selectRange(lastClickedVisibleIndex, visibleIndex);
+    } else if (isToggle) {
+      toggleOne(tr);
+      lastClickedVisibleIndex = visibleIndex;
+    } else if (selectedRows.has(tr)) {
+      selectedRows.delete(tr);
+      lastClickedVisibleIndex = visibleIndex;
+    } else {
+      selectedRows.add(tr);
+      lastClickedVisibleIndex = visibleIndex;
+    }
+
+    syncRowStyles();
+  });
+
+  function openLinks(links){
+    if (!links.length) return 0;
+    let opened = 0;
+    links.forEach((url)=>{
+      const w = window.open(url, '_blank', 'noopener');
+      if (w) opened += 1;
+    });
+    if (opened < links.length) {
+      showAppAlert(fmt(T.blocked, { opened: String(opened), total: String(links.length) }));
+    }
+    return opened;
+  }
+
+  selectAllBox?.addEventListener('change', ()=>{
+    const rows = visibleRows();
+    if (selectAllBox.checked) rows.forEach((tr)=>selectedRows.add(tr));
+    else rows.forEach((tr)=>selectedRows.delete(tr));
+    syncRowStyles();
+  });
 
   openBtn?.addEventListener('click', ()=>{
     const links = Array.from(tbody.querySelectorAll('tr'))
-      .filter(tr => tr.style.display !== 'none')
-      .map(tr => tr.getAttribute('data-order-link') || '')
+      .filter((tr) => tr.style.display !== 'none')
+      .map((tr) => tr.getAttribute('data-order-link') || '')
       .filter(Boolean);
 
     if (!links.length) {
@@ -151,18 +258,30 @@
       return;
     }
 
-    let opened = 0;
-    links.forEach((url)=>{
-      const w = window.open(url, '_blank', 'noopener');
-      if (w) opened += 1;
-    });
+    openLinks(links);
+  });
 
-    if (opened < links.length) {
-      showAppAlert(fmt(T.blocked, { opened: String(opened), total: String(links.length) }));
+  openSelectedBtn?.addEventListener('click', ()=>{
+    const links = Array.from(selectedRows)
+      .map((tr) => tr.getAttribute('data-order-link') || '')
+      .filter(Boolean);
+
+    if (!links.length) {
+      showAppAlert(T.noSelectedLinks);
+      return;
     }
+
+    openLinks(links);
   });
 
   sortTable(sortCol, sortAsc);
+  applyFilter();
+  syncRowStyles();
 })();
 </script>
 {% endblock %}
+
+
+
+
+

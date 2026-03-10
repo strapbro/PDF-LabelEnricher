@@ -1,13 +1,20 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="{{ ui_language_mode|default('en') }}">
 <head>
   <meta charset="utf-8">
   <title>{{ tr("Label Enricher") }}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/app_icon_source.svg?v=7">
+  <link rel="icon" type="image/x-icon" href="/static/app_icon.ico?v=7">
+  <link rel="icon" type="image/png" sizes="256x256" href="/static/app_icon_256.png?v=7">
+  <link rel="apple-touch-icon" href="/static/app_icon_256.png?v=7">
   <link rel="stylesheet" href="/static/style.css?v=20260307c">
 </head>
 <body class="ui-font-{{ ui_font_mode|default('default') }} {% if comic_mode %}comic-mode{% endif %}">
   <header id="appHeader">
-    <h1>{{ tr("Label Enricher") }}</h1>
+    <div class="app-brand">
+      <img class="app-brand-icon" src="/static/app_icon_source.svg?v=7" alt="">
+      <h1>{{ tr("Label Enricher") }}</h1>
+    </div>
     <div id="timeGreeting" class="time-greeting" aria-live="polite"></div>
     <div class="nav-row">
       <nav class="nav-links">
@@ -22,7 +29,7 @@
           <button class="btn btn-md btn-secondary" type="submit">{% if comic_mode %}{{ tr("Comic: ON") }}{% else %}{{ tr("Comic: OFF") }}{% endif %}</button>
         </form>
         <form class="nav-close" action="/app/close" method="post">
-          <button class="btn btn-md btn-attn" type="submit">{{ tr("Close App") }}</button>
+          <button id="closeAppBtn" class="btn btn-md btn-attn" type="button">{{ tr("Close App") }}</button>
         </form>
       </div>
     </div>
@@ -53,6 +60,21 @@
       if (hour < 12) el.textContent = morning;
       else if (hour < 18) el.textContent = afternoon;
       else el.textContent = evening;
+    })();
+
+    (function () {
+      const pdfUrl = {{ (('/batch/view-pdf?path=' ~ (open_pdf|urlencode)) if open_pdf else '')|tojson }};
+      if (!pdfUrl) return;
+      try {
+        window.open(pdfUrl, '_blank');
+      } catch (err) {
+      }
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('open_pdf');
+        window.history.replaceState({}, '', url.toString());
+      } catch (err) {
+      }
     })();
 
     (function () {
@@ -93,9 +115,53 @@
         return window.showAppConfirm(message || okMsg).then(() => true);
       };
 
+      const closeBtn = document.getElementById('closeAppBtn');
+      const closeForm = closeBtn ? closeBtn.closest('form.nav-close') : null;
+
+      function triggerCloseApp() {
+        const action = (closeForm instanceof HTMLFormElement && closeForm.action) ? closeForm.action : '/app/close';
+        try {
+          if (navigator.sendBeacon) {
+            navigator.sendBeacon(action, new Blob([], { type: 'application/x-www-form-urlencoded' }));
+          } else {
+            fetch(action, { method: 'POST', keepalive: true }).catch(() => {});
+          }
+        } catch (err) {
+          try {
+            fetch(action, { method: 'POST', keepalive: true }).catch(() => {});
+          } catch (innerErr) {
+          }
+        }
+        const attemptClose = () => {
+          try { window.close(); } catch (err) {}
+        };
+        attemptClose();
+        setTimeout(attemptClose, 60);
+        setTimeout(attemptClose, 180);
+        setTimeout(() => {
+          try {
+            if (document.visibilityState === 'visible') {
+              document.title = 'Label Enricher';
+              document.body.innerHTML = '<main style="font: 16px/1.4 Segoe UI, Arial, sans-serif; padding: 32px; color: #203126;"><h2 style="margin:0 0 8px;">Peace out girl scout</h2><p style="margin:0;">The app is closed. If this tab did not auto-close, you can close it now.</p></main>';
+            }
+          } catch (err) {}
+        }, 450);
+      }
+
+      closeBtn?.addEventListener('click', () => {
+        triggerCloseApp();
+      });
+
       document.addEventListener('submit', async (e) => {
         const form = e.target;
         if (!(form instanceof HTMLFormElement)) return;
+
+        if (form.classList.contains('nav-close')) {
+          e.preventDefault();
+          triggerCloseApp();
+          return;
+        }
+
         const message = form.getAttribute('data-confirm');
         if (!message) return;
         e.preventDefault();
@@ -112,3 +178,8 @@
   </script>
 </body>
 </html>
+
+
+
+
+

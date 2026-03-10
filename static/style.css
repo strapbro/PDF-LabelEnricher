@@ -1,4 +1,4 @@
-﻿ :root {
+ :root {
   --dust-grey: #dad7cd;
   --dry-sage: #a3b18a;
   --fern: #588157;
@@ -47,7 +47,7 @@ header {
   cursor: pointer;
   position: relative;
   top: 0;
-  margin-top: -8px;
+  margin-top: -2px;
   z-index: 50;
   color: #f2f7ff;
   padding: 26px 22px 18px 22px;
@@ -57,11 +57,28 @@ header {
   -webkit-backdrop-filter: blur(12px) saturate(130%);
 }
 
-header h1 {
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 10px;
-  font-size: 26px;
+}
+
+.app-brand-icon {
+  width: 59px;
+  height: 59px;
+  display: block;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 64px;
   font-weight: 800;
   letter-spacing: 0.24px;
+  color: #fff6eb;
+  text-shadow: 0 1px 0 rgba(255, 246, 236, 0.1);
 }
 
 .nav-row {
@@ -264,6 +281,18 @@ button:active,
   box-shadow: 0 6px 14px rgba(52, 78, 65, 0.16);
 }
 
+.btn-soft-danger {
+  background: #fdebea;
+  color: #8b3a35;
+  border: 1px solid #efc2bc;
+  box-shadow: none;
+}
+
+.btn-soft-danger:hover {
+  background: #f9dfdd;
+  box-shadow: 0 6px 14px rgba(185, 96, 86, 0.16);
+}
+
 input,
 select,
 textarea {
@@ -337,7 +366,7 @@ pre {
 }
 
 .time-greeting {
-  font-size: 36px;
+  font-size: 44px;
   font-weight: 900;
   line-height: 1.05;
   margin: 2px 0 10px;
@@ -427,3 +456,12 @@ body > header {
 .comic-mode * {
   font-family: "Comic Sans MS", "Comic Sans", "Chalkboard SE", cursive !important;
 }
+
+
+
+
+
+
+
+
+

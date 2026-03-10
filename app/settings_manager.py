@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import subprocess
@@ -57,6 +57,18 @@ DEFAULT_CONFIG = {
         "secondary_anchor": "midline",
         "secondary_strip_height": 36,
         "secondary_strip_gap": 6,
+        "spill_margin_box_height": 36,
+        "spill_font_size": 11,
+        "spill_line_spacing": 14,
+        "compact_threshold": 4,
+        "summary_page_min_items": 4,
+        "summary_page_mode": "half_page",
+        "summary_page_orientation": "normal",
+        "summary_page_font_size": 20,
+        "summary_page_line_spacing": 24,
+        "summary_page_wrap_mode": "word",
+        "summary_page_text_align": "left",
+        "summary_page_margin": 24,
         "field_order": ["label", "qty", "total", "location", "title"],
         "inline_fields_csv": "",
         "inline_separator": " | ",
@@ -99,12 +111,21 @@ DEFAULT_CONFIG = {
 class SettingsManager:
     def __init__(self) -> None:
         self.base_dir = self._resolve_base_dir()
+        self.resource_dir = self._resolve_resource_dir()
         self.config_path = self.base_dir / "config.yaml"
         self._config = self._load_or_create()
         self.ensure_directories()
 
     def _resolve_base_dir(self) -> Path:
         if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent
+        return Path(__file__).resolve().parents[1]
+
+    def _resolve_resource_dir(self) -> Path:
+        if getattr(sys, "frozen", False):
+            bundle_dir = getattr(sys, "_MEIPASS", None)
+            if bundle_dir:
+                return Path(bundle_dir)
             return Path(sys.executable).resolve().parent
         return Path(__file__).resolve().parents[1]
 
@@ -165,16 +186,18 @@ class SettingsManager:
 
     def open_folder(self, path: Path) -> bool:
         target = path
-        try:
+        if not target.exists() and target.suffix:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        elif not target.exists():
             target.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
 
         target_str = str(target.resolve())
 
-        # `start` tends to bring Explorer to the foreground more reliably.
         try:
-            subprocess.Popen(f'start "" "{target_str}"', shell=True)
+            if target.is_file():
+                subprocess.Popen(["explorer.exe", "/select,", target_str], close_fds=True)
+            else:
+                subprocess.Popen(["explorer.exe", target_str], close_fds=True)
             return True
         except Exception:
             pass
@@ -183,14 +206,6 @@ class SettingsManager:
             os.startfile(target_str)  # type: ignore[attr-defined]
             return True
         except Exception:
-            pass
-
-        try:
-            subprocess.Popen(["explorer", target_str])
-            return True
-        except Exception:
             return False
-
-
 
 

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import copy
 import json
@@ -18,7 +18,7 @@ from .item_db import ItemDB
 from .label_text_extractor import extract_label_signals
 from .label_matcher import match_label
 from .order_parser import parse_amazon_packing_slips, parse_amazon_tsv, parse_ebay_csv
-from .overlay_renderer import build_overlay_lines, create_backside_pdf, create_info_panel_overlay_pdf, create_overlay_pdf, get_page_size
+from .overlay_renderer import build_overlay_lines, build_compact_overlay_lines, create_backside_pdf, create_info_panel_overlay_pdf, create_overlay_pdf, create_summary_half_page, get_page_size
 from .pdf_merge import append_backside_page, merge_overlay_on_first_page, merge_overlays_on_first_page
 from .platform_detector import detect_platform_from_path, parse_order_id_from_filename
 from .settings_manager import SettingsManager
@@ -283,14 +283,16 @@ class BatchManager:
         # Only apply strict overlap filtering when filename order IDs cover most Amazon labels.
         coverage = len(amazon_ids) / max(1, len(amazon_label_pdfs))
         return coverage >= 0.7
-    def _build_orders(self, files: list[Path], label_pdfs: list[Path]) -> dict[str, dict[str, Any]]:
+    def _build_orders(self, files: list[Path], label_pdfs: list[Path]) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
         ebay_csvs = self._find_ebay_csvs(files)
         amazon_txts = self._find_amazon_txts(files)
         packing_slips = self._find_packing_slips(files)
 
         orders: dict[str, dict[str, Any]] = {}
+        warnings: dict[str, Any] = {"scientific_notation_item_numbers": 0}
         for ebay_csv in ebay_csvs:
-            parsed_ebay = parse_ebay_csv(ebay_csv)
+            parsed_ebay, ebay_warnings = parse_ebay_csv(ebay_csv)
+            warnings["scientific_notation_item_numbers"] += int(ebay_warnings.get("scientific_notation_item_numbers", 0) or 0)
             for rec in parsed_ebay.values():
                 self._merge_order_record(orders, rec)
 
@@ -324,7 +326,9 @@ class BatchManager:
                     "total_paid": 0.0,
                     "source": "stub",
                 }
-        return orders
+        if not warnings.get("scientific_notation_item_numbers"):
+            warnings = {}
+        return orders, warnings
 
     def _enrich_amazon_orders_with_packing_slips(self, orders: dict[str, dict[str, Any]], slip_rows: dict[str, dict[str, Any]]) -> None:
         for order_id, slip in slip_rows.items():
@@ -518,7 +522,7 @@ class BatchManager:
             logging.info("Batch end (packing slip sync): %s", report["summary"])
             return {"ok": True, "batch_dir": str(batch_dir), "report": report}
 
-        orders = self._build_orders(files, label_pdfs)
+        orders, build_warnings = self._build_orders(files, label_pdfs)
         if not orders:
             return {"ok": False, "error": "No order data found. Add eBay OrdersReport CSV and/or Amazon Order Report TXT."}
 
@@ -540,6 +544,7 @@ class BatchManager:
         report: dict[str, Any] = {
             "timestamp": ts,
             "results": [],
+            "warnings": build_warnings,
             "summary": {
                 "matched": 0,
                 "unresolved": 0,
@@ -751,6 +756,144 @@ class BatchManager:
 
         logging.info("Batch end: %s", report["summary"])
         return {"ok": True, "batch_dir": str(batch_dir), "report": report}
+
+    def _recount_batch_summary(self, report: dict[str, Any]) -> None:
+        results = report.get("results", []) if isinstance(report, dict) else []
+        summary = dict(report.get("summary", {}) if isinstance(report, dict) else {})
+        summary["matched"] = sum(1 for r in results if str(r.get("status", "")).lower() == "matched")
+        summary["unresolved"] = sum(1 for r in results if str(r.get("status", "")).lower() == "unresolved")
+        summary["errors"] = sum(1 for r in results if str(r.get("status", "")).lower() == "error")
+        report["summary"] = summary
+
+    def _build_matched_report_entry(
+        self,
+        *,
+        label_pdf: str,
+        source_pdf: Path,
+        order: dict[str, Any],
+        output_pdf: Path,
+        idx: dict[tuple[str, str], dict[str, str]],
+        process_index: int,
+    ) -> dict[str, Any]:
+        label_signals = extract_label_signals(source_pdf)
+        sort_meta = self._sort_meta_for_order(order, idx, label_signals.get("carrier", ""))
+        items = list(order.get("items", []) or [])
+        total_paid = 0.0
+        try:
+            total_paid = float(order.get("total_paid", 0.0) or 0.0)
+        except Exception:
+            total_paid = 0.0
+
+        quantity_total = 0
+        item_keys: list[str] = []
+        item_titles: list[str] = []
+        for item in items:
+            try:
+                quantity_total += int(item.get("quantity", 1) or 1)
+            except Exception:
+                quantity_total += 1
+
+            key = str(
+                item.get("item_sku", "")
+                or item.get("ebay_item_number", "")
+                or item.get("item_id", "")
+                or item.get("item_asin", "")
+                or ""
+            ).strip()
+            if key and key not in item_keys:
+                item_keys.append(key)
+
+            title = str(item.get("title", "") or "").strip()
+            if title and title not in item_titles:
+                item_titles.append(title)
+
+        return {
+            "label_pdf": str(label_pdf or ""),
+            "status": "matched",
+            "order_id": order.get("order_id", ""),
+            "platform": order.get("platform", ""),
+            "ship_name": order.get("ship_name", ""),
+            "ship_postal": order.get("ship_postal", ""),
+            "tracking_number": order.get("tracking_number", ""),
+            "carrier": label_signals.get("carrier", ""),
+            "method": "manual_queue_resolution",
+            "confidence": 1.0,
+            "output_pdf": str(output_pdf),
+            "process_index": process_index,
+            "sort_label": sort_meta.get("label", ""),
+            "sort_qty": sort_meta.get("qty", 0),
+            "sort_item_key": sort_meta.get("item_key", ""),
+            "sort_location": sort_meta.get("location", ""),
+            "sort_carrier": sort_meta.get("carrier", ""),
+            "item_count": len(items),
+            "quantity_total": quantity_total,
+            "total_paid": round(total_paid, 2),
+            "item_keys": item_keys,
+            "item_titles": item_titles,
+        }
+
+    def write_resolved_label_into_latest_batch(
+        self,
+        queue_entry: dict[str, Any],
+        order: dict[str, Any],
+        source_pdf: Path,
+        idx: dict[tuple[str, str], dict[str, str]],
+    ) -> dict[str, Any]:
+        latest = self._latest_batch_dir()
+        if latest is None:
+            output_dir = self.settings.processed_root_folder / "manual_resolved"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            out = self._render_one_label(source_pdf, order, idx, output_dir)
+            return {"ok": True, "output_pdf": str(out), "batch_updated": False}
+
+        output_dir = latest / "output_pdfs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out = self._render_one_label(source_pdf, order, idx, output_dir)
+
+        report_path = latest / "batch_report.json"
+        report: dict[str, Any] = {}
+        if report_path.exists():
+            try:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            except Exception:
+                report = {}
+
+        results = list(report.get("results", []) if isinstance(report, dict) else [])
+        target_label_pdf = str(queue_entry.get("label_pdf", "") or source_pdf)
+        existing_index = len(results)
+
+        for i, row in enumerate(results):
+            if str(row.get("label_pdf", "") or "") != target_label_pdf:
+                continue
+            try:
+                existing_index = int(row.get("process_index", i) or i)
+            except Exception:
+                existing_index = i
+            results[i] = self._build_matched_report_entry(
+                label_pdf=target_label_pdf,
+                source_pdf=source_pdf,
+                order=order,
+                output_pdf=out,
+                idx=idx,
+                process_index=existing_index,
+            )
+            break
+        else:
+            results.append(
+                self._build_matched_report_entry(
+                    label_pdf=target_label_pdf,
+                    source_pdf=source_pdf,
+                    order=order,
+                    output_pdf=out,
+                    idx=idx,
+                    process_index=existing_index,
+                )
+            )
+
+        report["results"] = results
+        self._recount_batch_summary(report)
+        atomic_write_json(report_path, report)
+        return {"ok": True, "output_pdf": str(out), "batch_updated": True, "batch_dir": str(latest)}
 
     def _build_label_identity(self, label_pdf: Path, signals: dict[str, Any]) -> str:
         parts: list[str] = []
@@ -1064,6 +1207,21 @@ class BatchManager:
         layout = self.settings.config.get("print_layout", {})
         overlay_mode = str(layout.get("overlay_mode", "margin"))
         overflow_mode = str(layout.get("overflow_mode", "backside"))
+        items = list(order.get("items") or [])
+        summary_page_min_items = int(layout.get("summary_page_min_items", layout.get("compact_threshold", 4)))
+
+        def _should_use_summary_page() -> bool:
+            return summary_page_min_items <= 0 or len(items) > summary_page_min_items
+
+        def _append_followup_page(base_pdf: Path, source_lines: list[str], overflow_lines: list[str]) -> None:
+            followup_pdf = (
+                create_summary_half_page(page_w, page_h, source_lines, self.settings.config)
+                if _should_use_summary_page()
+                else create_backside_pdf(page_w, page_h, overflow_lines, self.settings.config)
+            )
+            tmp_out = base_pdf.with_suffix(".tmp.pdf")
+            append_backside_page(base_pdf, followup_pdf, tmp_out)
+            tmp_out.replace(base_pdf)
 
         out_name = sanitize_filename(
             f"{order.get('platform','')}_{order.get('order_id','')}_{(order.get('items') or [{}])[0].get('item_id','')}_enhanced.pdf"
@@ -1080,20 +1238,14 @@ class BatchManager:
             merge_overlays_on_first_page(working_pdf, overlays, out_path)
             extra_remaining = panel_remaining if panel_remaining else remaining
             if extra_remaining:
-                backside_pdf = create_backside_pdf(page_w, page_h, extra_remaining, self.settings.config)
-                tmp_out = out_path.with_suffix(".tmp.pdf")
-                append_backside_page(out_path, backside_pdf, tmp_out)
-                tmp_out.replace(out_path)
+                _append_followup_page(out_path, lines, extra_remaining)
             return out_path
 
         if overlay_mode == "backside" and str(layout.get("page_mode", "full_page")).startswith("half_sheet_"):
             panel_overlay, remaining = create_info_panel_overlay_pdf(page_w, page_h, lines, self.settings.config)
             if remaining:
                 merge_overlay_on_first_page(working_pdf, panel_overlay, out_path)
-                backside_pdf = create_backside_pdf(page_w, page_h, remaining, self.settings.config)
-                tmp_out = out_path.with_suffix(".tmp.pdf")
-                append_backside_page(out_path, backside_pdf, tmp_out)
-                tmp_out.replace(out_path)
+                _append_followup_page(out_path, lines, remaining)
             else:
                 merge_overlay_on_first_page(working_pdf, panel_overlay, out_path)
             return out_path
@@ -1114,37 +1266,86 @@ class BatchManager:
                     spill_layout["orientation_mode"] = "normal"
                     spill_layout["placement_preset"] = "top_margin"
                     spill_layout["margin_box_height"] = int(
-                        layout.get("secondary_strip_height", max(24, int(layout.get("margin_box_height", 36))))
+                        layout.get("spill_margin_box_height", layout.get("margin_box_height", 36))
                     )
+                    spill_layout["edge_inset_x"] = float(layout.get("edge_inset_x", 8)) + float(layout.get("margin_box_width", 32)) + float(layout.get("spill_edge_inset_x", 8))
+                    spill_layout["edge_inset_y"] = float(layout.get("spill_edge_inset_y", layout.get("edge_inset_y", 24)))
+                    # Use dedicated spill font/spacing settings
+                    spill_layout["font_size"] = int(layout.get("spill_font_size", layout.get("font_size", 11)))
+                    spill_layout["line_spacing"] = int(layout.get("spill_line_spacing", layout.get("line_spacing", 14)))
 
-                    top_spill_overlay, still_remaining = create_overlay_pdf(page_w, page_h, still_remaining, spill_cfg, region="primary")
+                    top_spill_overlay, still_remaining = create_overlay_pdf(
+                        page_w,
+                        page_h,
+                        still_remaining,
+                        spill_cfg,
+                        region="primary",
+                        preset_override="top_margin",
+                    )
                     overlays.append(top_spill_overlay)
 
                     if still_remaining:
-                        spill_layout["placement_preset"] = "bottom_margin"
-                        bottom_spill_overlay, still_remaining = create_overlay_pdf(page_w, page_h, still_remaining, spill_cfg, region="primary")
+                        bottom_spill_overlay, still_remaining = create_overlay_pdf(
+                            page_w,
+                            page_h,
+                            still_remaining,
+                            spill_cfg,
+                            region="primary",
+                            preset_override="bottom_margin",
+                        )
                         overlays.append(bottom_spill_overlay)
 
-                    if still_remaining:
-                        logging.warning("Overlay overflow truncated after side + top/bottom spill regions: %s", working_pdf)
+                    # --- Auto-compact retry ---
+                    # If lines still overflow after all 4 zones AND item count
+                    # exceeds the compact threshold, rebuild in compact 2-per-line
+                    # format and re-render from scratch.
+                    items = order.get("items", []) or []
+                    compact_threshold = int(layout.get("compact_threshold", 4))
+                    if still_remaining and len(items) > compact_threshold:
+                        compact_lines = build_compact_overlay_lines(order, item_rows, self.settings.config)
+                        p_ov, c_remaining = create_overlay_pdf(page_w, page_h, compact_lines, self.settings.config, region="primary")
+                        c_overlays = [p_ov]
+                        s_ov, c_remaining = create_overlay_pdf(page_w, page_h, c_remaining, self.settings.config, region="secondary")
+                        c_overlays.append(s_ov)
+                        if c_remaining:
+                            ts_ov, c_remaining = create_overlay_pdf(
+                                page_w,
+                                page_h,
+                                c_remaining,
+                                spill_cfg,
+                                region="primary",
+                                preset_override="top_margin",
+                            )
+                            c_overlays.append(ts_ov)
+                        if c_remaining:
+                            bs_ov, c_remaining = create_overlay_pdf(
+                                page_w,
+                                page_h,
+                                c_remaining,
+                                spill_cfg,
+                                region="primary",
+                                preset_override="bottom_margin",
+                            )
+                            c_overlays.append(bs_ov)
+                        merge_overlays_on_first_page(working_pdf, c_overlays, out_path)
+                        # Ultimate fallback: summary half-page
+                        if c_remaining:
+                            _append_followup_page(out_path, compact_lines, c_remaining)
+                        return out_path
 
                     merge_overlays_on_first_page(working_pdf, overlays, out_path)
+                    if still_remaining:
+                        _append_followup_page(out_path, lines, still_remaining)
                 else:
                     merge_overlays_on_first_page(working_pdf, overlays, out_path)
                     if still_remaining:
-                        backside_pdf = create_backside_pdf(page_w, page_h, still_remaining, self.settings.config)
-                        tmp_out = out_path.with_suffix(".tmp.pdf")
-                        append_backside_page(out_path, backside_pdf, tmp_out)
-                        tmp_out.replace(out_path)
+                        _append_followup_page(out_path, lines, still_remaining)
             else:
                 if overlay_mode == "backside":
                     append_backside_page(working_pdf, create_backside_pdf(page_w, page_h, lines, self.settings.config), out_path)
                 else:
                     merge_overlay_on_first_page(working_pdf, primary_overlay, out_path)
-                    backside_pdf = create_backside_pdf(page_w, page_h, remaining, self.settings.config)
-                    tmp_out = out_path.with_suffix(".tmp.pdf")
-                    append_backside_page(out_path, backside_pdf, tmp_out)
-                    tmp_out.replace(out_path)
+                    _append_followup_page(out_path, lines, remaining)
         else:
             if overlay_mode == "backside":
                 append_backside_page(working_pdf, create_backside_pdf(page_w, page_h, lines, self.settings.config), out_path)
@@ -1311,14 +1512,13 @@ class BatchManager:
     def resolve_selected_variations(self) -> dict[str, Any]:
         queue = self._load_unresolved_queue()
         if not queue:
-            return {"ok": True, "generated": 0, "remaining": 0, "errors": []}
+            return {"ok": True, "generated": 0, "remaining": 0, "errors": [], "batch_updated": False}
 
         kept: list[dict[str, Any]] = []
         generated = 0
         errors: list[str] = []
         idx = self.item_db.index()
-        output_dir = self.settings.processed_root_folder / "manual_resolved"
-        output_dir.mkdir(parents=True, exist_ok=True)
+        batch_updated = False
 
         for row in queue:
             if str(row.get("reason", "")) != "multi_variation_choice_required":
@@ -1351,7 +1551,8 @@ class BatchManager:
 
             try:
                 order = self._apply_variant_choice(order, idx, chosen)
-                self._render_one_label(src, order, idx, output_dir)
+                write_result = self.write_resolved_label_into_latest_batch(row, order, src, idx)
+                batch_updated = batch_updated or bool(write_result.get("batch_updated"))
                 generated += 1
             except Exception:
                 logging.exception("Failed to generate output for variation queue row: %s", row.get("label_pdf", ""))
@@ -1359,7 +1560,15 @@ class BatchManager:
                 kept.append(row)
 
         self._save_unresolved_queue(kept)
-        return {"ok": True, "generated": generated, "remaining": len(kept), "errors": errors}
+        combined = self.combine_latest_output_pdfs() if generated > 0 and batch_updated else {}
+        return {
+            "ok": True,
+            "generated": generated,
+            "remaining": len(kept),
+            "errors": errors,
+            "batch_updated": batch_updated,
+            "combined": combined,
+        }
 
     def resolve_unmatched(self, label_pdf: str, order_id: str, variant_choice: str = "") -> dict[str, Any]:
         queue = self._load_unresolved_queue()
@@ -1391,13 +1600,19 @@ class BatchManager:
         if src is None or not src.exists():
             return {"ok": False, "error": "Source label PDF not found"}
 
-        output_dir = self.settings.processed_root_folder / "manual_resolved"
-        output_dir.mkdir(parents=True, exist_ok=True)
         idx = self.item_db.index()
-        out = self._render_one_label(src, order, idx, output_dir)
+        write_result = self.write_resolved_label_into_latest_batch(target, order, src, idx)
+        out = Path(str(write_result.get("output_pdf", "")))
 
         self._save_unresolved_queue(kept)
-        return {"ok": True, "output_pdf": str(out)}
+        combined = self.combine_latest_output_pdfs() if write_result.get("batch_updated") else {}
+        return {
+            "ok": True,
+            "output_pdf": str(out),
+            "remaining": len(kept),
+            "batch_updated": bool(write_result.get("batch_updated")),
+            "combined": combined,
+        }
 
     def remove_unresolved_entry(self, label_pdf: str) -> bool:
         queue = self._load_unresolved_queue()
@@ -1649,6 +1864,9 @@ class BatchManager:
                 shutil.rmtree(p, ignore_errors=True)
                 removed += 1
         return removed
+
+
+
 
 
 
