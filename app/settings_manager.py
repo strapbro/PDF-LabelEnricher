@@ -69,6 +69,7 @@ DEFAULT_CONFIG = {
         "summary_page_wrap_mode": "word",
         "summary_page_text_align": "left",
         "summary_page_margin": 24,
+        "total_display_mode": "grand_total",
         "field_order": ["label", "qty", "total", "location", "title"],
         "inline_fields_csv": "",
         "inline_separator": " | ",
@@ -207,5 +208,6 @@ class SettingsManager:
             return True
         except Exception:
             return False
+
 
 

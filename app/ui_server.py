@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import copy
 import csv
@@ -1560,6 +1560,7 @@ def _layout_ui_defaults() -> dict[str, Any]:
         "summary_page_wrap_mode": str(layout.get("summary_page_wrap_mode", layout.get("wrap_mode", "word"))),
         "summary_page_text_align": str(layout.get("summary_page_text_align", layout.get("text_align", "left"))),
         "summary_page_margin": int(layout.get("summary_page_margin", 24)),
+        "total_display_mode": str(layout.get("total_display_mode", "grand_total")),
         "text_align": str(layout.get("text_align", "left")),
         "wrap_mode": str(layout.get("wrap_mode", "word")),
         "line_layout_mode": _detect_line_layout_mode(field_order_csv, inline_fields_csv, line_groups_csv),
@@ -1664,6 +1665,7 @@ def _build_preview_config(
     layout["summary_page_wrap_mode"] = str(summary_page_wrap_mode)
     layout["summary_page_text_align"] = str(summary_page_text_align)
     layout["summary_page_margin"] = int(summary_page_margin)
+    layout["total_display_mode"] = "subtotal" if str(total_display_mode or "").strip().lower() == "subtotal" else "grand_total"
     layout["text_align"] = str(text_align)
     layout["wrap_mode"] = str(wrap_mode)
     layout["inline_separator"] = str(inline_separator)
@@ -1734,6 +1736,7 @@ def _sample_lines_for_order(field_order_csv: str, inline_fields_csv: str, show_f
         "platform": "amazon",
         "order_id": "SAMPLE-001",
         "total_paid": 26.98,
+        "subtotal_paid": 24.49,
         "items": [
             {"item_id": "K3-PBV6-ON0I", "title": "64oz bowl lid for Ninja blender replacement with extra long descriptive title", "quantity": 2},
             {"item_id": "B081YY3ZBV", "title": "Shark motor head attachment with extra long descriptive title for overflow preview", "quantity": 1},
@@ -2166,6 +2169,7 @@ def create_app() -> FastAPI:
         summary_page_wrap_mode: str = Query("word"),
         summary_page_text_align: str = Query("left"),
         summary_page_margin: int = Query(24),
+        total_display_mode: str = Query("grand_total"),
         text_align: str = Query("left"),
         wrap_mode: str = Query("word"),
         line_layout_mode: str = Query("qty_label_loc_inline"),
@@ -2207,6 +2211,7 @@ def create_app() -> FastAPI:
                 summary_page_wrap_mode=summary_page_wrap_mode,
                 summary_page_text_align=summary_page_text_align,
                 summary_page_margin=summary_page_margin,
+                total_display_mode=total_display_mode,
                 text_align=text_align,
                 wrap_mode=wrap_mode,
                 line_layout_mode=line_layout_mode,
@@ -3131,6 +3136,7 @@ def create_app() -> FastAPI:
         summary_page_wrap_mode: str = Form("word"),
         summary_page_text_align: str = Form("left"),
         summary_page_margin: int = Form(24),
+        total_display_mode: str = Form("grand_total"),
         text_align: str = Form("left"),
         wrap_mode: str = Form("word"),
         line_layout_mode: str = Form("qty_label_loc_inline"),
@@ -3184,7 +3190,8 @@ def create_app() -> FastAPI:
             summary_page_wrap_mode=summary_page_wrap_mode,
             summary_page_text_align=summary_page_text_align,
             summary_page_margin=summary_page_margin,
-            text_align=text_align,
+                total_display_mode=total_display_mode,
+                text_align=text_align,
             wrap_mode=wrap_mode,
             line_layout_mode=line_layout_mode,
             field_order_csv=field_order_csv,
@@ -3367,6 +3374,10 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+
+
 
 
 
