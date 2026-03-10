@@ -1738,10 +1738,12 @@ def _sample_lines_for_order(field_order_csv: str, inline_fields_csv: str, show_f
         "order_id": "SAMPLE-001",
         "total_paid": 26.98,
         "subtotal_paid": 24.49,
+        "item_subtotal_paid": 20.99,
+        "shipping_subtotal_paid": 3.50,
         "items": [
-            {"item_id": "K3-PBV6-ON0I", "title": "64oz bowl lid for Ninja blender replacement with extra long descriptive title", "quantity": 2},
-            {"item_id": "B081YY3ZBV", "title": "Shark motor head attachment with extra long descriptive title for overflow preview", "quantity": 1},
-            {"item_id": "HV320-BODY", "title": "Body assembly for Shark handheld vacuum with longer overflow sample text", "quantity": 1},
+            {"item_id": "K3-PBV6-ON0I", "title": "64oz bowl lid for Ninja blender replacement", "quantity": 2, "item_subtotal": 7.49},
+            {"item_id": "B081YY3ZBV", "title": "Shark motor head attachment", "quantity": 1, "item_subtotal": 8.50},
+            {"item_id": "HV320-BODY", "title": "Vacuum body assembly", "quantity": 1, "item_subtotal": 5.00},
         ],
     }
     sample_rows = [
@@ -3375,6 +3377,7 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
 
 
 
