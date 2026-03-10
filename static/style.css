@@ -465,3 +465,208 @@ body > header {
 
 
 
+
+/* ===== Premium Theme System (2026-03 dark-mode pass) ===== */
+:root {
+  --pm-radius-sm: 10px;
+  --pm-radius-md: 16px;
+  --pm-radius-lg: 24px;
+  --pm-transition: 180ms cubic-bezier(.2,.8,.2,1);
+}
+
+body.theme-dark {
+  --pm-bg: #090b10;
+  --pm-bg-2: #0f131b;
+  --pm-ink: #edf2ff;
+  --pm-ink-soft: #a9b4cc;
+  --pm-surface: rgba(20, 26, 38, 0.72);
+  --pm-surface-2: rgba(28, 36, 52, 0.78);
+  --pm-border: rgba(182, 201, 255, 0.18);
+  --pm-border-strong: rgba(222, 231, 255, 0.3);
+  --pm-shadow: 0 20px 54px rgba(2, 5, 14, 0.5);
+  --pm-ring: rgba(128, 151, 255, 0.34);
+  --pm-accent: linear-gradient(95deg, rgba(108, 190, 255, 0.9), rgba(201, 141, 255, 0.9), rgba(104, 230, 217, 0.88));
+}
+
+body.theme-light {
+  --pm-bg: #f4f7ff;
+  --pm-bg-2: #ebf0fb;
+  --pm-ink: #172131;
+  --pm-ink-soft: #4f5d75;
+  --pm-surface: rgba(255, 255, 255, 0.8);
+  --pm-surface-2: rgba(255, 255, 255, 0.93);
+  --pm-border: rgba(91, 116, 170, 0.2);
+  --pm-border-strong: rgba(67, 89, 142, 0.35);
+  --pm-shadow: 0 18px 42px rgba(52, 78, 123, 0.15);
+  --pm-ring: rgba(86, 120, 198, 0.22);
+  --pm-accent: linear-gradient(95deg, rgba(90, 140, 255, 0.92), rgba(173, 94, 232, 0.9), rgba(60, 182, 192, 0.88));
+}
+
+body.theme-dark,
+body.theme-light {
+  color: var(--pm-ink);
+  background:
+    linear-gradient(transparent 95%, rgba(130, 150, 190, 0.11) 95%),
+    linear-gradient(90deg, transparent 95%, rgba(130, 150, 190, 0.11) 95%),
+    radial-gradient(1200px 560px at 10% -5%, rgba(89, 132, 238, 0.12), transparent 62%),
+    radial-gradient(900px 600px at 88% -8%, rgba(190, 118, 220, 0.1), transparent 60%),
+    linear-gradient(180deg, var(--pm-bg), var(--pm-bg-2));
+  background-size: 46px 46px, 46px 46px, auto, auto, auto;
+}
+
+body.theme-dark header,
+body.theme-light header {
+  background: color-mix(in srgb, var(--pm-surface-2) 78%, transparent);
+  border: 1px solid var(--pm-border);
+  border-radius: 0 0 var(--pm-radius-lg) var(--pm-radius-lg);
+  box-shadow: var(--pm-shadow);
+  backdrop-filter: blur(14px) saturate(125%);
+  -webkit-backdrop-filter: blur(14px) saturate(125%);
+}
+
+body.theme-dark header h1,
+body.theme-light header h1 {
+  color: var(--pm-ink);
+  font-size: clamp(36px, 5vw, 54px);
+  letter-spacing: 0.02em;
+  text-shadow: none;
+}
+
+body.theme-dark .nav-links a,
+body.theme-light .nav-links a {
+  border-radius: 999px;
+  border: 1px solid var(--pm-border);
+  color: var(--pm-ink);
+  background: color-mix(in srgb, var(--pm-surface) 88%, transparent);
+  box-shadow: none;
+  transition: transform var(--pm-transition), border-color var(--pm-transition), background var(--pm-transition);
+}
+
+body.theme-dark .nav-links a:hover,
+body.theme-light .nav-links a:hover {
+  transform: translateY(-1px);
+  border-color: var(--pm-border-strong);
+  background: color-mix(in srgb, var(--pm-surface-2) 94%, transparent);
+}
+
+body.theme-dark main,
+body.theme-light main {
+  padding: clamp(16px, 2.6vw, 32px);
+  max-width: 1560px;
+  margin: 0 auto;
+}
+
+body.theme-dark .card,
+body.theme-light .card {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--pm-surface) 90%, transparent);
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-lg);
+  box-shadow: var(--pm-shadow);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+}
+
+body.theme-dark .card::before,
+body.theme-light .card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--pm-accent);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: .24;
+  pointer-events: none;
+}
+
+body.theme-dark .btn,
+body.theme-light .btn {
+  border-radius: 999px;
+  border: 1px solid var(--pm-border);
+  box-shadow: none;
+}
+
+body.theme-dark .btn-primary,
+body.theme-dark .btn-upload,
+body.theme-dark .btn-open,
+body.theme-light .btn-primary,
+body.theme-light .btn-upload,
+body.theme-light .btn-open {
+  background: #f5f8ff;
+  color: #0f1726;
+  border-color: rgba(255, 255, 255, 0.85);
+}
+
+body.theme-dark .btn-secondary,
+body.theme-light .btn-secondary,
+body.theme-dark .btn-outline,
+body.theme-light .btn-outline {
+  background: color-mix(in srgb, var(--pm-surface-2) 90%, transparent);
+  color: var(--pm-ink);
+}
+
+body.theme-dark input,
+body.theme-dark select,
+body.theme-dark textarea,
+body.theme-light input,
+body.theme-light select,
+body.theme-light textarea {
+  border-radius: var(--pm-radius-md);
+  border: 1px solid var(--pm-border);
+  background: color-mix(in srgb, var(--pm-surface-2) 86%, transparent);
+  color: var(--pm-ink);
+}
+
+body.theme-dark input:focus,
+body.theme-dark select:focus,
+body.theme-dark textarea:focus,
+body.theme-light input:focus,
+body.theme-light select:focus,
+body.theme-light textarea:focus {
+  border-color: var(--pm-border-strong);
+  box-shadow: 0 0 0 4px var(--pm-ring);
+}
+
+body.theme-dark .settings-box,
+body.theme-light .settings-box,
+body.theme-dark .line-row,
+body.theme-light .line-row,
+body.theme-dark .line-dropzone,
+body.theme-light .line-dropzone,
+body.theme-dark .preview-frame,
+body.theme-light .preview-frame {
+  border-color: var(--pm-border) !important;
+  background: color-mix(in srgb, var(--pm-surface-2) 86%, transparent) !important;
+  color: var(--pm-ink);
+}
+
+body.theme-dark .field-pill,
+body.theme-light .field-pill {
+  border-color: var(--pm-border) !important;
+  background: color-mix(in srgb, var(--pm-surface-2) 90%, transparent) !important;
+  color: var(--pm-ink) !important;
+}
+
+body.theme-dark .settings-intro,
+body.theme-dark .builder-help,
+body.theme-dark .preview-help,
+body.theme-dark .builder-label,
+body.theme-dark .line-row-title,
+body.theme-dark .empty-hint,
+body.theme-light .settings-intro,
+body.theme-light .builder-help,
+body.theme-light .preview-help,
+body.theme-light .builder-label,
+body.theme-light .line-row-title,
+body.theme-light .empty-hint {
+  color: var(--pm-ink-soft) !important;
+}
+
+body.theme-dark .box-title,
+body.theme-light .box-title {
+  color: var(--pm-ink) !important;
+}

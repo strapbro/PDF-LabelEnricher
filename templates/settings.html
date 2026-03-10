@@ -29,7 +29,13 @@
                 <option value="wingdings" {% if ui.ui_font_mode == 'wingdings' %}selected{% endif %}>{{ tr("Wingdings (UI only)") }}</option>
               </select>
             </label>
-            <p class="builder-help" style="margin-top:8px;">{{ tr("Font mode changes the app UI only. Label PDF overlay text stays readable.") }}</p>
+            <label><span>{{ tr("Theme mode") }}</span>
+              <select name="ui_theme_mode" id="ui_theme_mode">
+                <option value="dark" {% if ui.ui_theme_mode == 'dark' %}selected{% endif %}>{{ tr("Dark") }}</option>
+                <option value="light" {% if ui.ui_theme_mode == 'light' %}selected{% endif %}>{{ tr("Light") }}</option>
+              </select>
+            </label>
+            <p class="builder-help" style="margin-top:8px;">{{ tr("Theme and font mode change the app UI only. Label PDF overlay text stays readable.") }}</p>
           </div>
 
           <div class="settings-box">
@@ -215,6 +221,34 @@
 
             <label>{{ tr("Summary page margin (points)") }}
               <input type="number" name="summary_page_margin" id="summary_page_margin" value="{{ ui.summary_page_margin }}" min="0" max="160">
+            </label>
+
+            <label>{{ tr("Overflow page font size") }}
+              <input type="number" name="overflow_page_font_size" id="overflow_page_font_size" value="{{ ui.overflow_page_font_size }}" min="8" max="40">
+            </label>
+
+            <label>{{ tr("Overflow page line spacing") }}
+              <input type="number" name="overflow_page_line_spacing" id="overflow_page_line_spacing" value="{{ ui.overflow_page_line_spacing }}" min="8" max="60">
+            </label>
+
+            <label>{{ tr("Overflow page wrapping style") }}
+              <select name="overflow_page_wrap_mode" id="overflow_page_wrap_mode">
+                <option value="word" {% if ui.overflow_page_wrap_mode == 'word' %}selected{% endif %}>{{ tr("Wrap by words") }}</option>
+                <option value="char" {% if ui.overflow_page_wrap_mode == 'char' %}selected{% endif %}>{{ tr("Wrap by characters") }}</option>
+                <option value="truncate" {% if ui.overflow_page_wrap_mode == 'truncate' %}selected{% endif %}>{{ tr("Cut with ...") }}</option>
+              </select>
+            </label>
+
+            <label>{{ tr("Overflow page text alignment") }}
+              <select name="overflow_page_text_align" id="overflow_page_text_align">
+                <option value="left" {% if ui.overflow_page_text_align == 'left' %}selected{% endif %}>{{ tr("Left") }}</option>
+                <option value="center" {% if ui.overflow_page_text_align == 'center' %}selected{% endif %}>{{ tr("Center") }}</option>
+                <option value="right" {% if ui.overflow_page_text_align == 'right' %}selected{% endif %}>{{ tr("Right") }}</option>
+              </select>
+            </label>
+
+            <label>{{ tr("Overflow page margin (points)") }}
+              <input type="number" name="overflow_page_margin" id="overflow_page_margin" value="{{ ui.overflow_page_margin }}" min="0" max="200">
             </label>
           </div>
 
@@ -627,6 +661,11 @@
     q.set('summary_page_wrap_mode', fd.get('summary_page_wrap_mode') || 'word');
     q.set('summary_page_text_align', fd.get('summary_page_text_align') || 'left');
     q.set('summary_page_margin', fd.get('summary_page_margin') || '24');
+    q.set('overflow_page_font_size', fd.get('overflow_page_font_size') || '20');
+    q.set('overflow_page_line_spacing', fd.get('overflow_page_line_spacing') || '24');
+    q.set('overflow_page_wrap_mode', fd.get('overflow_page_wrap_mode') || 'word');
+    q.set('overflow_page_text_align', fd.get('overflow_page_text_align') || 'left');
+    q.set('overflow_page_margin', fd.get('overflow_page_margin') || '24');
     q.set('text_align', fd.get('text_align') || 'left');
     q.set('wrap_mode', fd.get('wrap_mode') || 'word');
     q.set('line_layout_mode', fd.get('line_layout_mode') || 'custom');

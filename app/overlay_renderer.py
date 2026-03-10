@@ -916,13 +916,13 @@ def create_info_panel_overlay_pdf(
 
     layout = config["print_layout"]
     font_name = _resolve_font_name(layout)
-    font_size = int(layout.get("backside_font_size", layout.get("font_size", 16)))
-    line_spacing = int(layout.get("backside_line_spacing", layout.get("line_spacing", 20)))
-    wrap_mode = str(layout.get("wrap_mode", "truncate"))
-    text_align = str(layout.get("text_align", "left"))
-    edge_x = float(layout.get("edge_inset_x", 8))
-    edge_y = float(layout.get("edge_inset_y", 24))
-    page_mode = str(layout.get("page_mode", "half_sheet_top"))
+    font_size = int(layout.get("overflow_page_font_size", layout.get("backside_font_size", layout.get("font_size", 16))))
+    line_spacing = int(layout.get("overflow_page_line_spacing", layout.get("backside_line_spacing", layout.get("line_spacing", 20))))
+    wrap_mode = str(layout.get("overflow_page_wrap_mode", layout.get("wrap_mode", "truncate")))
+    text_align = str(layout.get("overflow_page_text_align", layout.get("text_align", "left")))
+    overflow_margin = float(layout.get("overflow_page_margin", layout.get("edge_inset_x", 24)))
+    edge_x = overflow_margin
+    edge_y = overflow_margin
 
     if page_mode == "half_sheet_top":
         region_y0 = 0.0
@@ -963,10 +963,10 @@ def create_backside_pdf(page_w: float, page_h: float, lines: list[str], config: 
 
     layout = config["print_layout"]
     font_name = _resolve_font_name(layout)
-    font_size = int(layout.get("backside_font_size", layout.get("font_size", 16)))
-    line_spacing = int(layout.get("backside_line_spacing", layout.get("line_spacing", 20)))
-    wrap_mode = str(layout.get("wrap_mode", "word"))
-    text_align = str(layout.get("text_align", "left"))
+    font_size = int(layout.get("overflow_page_font_size", layout.get("backside_font_size", layout.get("font_size", 16))))
+    line_spacing = int(layout.get("overflow_page_line_spacing", layout.get("backside_line_spacing", layout.get("line_spacing", 20))))
+    wrap_mode = str(layout.get("overflow_page_wrap_mode", layout.get("wrap_mode", "word")))
+    text_align = str(layout.get("overflow_page_text_align", layout.get("text_align", "left")))
     orientation = str(layout.get("orientation_mode", "normal"))
 
     if orientation == "rotated_90":

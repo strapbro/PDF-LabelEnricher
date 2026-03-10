@@ -45,6 +45,7 @@ def _templates() -> Jinja2Templates:
     ui_cfg = settings.config.get("ui", {}) or {}
     tpl.env.globals["comic_mode"] = bool(ui_cfg.get("comic_mode", False))
     tpl.env.globals["ui_font_mode"] = str(ui_cfg.get("font_mode", "default") or "default")
+    tpl.env.globals["ui_theme_mode"] = str(ui_cfg.get("theme_mode", "dark") or "dark")
     lang = normalize_ui_language(str(ui_cfg.get("language_mode", "en") or "en"))
     tpl.env.globals["ui_language_mode"] = lang
     tpl.env.globals["tr"] = lambda text, **kwargs: translate_ui(text, lang=lang, **kwargs)
@@ -1560,6 +1561,11 @@ def _layout_ui_defaults() -> dict[str, Any]:
         "summary_page_wrap_mode": str(layout.get("summary_page_wrap_mode", layout.get("wrap_mode", "word"))),
         "summary_page_text_align": str(layout.get("summary_page_text_align", layout.get("text_align", "left"))),
         "summary_page_margin": int(layout.get("summary_page_margin", 24)),
+        "overflow_page_font_size": int(layout.get("overflow_page_font_size", layout.get("backside_font_size", layout.get("font_size", 20)))),
+        "overflow_page_line_spacing": int(layout.get("overflow_page_line_spacing", layout.get("backside_line_spacing", layout.get("line_spacing", 24)))),
+        "overflow_page_wrap_mode": str(layout.get("overflow_page_wrap_mode", layout.get("wrap_mode", "word"))),
+        "overflow_page_text_align": str(layout.get("overflow_page_text_align", layout.get("text_align", "left"))),
+        "overflow_page_margin": int(layout.get("overflow_page_margin", layout.get("edge_inset_x", 24))),
         "total_display_mode": str(layout.get("total_display_mode", "grand_total")),
         "text_align": str(layout.get("text_align", "left")),
         "wrap_mode": str(layout.get("wrap_mode", "word")),
@@ -1574,6 +1580,7 @@ def _layout_ui_defaults() -> dict[str, Any]:
         "archive_retention_days": int(settings.config.get("admin", {}).get("archive_retention_days", 14)),
         "ui_language_mode": str(ui_cfg.get("language_mode", "en") or "en"),
         "ui_font_mode": str(ui_cfg.get("font_mode", "default") or "default"),
+        "ui_theme_mode": str(ui_cfg.get("theme_mode", "dark") or "dark"),
         "output_sort_mode": str(output_sort.get("mode", "processed")),
         "sort_priority_1": str((priorities + ["", "", "", ""])[0]),
         "sort_priority_2": str((priorities + ["", "", "", ""])[1]),
@@ -1641,6 +1648,11 @@ def _build_preview_config(
     summary_page_wrap_mode: str = "word",
     summary_page_text_align: str = "left",
     summary_page_margin: int = 24,
+    overflow_page_font_size: int = 20,
+    overflow_page_line_spacing: int = 24,
+    overflow_page_wrap_mode: str = "word",
+    overflow_page_text_align: str = "left",
+    overflow_page_margin: int = 24,
     total_display_mode: str = "grand_total",
 ) -> dict[str, Any]:
     cfg = copy.deepcopy(settings.config)
@@ -1666,6 +1678,11 @@ def _build_preview_config(
     layout["summary_page_wrap_mode"] = str(summary_page_wrap_mode)
     layout["summary_page_text_align"] = str(summary_page_text_align)
     layout["summary_page_margin"] = int(summary_page_margin)
+    layout["overflow_page_font_size"] = int(overflow_page_font_size)
+    layout["overflow_page_line_spacing"] = int(overflow_page_line_spacing)
+    layout["overflow_page_wrap_mode"] = str(overflow_page_wrap_mode)
+    layout["overflow_page_text_align"] = str(overflow_page_text_align)
+    layout["overflow_page_margin"] = int(overflow_page_margin)
     layout["total_display_mode"] = "subtotal" if str(total_display_mode or "").strip().lower() == "subtotal" else "grand_total"
     layout["text_align"] = str(text_align)
     layout["wrap_mode"] = str(wrap_mode)
@@ -2131,6 +2148,17 @@ def create_app() -> FastAPI:
         state = "ON" if next_font == "comic" else "OFF"
         return _redirect_ui(dest, "Comic Mode {state}", state=state)
 
+    @app.post("/theme/mode-toggle")
+    def theme_mode_toggle(request: Request):
+        cfg = settings.config
+        ui_cfg = cfg.setdefault("ui", {})
+        cur_mode = str(ui_cfg.get("theme_mode", "dark") or "dark").strip().lower()
+        next_mode = "light" if cur_mode == "dark" else "dark"
+        ui_cfg["theme_mode"] = next_mode
+        settings.save(cfg)
+        dest = request.headers.get("referer") or "/"
+        return _redirect_ui(dest, "Theme: {mode}", mode=("Dark" if next_mode == "dark" else "Light"))
+
     @app.post("/app/close")
     def close_app():
         _launch_stop_script()
@@ -2174,6 +2202,11 @@ def create_app() -> FastAPI:
         summary_page_wrap_mode: str = Query("word"),
         summary_page_text_align: str = Query("left"),
         summary_page_margin: int = Query(24),
+        overflow_page_font_size: int = Query(20),
+        overflow_page_line_spacing: int = Query(24),
+        overflow_page_wrap_mode: str = Query("word"),
+        overflow_page_text_align: str = Query("left"),
+        overflow_page_margin: int = Query(24),
         total_display_mode: str = Query("grand_total"),
         text_align: str = Query("left"),
         wrap_mode: str = Query("word"),
@@ -2216,6 +2249,11 @@ def create_app() -> FastAPI:
                 summary_page_wrap_mode=summary_page_wrap_mode,
                 summary_page_text_align=summary_page_text_align,
                 summary_page_margin=summary_page_margin,
+                overflow_page_font_size=overflow_page_font_size,
+                overflow_page_line_spacing=overflow_page_line_spacing,
+                overflow_page_wrap_mode=overflow_page_wrap_mode,
+                overflow_page_text_align=overflow_page_text_align,
+                overflow_page_margin=overflow_page_margin,
                 total_display_mode=total_display_mode,
                 text_align=text_align,
                 wrap_mode=wrap_mode,
@@ -2994,7 +3032,8 @@ def create_app() -> FastAPI:
 
         asin = (item_asin or "").strip().upper()
         if p == "amazon" and not asin and key.upper().startswith("B") and len(key) == 10:
-            asin = key.upper()
+            asin = key.upper()
+
 
         t = (title or "").strip()
         label = (custom_label or "").strip()
@@ -3141,6 +3180,11 @@ def create_app() -> FastAPI:
         summary_page_wrap_mode: str = Form("word"),
         summary_page_text_align: str = Form("left"),
         summary_page_margin: int = Form(24),
+        overflow_page_font_size: int = Form(20),
+        overflow_page_line_spacing: int = Form(24),
+        overflow_page_wrap_mode: str = Form("word"),
+        overflow_page_text_align: str = Form("left"),
+        overflow_page_margin: int = Form(24),
         total_display_mode: str = Form("grand_total"),
         text_align: str = Form("left"),
         wrap_mode: str = Form("word"),
@@ -3170,6 +3214,7 @@ def create_app() -> FastAPI:
         sort_dir_carrier: str = Form("asc"),
         ui_language_mode: str = Form("en"),
         ui_font_mode: str = Form("default"),
+        ui_theme_mode: str = Form("dark"),
     ):
         cfg = _build_preview_config(
             margin_direction=margin_direction,
@@ -3195,8 +3240,13 @@ def create_app() -> FastAPI:
             summary_page_wrap_mode=summary_page_wrap_mode,
             summary_page_text_align=summary_page_text_align,
             summary_page_margin=summary_page_margin,
-                total_display_mode=total_display_mode,
-                text_align=text_align,
+            overflow_page_font_size=overflow_page_font_size,
+            overflow_page_line_spacing=overflow_page_line_spacing,
+            overflow_page_wrap_mode=overflow_page_wrap_mode,
+            overflow_page_text_align=overflow_page_text_align,
+            overflow_page_margin=overflow_page_margin,
+            total_display_mode=total_display_mode,
+            text_align=text_align,
             wrap_mode=wrap_mode,
             line_layout_mode=line_layout_mode,
             field_order_csv=field_order_csv,
@@ -3228,8 +3278,11 @@ def create_app() -> FastAPI:
             ui_language_mode = "en"
         if ui_font_mode not in ("default", "comic", "wingdings"):
             ui_font_mode = "default"
+        if ui_theme_mode not in ("light", "dark"):
+            ui_theme_mode = "dark"
         ui_cfg["language_mode"] = ui_language_mode
         ui_cfg["font_mode"] = ui_font_mode
+        ui_cfg["theme_mode"] = ui_theme_mode
         ui_cfg["comic_mode"] = (ui_font_mode == "comic")
         cfg.setdefault("print_layout", {})["comic_mode"] = False
         settings.save(cfg)
