@@ -323,6 +323,9 @@ def parse_amazon_tsv(path: Path, allowed_order_ids: set[str] | None = None) -> d
                     "items": [],
                     "total_paid": 0.0,
                     "subtotal_paid": 0.0,
+                    "item_subtotal_paid": 0.0,
+                    "shipping_subtotal_paid": 0.0,
+                    "service_prefix_text": "",
                 },
             )
 
@@ -336,17 +339,20 @@ def parse_amazon_tsv(path: Path, allowed_order_ids: set[str] | None = None) -> d
             except Exception:
                 qty = 1
 
-            line_subtotal = (
-                _money(row.get("item-price"))
-                + _money(row.get("shipping-price"))
-                - _money(row.get("item-promotion-discount"))
-                - _money(row.get("ship-promotion-discount"))
-            )
+            item_subtotal = _money(row.get("item-price")) - _money(row.get("item-promotion-discount"))
+            shipping_subtotal = _money(row.get("shipping-price")) - _money(row.get("ship-promotion-discount"))
+            line_subtotal = item_subtotal + shipping_subtotal
             line_total = (
                 line_subtotal
                 + _money(row.get("item-tax"))
                 + _money(row.get("shipping-tax"))
             )
+
+            service_level = str(row.get("ship-service-level", "") or "").strip()
+            normalized_service = re.sub(r"\s+", "", service_level).lower()
+            if service_level and normalized_service not in {"", "freeeconomy"} and not str(rec.get("service_prefix_text", "") or "").strip():
+                rec["service_prefix_text"] = service_level
+
             rec["items"].append(
                 {
                     "item_id": item_id,
@@ -356,12 +362,15 @@ def parse_amazon_tsv(path: Path, allowed_order_ids: set[str] | None = None) -> d
                     "quantity": qty,
                     "line_total": line_total,
                     "line_subtotal": line_subtotal,
+                    "item_subtotal": item_subtotal,
+                    "shipping_subtotal": shipping_subtotal,
                 }
             )
             rec["total_paid"] += line_total
             rec["subtotal_paid"] += line_subtotal
+            rec["item_subtotal_paid"] += item_subtotal
+            rec["shipping_subtotal_paid"] += shipping_subtotal
     return records
-
 def parse_amazon_packing_slips(paths: list[Path], allowed_order_ids: set[str] | None = None) -> dict[str, dict[str, Any]]:
     records: dict[str, dict[str, Any]] = {}
     for path in paths:
@@ -446,10 +455,15 @@ def parse_ebay_csv(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any
                     "items": [],
                     "total_paid": 0.0,
                     "subtotal_paid": 0.0,
+                    "item_subtotal_paid": 0.0,
+                    "shipping_subtotal_paid": 0.0,
                     "_explicit_total": 0.0,
                     "_explicit_subtotal": 0.0,
+                    "_explicit_item_subtotal": 0.0,
+                    "_explicit_shipping_subtotal": 0.0,
                     "_item_total_sum": 0.0,
                     "_item_subtotal_sum": 0.0,
+                    "_shipping_subtotal_sum": 0.0,
                     "_summary_qty": 0,
                 },
             )
@@ -475,6 +489,10 @@ def parse_ebay_csv(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any
                     rec["_explicit_total"] = max(float(rec.get("_explicit_total", 0.0) or 0.0), explicit_total)
                 if explicit_subtotal > 0:
                     rec["_explicit_subtotal"] = max(float(rec.get("_explicit_subtotal", 0.0) or 0.0), explicit_subtotal)
+                if sold_for > 0:
+                    rec["_explicit_item_subtotal"] = max(float(rec.get("_explicit_item_subtotal", 0.0) or 0.0), sold_for)
+                if shipping > 0:
+                    rec["_explicit_shipping_subtotal"] = max(float(rec.get("_explicit_shipping_subtotal", 0.0) or 0.0), shipping)
                 try:
                     rec["_summary_qty"] = max(int(rec.get("_summary_qty", 0) or 0), qty)
                 except Exception:
@@ -483,6 +501,8 @@ def parse_ebay_csv(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any
 
             line_total = explicit_total if explicit_total > 0 else (sold_for + shipping)
             line_subtotal = explicit_subtotal if explicit_subtotal > 0 else (sold_for + shipping)
+            item_subtotal = sold_for
+            shipping_subtotal = shipping
 
             variation_details_raw = str(row.get("Variation Details", "") or "").strip()
             variation_detail = _normalize_ebay_variation_details(variation_details_raw)
@@ -495,18 +515,24 @@ def parse_ebay_csv(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any
                     "quantity": qty,
                     "line_total": line_total,
                     "line_subtotal": line_subtotal,
+                    "item_subtotal": item_subtotal,
+                    "shipping_subtotal": shipping_subtotal,
                     "variation_details": variation_details_raw,
                     "variation_detail": variation_detail,
                 }
             )
             rec["_item_total_sum"] += line_total
-            rec["_item_subtotal_sum"] += line_subtotal
+            rec["_item_subtotal_sum"] += item_subtotal
+            rec["_shipping_subtotal_sum"] += shipping_subtotal
 
     for rec in records.values():
         explicit_total = float(rec.pop("_explicit_total", 0.0) or 0.0)
         explicit_subtotal = float(rec.pop("_explicit_subtotal", 0.0) or 0.0)
+        explicit_item_subtotal = float(rec.pop("_explicit_item_subtotal", 0.0) or 0.0)
+        explicit_shipping_subtotal = float(rec.pop("_explicit_shipping_subtotal", 0.0) or 0.0)
         item_total_sum = float(rec.pop("_item_total_sum", 0.0) or 0.0)
         item_subtotal_sum = float(rec.pop("_item_subtotal_sum", 0.0) or 0.0)
+        shipping_subtotal_sum = float(rec.pop("_shipping_subtotal_sum", 0.0) or 0.0)
         summary_qty = int(rec.pop("_summary_qty", 0) or 0)
         detail_qty = 0
         for item in rec.get("items", []) or []:
@@ -526,11 +552,15 @@ def parse_ebay_csv(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any
                         "quantity": 1,
                         "line_total": 0.0,
                         "line_subtotal": 0.0,
+                        "item_subtotal": 0.0,
+                        "shipping_subtotal": 0.0,
                     }
                 )
 
         rec["total_paid"] = explicit_total if explicit_total > 0 else item_total_sum
-        rec["subtotal_paid"] = explicit_subtotal if explicit_subtotal > 0 else item_subtotal_sum
+        rec["subtotal_paid"] = explicit_subtotal if explicit_subtotal > 0 else (item_subtotal_sum + shipping_subtotal_sum)
+        rec["item_subtotal_paid"] = explicit_item_subtotal if explicit_item_subtotal > 0 else item_subtotal_sum
+        rec["shipping_subtotal_paid"] = explicit_shipping_subtotal if explicit_shipping_subtotal > 0 else shipping_subtotal_sum
 
     warnings = {"scientific_notation_item_numbers": scientific_notation_rows} if scientific_notation_rows else {}
     return records, warnings
