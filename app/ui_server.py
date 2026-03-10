@@ -1641,6 +1641,7 @@ def _build_preview_config(
     summary_page_wrap_mode: str = "word",
     summary_page_text_align: str = "left",
     summary_page_margin: int = 24,
+    total_display_mode: str = "grand_total",
 ) -> dict[str, Any]:
     cfg = copy.deepcopy(settings.config)
     layout = cfg.setdefault("print_layout", {})
@@ -3374,6 +3375,8 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
 
 
 
