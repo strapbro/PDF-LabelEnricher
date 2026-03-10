@@ -329,7 +329,8 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
         platform_hint = "ebay"
 
     return {
-        "text": text,
+        "text": search_text,
+        "raw_text": text,
         "platform_hint": platform_hint,
         "ship_postal": postal,
         "tracking_number": tracking,

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -18,6 +18,28 @@ def _norm_order_id(value: str) -> str:
     return "".join(ch for ch in (value or "") if ch.isdigit())
 
 
+
+def _norm_text(value: str) -> str:
+    return " ".join("".join(ch.lower() if ch.isalnum() else " " for ch in (value or "")).split())
+
+
+def _label_text_name_score(ship_name: str, signals: dict[str, Any]) -> float:
+    target = _norm_text(ship_name)
+    hay = _norm_text(str(signals.get("text", "") or ""))
+    if not target or not hay:
+        return 0.0
+    if target in hay:
+        return 1.0
+    parts = [p for p in target.split() if len(p) >= 3]
+    if len(parts) >= 2 and all(p in hay for p in parts[: min(3, len(parts))]):
+        return 0.88
+    return 0.0
+
+
+def _label_text_zip_hit(ship_postal: str, signals: dict[str, Any]) -> bool:
+    zip5 = "".join(ch for ch in (ship_postal or "") if ch.isdigit())[:5]
+    hay = "".join(ch for ch in str(signals.get("text", "") or "") if ch.isdigit())
+    return bool(zip5 and hay and zip5 in hay)
 def _effective_platform_hint(initial_hint: str, signals: dict[str, Any]) -> str:
     hint = (initial_hint or "").strip().lower()
     if hint in ("amazon", "ebay"):
@@ -74,11 +96,19 @@ def best_candidates(label_pdf: Path, orders: dict[str, dict[str, Any]], platform
             score += 1.0
             reasons.append("label_order_id_ebay")
 
+        zip_hit = False
         if rec.get("ship_postal") and signals.get("ship_postal") and rec["ship_postal"][:5] == signals["ship_postal"][:5]:
             score += 0.45
             reasons.append("zip")
+            zip_hit = True
+        elif _label_text_zip_hit(str(rec.get("ship_postal", "") or ""), signals):
+            score += 0.35
+            reasons.append("label_text_zip")
+            zip_hit = True
 
         name_score = _score_name(rec.get("ship_name", ""), signals.get("recipient_name", ""))
+        if name_score < 0.72:
+            name_score = max(name_score, _label_text_name_score(str(rec.get("ship_name", "") or ""), signals))
         score += 0.5 * name_score
         if name_score >= 0.72:
             reasons.append("recipient_name")
@@ -125,7 +155,7 @@ def match_label(label_pdf: Path, orders: dict[str, dict[str, Any]], platform_hin
         }
 
     # Zip + name can be enough for eBay/carrier labels, but keep strict margin.
-    if "zip" in top.get("reasons", []) and "recipient_name" in top.get("reasons", []):
+    if any(r in top.get("reasons", []) for r in ["zip", "label_text_zip"]) and "recipient_name" in top.get("reasons", []):
         second = cands[1]["score"] if len(cands) > 1 else 0.0
         if top["score"] >= 0.84 and (top["score"] - second) >= 0.15:
             return {
