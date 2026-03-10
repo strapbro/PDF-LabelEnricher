@@ -15,28 +15,12 @@ TRACKING_FEDEX_RE = re.compile(r"\b(\d{12}|\d{15}|\d{20}|\d{22})\b")
 AMZ_ORDER_RE = re.compile(r"\b\d{3}-\d{7}-\d{7}\b")
 EBAY_ORDER_RE = re.compile(r"\b\d{2}-\d{5}-\d{5}\b")
 
+BUSINESS_WORDS = {"group", "llc", "inc", "company", "corp", "corporation", "goods", "supply", "supplies", "logistics", "shipping"}
 
-BUSINESS_WORDS = {
-    "group", "llc", "inc", "co", "company", "corp", "corporation", "warehouse",
-    "goods", "supply", "supplies", "store", "shop", "trading", "logistics", "shipping",
-}
 
 
 def _normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
-
-
-def _dedupe_keep_order(values: list[str]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        clean = (value or "").strip()
-        key = clean.lower()
-        if not clean or key in seen:
-            continue
-        seen.add(key)
-        out.append(clean)
-    return out
 
 
 def _extract_text(pdf_path: Path) -> tuple[str, str]:
@@ -46,6 +30,8 @@ def _extract_text(pdf_path: Path) -> tuple[str, str]:
         with fitz.open(str(pdf_path)) as doc:
             if doc.page_count > 0:
                 page = doc[0]
+                # Try multiple rotation matrices because carrier labels are often
+                # stored at +/-90 and plain extraction can miss core fields.
                 text_candidates: list[str] = []
                 word_candidates: list[str] = []
                 for rot in (0, 90, 180, 270):
@@ -59,12 +45,12 @@ def _extract_text(pdf_path: Path) -> tuple[str, str]:
                         words = page.get_text("words", textpage=tp) or []
                         ws = " ".join(str(w[4]) for w in words if len(w) > 4 and str(w[4]).strip())
                         if ws.strip():
-                            word_candidates.append(_normalize_space(ws))
+                            word_candidates.append(ws)
                     except Exception:
                         continue
 
-                page_text = "\n".join(_dedupe_keep_order(text_candidates))
-                words_text = " ".join(_dedupe_keep_order(word_candidates))
+                page_text = max(text_candidates, key=len) if text_candidates else ""
+                words_text = _normalize_space(max(word_candidates, key=len)) if word_candidates else ""
     except Exception:
         pass
 
@@ -120,8 +106,10 @@ def _detect_carrier(full_text: str, tracking_number: str) -> str:
 def _candidate_lines(text: str, words_text: str) -> list[str]:
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if words_text:
+        # Keep a coarse words fallback in case text lines are badly rotated,
+        # but avoid single-token OCR scraps that can look like a city name.
         lines.append(_normalize_space(words_text))
-    return _dedupe_keep_order(lines)
+    return lines
 
 
 def _is_noise_line(line: str) -> bool:
@@ -148,18 +136,16 @@ def _is_noise_line(line: str) -> bool:
         "priority mail",
         "ground",
         "label",
-        "billing",
-        "reference no",
     ]
     return any(t in ll for t in noise)
 
 
 def _extract_shipto_block(lines: list[str]) -> list[str]:
     anchors = ["ship to", "shipto", "to:", "deliver to", "recipient"]
-    for i, ln in enumerate(lines[:160]):
+    for i, ln in enumerate(lines[:120]):
         ll = ln.lower()
         if any(a in ll for a in anchors):
-            return lines[i + 1 : min(i + 12, len(lines))]
+            return lines[i + 1 : min(i + 10, len(lines))]
     return []
 
 
@@ -189,11 +175,6 @@ def _looks_like_single_name(line: str) -> bool:
     if not token.isalpha():
         return False
     return token[0].isupper() and len(token) >= 4
-
-
-def _looks_like_business_name(line: str) -> bool:
-    parts = [p.lower() for p in re.split(r"\s+", _normalize_space(line)) if p]
-    return any(p in BUSINESS_WORDS for p in parts)
 
 
 def _looks_like_city_state_zip(line: str, postal: str = "") -> bool:
@@ -237,6 +218,11 @@ def _looks_like_filename_noise(line: str, pdf_name: str) -> bool:
     return False
 
 
+def _looks_like_business_name(line: str) -> bool:
+    parts = [p.lower() for p in re.split(r"\s+", _normalize_space(line)) if p]
+    return any(p in BUSINESS_WORDS for p in parts)
+
+
 def _valid_recipient_candidate(line: str, postal: str = "", pdf_name: str = "") -> bool:
     cand = (line or "").strip()
     if not cand:
@@ -257,18 +243,16 @@ def _recipient_from_shipto_text(text: str, postal: str, pdf_name: str) -> str:
     for i, line in enumerate(lines):
         if "ship to" not in line.lower():
             continue
-        window = lines[i + 1 : min(i + 8, len(lines))]
-        for cand in window:
+        for cand in lines[i + 1 : min(i + 8, len(lines))]:
             if _valid_recipient_candidate(cand, postal, pdf_name):
                 return cand
     return ""
-
 
 def _recipient_from_zip_context(lines: list[str], postal: str, pdf_name: str = "") -> str:
     if not postal:
         return ""
 
-    for i, ln in enumerate(lines[:200]):
+    for i, ln in enumerate(lines[:160]):
         if postal not in ln:
             continue
         for k in (1, 2, 3):
@@ -301,51 +285,21 @@ def _pick_recipient(block: list[str], all_lines: list[str], postal: str, pdf_nam
     if r:
         return r
 
-    r = pick(all_lines[:120])
+    r = pick(all_lines[:100])
     if r:
         return r
 
+    for ln in all_lines[:120]:
+        if _valid_recipient_candidate(ln, postal, pdf_name):
+            return ln
     return ""
 
 
-def _score_zip_candidate(lines: list[str], idx: int, postal: str, pdf_name: str) -> int:
-    score = 0
-    line = lines[idx]
-    lower = line.lower()
-    if "from" in lower or "billing" in lower or "return" in lower:
-        score -= 5
-    for delta in (1, 2, 3):
-        j = idx - delta
-        if j < 0:
-            break
-        cand = lines[j]
-        if _valid_recipient_candidate(cand, postal, pdf_name):
-            score += 5 - delta
-            break
-    for delta in (1, 2):
-        for j in (idx - delta, idx + delta):
-            if 0 <= j < len(lines) and _looks_like_street_line(lines[j]):
-                score += 2
-                break
-    return score
-
-
-def _pick_zip(block: list[str], all_lines: list[str], all_text: str, pdf_name: str = "") -> str:
+def _pick_zip(block: list[str], all_text: str) -> str:
     for ln in block:
         m = ZIP_RE.search(ln)
         if m:
             return m.group(1)
-
-    candidates: list[tuple[int, str, int]] = []
-    for idx, ln in enumerate(all_lines[:220]):
-        m = ZIP_RE.search(ln)
-        if not m:
-            continue
-        postal = m.group(1)
-        candidates.append((_score_zip_candidate(all_lines, idx, postal, pdf_name), postal, idx))
-    if candidates:
-        candidates.sort(key=lambda item: (item[0], item[2]))
-        return candidates[-1][1]
 
     all_zips = ZIP_RE.findall(all_text)
     if all_zips:
@@ -360,7 +314,7 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
 
     lines = _candidate_lines(text, words_text)
     shipto_block = _extract_shipto_block(lines)
-    postal = _pick_zip(shipto_block, lines, search_text, pdf_path.name)
+    postal = _pick_zip(shipto_block, search_text)
     recipient = _pick_recipient(shipto_block, lines, postal, pdf_path.name, text)
     tracking = _extract_tracking(search_text)
     carrier = _detect_carrier(search_text, tracking)
