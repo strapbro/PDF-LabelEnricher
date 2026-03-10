@@ -126,6 +126,47 @@ def _selected_order_total(order: dict[str, Any], config: dict[str, Any]) -> floa
     return None
 
 
+def _selected_total_label(config: dict[str, Any]) -> str:
+    layout = config.get("print_layout", {}) if isinstance(config, dict) else {}
+    mode = str(layout.get("total_display_mode", "grand_total") or "grand_total").strip().lower()
+    return "SUBTOTAL" if mode == "subtotal" else "TOTAL"
+
+
+def _money_line(label: str, value: Any, show_labels: bool) -> str:
+    try:
+        amount = float(value or 0)
+    except Exception:
+        return ""
+    if amount <= 0:
+        return ""
+    return f"{label} ${amount:.2f}" if show_labels else f"${amount:.2f}"
+
+
+def _auto_overlay_prefix_text(order: dict[str, Any]) -> str:
+    prefixes: list[str] = []
+    manual_prefix = str(order.get("manual_prefix_text", "") or "").strip()
+    if manual_prefix:
+        prefixes.append(manual_prefix)
+
+    service_prefix = str(order.get("service_prefix_text", "") or "").strip()
+    if service_prefix:
+        prefixes.append(service_prefix)
+
+    replacement = any(float(item.get("item_subtotal", 0) or 0) <= 0 for item in (order.get("items", []) or []))
+    if replacement:
+        prefixes.append("REPLACEMENT")
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for prefix in prefixes:
+        key = re.sub(r"\s+", " ", str(prefix or "").strip()).upper()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(key)
+    return " ".join(_format_manual_prefix(prefix) for prefix in deduped)
+
+
 def _with_continuation_notice(text: str, font_name: str, font_size: int, max_width: float, suffix: str = "!! -- CONT BELOW -- !!") -> str:
     clean, _ = _strip_emph_markers(text)
     suffix = str(suffix or "!! -- CONT BELOW -- !!").strip().upper()
@@ -400,7 +441,7 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
     else:
         tokens = default_order
 
-    allowed = ["label", "qty", "total", "location", "title"]
+    allowed = ["label", "qty", "total", "subtotal", "item_subtotal", "shipping_subtotal", "location", "title"]
     field_order = [t for t in tokens if t in allowed]
     for t in allowed:
         if t not in field_order:
@@ -450,12 +491,17 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
     summary_location_line = " | ".join(summary_locations) if summary_locations else ""
 
     total = _selected_order_total(order, config)
-    total_line = ""
-    if total is not None and float(total or 0) > 0:
-        total_line = (f"TOTAL ${float(total):.2f}") if show_labels else f"${float(total):.2f}"
+    total_label = _selected_total_label(config)
+    total_line = _money_line(total_label, total, show_labels)
+    subtotal_line = _money_line("SUBTOTAL", order.get("subtotal_paid"), show_labels)
+    item_subtotal_line = _money_line("ITEM SUBTOTAL", order.get("item_subtotal_paid"), show_labels)
+    shipping_subtotal_line = _money_line("SHIPPING SUBTOTAL", order.get("shipping_subtotal_paid"), show_labels)
 
     location_emitted = False
     total_emitted = False
+    subtotal_emitted = False
+    item_subtotal_emitted = False
+    shipping_subtotal_emitted = False
 
     def _flag_on(value: Any, default: bool = True) -> bool:
         if value is None:
@@ -554,6 +600,18 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
                 if total_line and not total_emitted:
                     chunks.append(("total", total_line))
                     total_emitted = True
+            elif field == "subtotal":
+                if subtotal_line and not subtotal_emitted:
+                    chunks.append(("subtotal", subtotal_line))
+                    subtotal_emitted = True
+            elif field == "item_subtotal":
+                if item_subtotal_line and not item_subtotal_emitted:
+                    chunks.append(("item_subtotal", item_subtotal_line))
+                    item_subtotal_emitted = True
+            elif field == "shipping_subtotal":
+                if shipping_subtotal_line and not shipping_subtotal_emitted:
+                    chunks.append(("shipping_subtotal", shipping_subtotal_line))
+                    shipping_subtotal_emitted = True
 
         has_label = any(f == "label" for f, _ in chunks)
         has_qty = any(f == "qty" for f, _ in chunks)
@@ -582,8 +640,14 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
             lines.append(INLINE_LOCK_PREFIX + inline_sep.join(summary_parts))
     if total_line and not total_emitted:
         lines.append(total_line)
+    if subtotal_line and not subtotal_emitted:
+        lines.append(subtotal_line)
+    if item_subtotal_line and not item_subtotal_emitted:
+        lines.append(item_subtotal_line)
+    if shipping_subtotal_line and not shipping_subtotal_emitted:
+        lines.append(shipping_subtotal_line)
 
-    manual_prefix = _format_manual_prefix(order.get("manual_prefix_text", ""))
+    manual_prefix = _auto_overlay_prefix_text(order)
     if manual_prefix:
         for idx, line in enumerate(lines):
             clean, _ = _strip_emph_markers(line)
@@ -622,9 +686,8 @@ def build_compact_overlay_lines(
     use_numbering = len(items) > 1
 
     total = _selected_order_total(order, config)
-    total_line = ""
-    if total is not None and float(total or 0) > 0:
-        total_line = (f"TOTAL ${float(total):.2f}") if show_labels else f"${float(total):.2f}"
+    total_label = _selected_total_label(config)
+    total_line = _money_line(total_label, total, show_labels)
 
     def _flag_on(value: Any, default: bool = True) -> bool:
         if value is None:
@@ -675,7 +738,7 @@ def build_compact_overlay_lines(
     if summary_parts:
         lines.append(INLINE_LOCK_PREFIX + inline_sep.join(summary_parts))
 
-    manual_prefix = _format_manual_prefix(order.get("manual_prefix_text", ""))
+    manual_prefix = _auto_overlay_prefix_text(order)
     if manual_prefix and lines:
         first = lines[0]
         if first.startswith(INLINE_LOCK_PREFIX):
@@ -946,6 +1009,9 @@ def get_page_size(pdf_path: Path) -> tuple[float, float]:
     reader = PdfReader(str(pdf_path))
     page = reader.pages[0]
     return float(page.mediabox.width), float(page.mediabox.height)
+
+
+
 
 
 

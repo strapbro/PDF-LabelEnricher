@@ -385,7 +385,14 @@
     label: {{ tr("LABEL")|tojson }},
     labelHint: {{ tr("internal label")|tojson }},
     total: {{ tr("TOTAL")|tojson }},
+    totalSubtotal: {{ tr("SUBTOTAL")|tojson }},
     totalHint: {{ tr("buyer total")|tojson }},
+    subtotal: {{ tr("SUBTOTAL")|tojson }},
+    subtotalHint: {{ tr("order subtotal before tax")|tojson }},
+    itemSubtotal: {{ tr("ITEM SUBTOTAL")|tojson }},
+    itemSubtotalHint: {{ tr("items only, no shipping")|tojson }},
+    shippingSubtotal: {{ tr("SHIPPING SUBTOTAL")|tojson }},
+    shippingSubtotalHint: {{ tr("shipping only")|tojson }},
     location: {{ tr("LOC")|tojson }},
     locationHint: {{ tr("pick location")|tojson }},
     title: {{ tr("TITLE")|tojson }},
@@ -404,12 +411,20 @@
     return out;
   }
 
+  function totalFieldTitle() {
+    const sel = form.querySelector('#total_display_mode');
+    return sel && sel.value === 'subtotal' ? T.totalSubtotal : T.total;
+  }
+
   const FIELD_META = {
-    qty: { title: T.qty, hint: T.qtyHint },
-    label: { title: T.label, hint: T.labelHint },
-    total: { title: T.total, hint: T.totalHint },
-    location: { title: T.location, hint: T.locationHint },
-    title: { title: T.title, hint: T.titleHint },
+    qty: { get title() { return T.qty; }, hint: T.qtyHint },
+    label: { get title() { return T.label; }, hint: T.labelHint },
+    total: { get title() { return totalFieldTitle(); }, hint: T.totalHint },
+    subtotal: { get title() { return T.subtotal; }, hint: T.subtotalHint },
+    item_subtotal: { get title() { return T.itemSubtotal; }, hint: T.itemSubtotalHint },
+    shipping_subtotal: { get title() { return T.shippingSubtotal; }, hint: T.shippingSubtotalHint },
+    location: { get title() { return T.location; }, hint: T.locationHint },
+    title: { get title() { return T.title; }, hint: T.titleHint },
   };
   const ALL_FIELDS = Object.keys(FIELD_META);
   const PRESETS = {
@@ -624,6 +639,7 @@
     q.set('inline_fields_csv', inlineFieldsInput.value || '');
     q.set('line_groups_csv', lineGroupsInput.value || '');
     q.set('inline_separator', fd.get('inline_separator') || ' | ');
+    q.set('total_display_mode', fd.get('total_display_mode') || 'grand_total');
     q.set('show_field_labels', fd.get('show_field_labels') ? '1' : '0');
     q.set('page_mode', fd.get('page_mode') || 'half_sheet_top');
     q.set('render_mode', fd.get('render_mode') || 'margin');
@@ -688,6 +704,8 @@
     });
   }
 
+  const totalDisplaySel = form.querySelector('#total_display_mode');
+
   modeSel.addEventListener('change', () => {
     const presetKey = String(modeSel.value || '').trim();
     if (PRESETS[presetKey]) assignedLines = normalizeLines(PRESETS[presetKey]);
@@ -711,6 +729,15 @@
   if (labelSel) labelSel.addEventListener('change', queueRefresh);
 
   updateSortControls();
+  if (totalDisplaySel) {`r`n    totalDisplaySel.addEventListener('change', () => {`r`n      buildFieldPool();`r`n      buildLineRows();`r`n      setSaveDirty(true);`r`n      queueRefresh();`r`n    });`r`n  }`r`n`r`n  if (totalDisplaySel) {
+    totalDisplaySel.addEventListener('change', () => {
+      buildFieldPool();
+      buildLineRows();
+      setSaveDirty(true);
+      queueRefresh();
+    });
+  }
+
   loadPresetOrCurrent(false, true);
   setSaveDirty(false);
   queueRefresh();
@@ -721,6 +748,9 @@
 })();
 </script>
 {% endblock %}
+
+
+
 
 
 
