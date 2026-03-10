@@ -22,8 +22,11 @@ backups/
 
 # Local app data (keep sample_data tracked instead)
 items.csv
+config.yaml
 config.local.yaml
+label_location_hints.csv
 
 # Temp/probe files
 _tmp_*
 *.tmp
+
