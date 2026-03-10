@@ -159,6 +159,13 @@
             </label>
 
             <label><input type="checkbox" name="show_field_labels" id="show_field_labels" {% if ui.show_field_labels %}checked{% endif %}> {{ tr('Show labels like "QTY" and "TOTAL"') }}</label>
+
+            <label>{{ tr("TOTAL field shows") }}
+              <select name="total_display_mode" id="total_display_mode">
+                <option value="grand_total" {% if ui.total_display_mode == 'grand_total' %}selected{% endif %}>{{ tr("Grand total") }}</option>
+                <option value="subtotal" {% if ui.total_display_mode == 'subtotal' %}selected{% endif %}>{{ tr("Subtotal") }}</option>
+              </select>
+            </label>
           </div>
 
           <div class="settings-box">
@@ -714,6 +721,8 @@
 })();
 </script>
 {% endblock %}
+
+
 
 
 

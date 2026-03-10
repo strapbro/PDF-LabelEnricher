@@ -101,8 +101,29 @@ def _format_manual_prefix(text: str) -> str:
     if not clean:
         return ""
     clean = re.sub(r"\s+", " ", clean).upper()
-    return f"[!! {clean} !!]"
+    return f"! {clean} !"
 
+
+
+def _selected_order_total(order: dict[str, Any], config: dict[str, Any]) -> float | None:
+    layout = config.get("print_layout", {}) if isinstance(config, dict) else {}
+    mode = str(layout.get("total_display_mode", "grand_total") or "grand_total").strip().lower()
+
+    if mode == "subtotal":
+        preferred = order.get("subtotal_paid")
+        fallback = order.get("total_paid")
+    else:
+        preferred = order.get("total_paid")
+        fallback = order.get("subtotal_paid")
+
+    for candidate in (preferred, fallback):
+        try:
+            value = float(candidate or 0)
+        except Exception:
+            continue
+        if value > 0:
+            return value
+    return None
 
 
 def _with_continuation_notice(text: str, font_name: str, font_size: int, max_width: float, suffix: str = "!! -- CONT BELOW -- !!") -> str:
@@ -428,7 +449,7 @@ def build_overlay_lines(order: dict[str, Any], item_rows: list[dict[str, str]], 
             summary_locations.append(loc_text)
     summary_location_line = " | ".join(summary_locations) if summary_locations else ""
 
-    total = order.get("total_paid")
+    total = _selected_order_total(order, config)
     total_line = ""
     if total is not None and float(total or 0) > 0:
         total_line = (f"TOTAL ${float(total):.2f}") if show_labels else f"${float(total):.2f}"
@@ -600,7 +621,7 @@ def build_compact_overlay_lines(
     items = order.get("items", []) or []
     use_numbering = len(items) > 1
 
-    total = order.get("total_paid")
+    total = _selected_order_total(order, config)
     total_line = ""
     if total is not None and float(total or 0) > 0:
         total_line = (f"TOTAL ${float(total):.2f}") if show_labels else f"${float(total):.2f}"
@@ -925,6 +946,7 @@ def get_page_size(pdf_path: Path) -> tuple[float, float]:
     reader = PdfReader(str(pdf_path))
     page = reader.pages[0]
     return float(page.mediabox.width), float(page.mediabox.height)
+
 
 
 
