@@ -79,7 +79,7 @@
               | {{ c.get("ship_name", "") }}
               | {{ tr("ZIP") }} {{ c.get("ship_postal", "") }}
               {% if first_item %}| {{ tr("Item Title") }}: {{ first_item.get("title", "") }}{% endif %}
-              {% if first_item %}| {{ tr("Qty") }}: {{ first_item.get("quantity", "") }}{% endif %}
+              {% if first_item %}| {{ tr("Qty") }}: {{ first_item.get("quantity", "") }}{% endif %}{% if c_order.get("sale_date") %} | {{ tr("Ship Date") }}: {{ c_order.get("sale_date", "") }}{% endif %}
             </li>
           {% else %}
             <li>{{ tr("No candidate matches found") }}</li>
@@ -87,12 +87,12 @@
           </ul>
         </td>
         <td>
-          {% if row.candidates and row.candidates|length > 0 %}
+          {% if (row.display_candidates or row.candidates) and (row.display_candidates or row.candidates)|length > 0 %}
           <form action="/resolve/assign" method="post" style="margin-bottom:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
             <input type="hidden" name="label_pdf" value="{{ row.label_pdf }}">
             <select name="order_id" required>
-              {% for c in row.candidates %}
-              <option value="{{ c.get('order_id', '') }}">{{ tr("Order #") }} {{ c.get('order_id', '') }} ({{ ((c.get('score', 0) * 100) | round(0)) }}%)</option>
+              {% for c in (row.display_candidates or row.candidates or []) %}
+              <option value="{{ c.get('order_id', '') }}">{{ tr("Order #") }} {{ c.get('order_id', '') }} ({{ ((c.get('score', 0) * 100) | round(0)) }}%){% set c_order = c.get("order", {}) %}{% if c_order.get("sale_date") %} | {{ c_order.get("sale_date") }}{% endif %}</option>
               {% endfor %}
             </select>
             <button class="btn btn-sm btn-primary" type="submit">{{ tr("Resolve + Generate Output") }}</button>

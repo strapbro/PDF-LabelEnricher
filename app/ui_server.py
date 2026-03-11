@@ -45,6 +45,7 @@ def _templates() -> Jinja2Templates:
     ui_cfg = settings.config.get("ui", {}) or {}
     tpl.env.globals["comic_mode"] = bool(ui_cfg.get("comic_mode", False))
     tpl.env.globals["ui_font_mode"] = str(ui_cfg.get("font_mode", "default") or "default")
+    tpl.env.globals["ui_theme_mode"] = str(ui_cfg.get("theme_mode", "dark") or "dark")
     lang = normalize_ui_language(str(ui_cfg.get("language_mode", "en") or "en"))
     tpl.env.globals["ui_language_mode"] = lang
     tpl.env.globals["tr"] = lambda text, **kwargs: translate_ui(text, lang=lang, **kwargs)
@@ -225,11 +226,133 @@ def _human_reason(reason: str) -> str:
         return "Unknown reason."
     return reason
 
+def _norm_unresolved_buyer_key(name: str, postal: str) -> tuple[str, str]:
+    clean_name = re.sub(r"[^a-z0-9]+", " ", str(name or "").strip().lower()).strip()
+    zip5 = "".join(ch for ch in str(postal or "") if ch.isdigit())[:5]
+    return clean_name, zip5
+
+
+def _norm_tracking_value(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
+def _candidate_quantity_total(order: dict[str, Any]) -> int:
+    total = 0
+    for item in order.get("items", []) or []:
+        try:
+            total += int(item.get("quantity", 1) or 1)
+        except Exception:
+            total += 1
+    return total
+
+
+def _annotate_unresolved_row(row: dict[str, Any]) -> dict[str, Any]:
+    rr = dict(row)
+    candidates = list(rr.get("candidates", []) or [])
+    label_tracking = _norm_tracking_value(str(rr.get("tracking_number", "") or ""))
+
+    def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[str, str]:
+        order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
+        return (
+            str(order.get("sale_date_sort", "") or order.get("sale_date", "") or ""),
+            str(candidate.get("order_id", "") or ""),
+        )
+
+    def _build_merge_payload(grouped: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        payload: list[dict[str, Any]] = []
+        for idx, candidate in enumerate(grouped):
+            order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
+            payload.append({
+                "order_id": str(candidate.get("order_id", "") or ""),
+                "sale_date": str(order.get("sale_date", "") or ""),
+                "is_latest": idx == 0,
+                "item_count": len(order.get("items", []) or []),
+                "quantity_total": _candidate_quantity_total(order),
+                "total_paid": order.get("total_paid", 0.0),
+                "title": ((order.get("items", []) or [{}])[0].get("title", "") if (order.get("items", []) or []) else ""),
+                "tracking_number": str(order.get("tracking_number", "") or candidate.get("tracking_number", "") or ""),
+            })
+        return payload
+
+    tracking_groups: dict[str, list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        candidate_tracking = _norm_tracking_value((candidate.get("order") or {}).get("tracking_number", "") or candidate.get("tracking_number", "") or "")
+        if not candidate_tracking:
+            continue
+        tracking_groups.setdefault(candidate_tracking, []).append(candidate)
+
+    tracking_group: list[dict[str, Any]] = []
+    tracking_group_value = label_tracking
+    if label_tracking and label_tracking in tracking_groups:
+        tracking_group = list(tracking_groups.get(label_tracking, []))
+    else:
+        eligible_tracking_groups = [group for group in tracking_groups.values() if len(group) >= 2]
+        if eligible_tracking_groups:
+            eligible_tracking_groups.sort(
+                key=lambda group: (len(group), _candidate_sort_key(sorted(group, key=_candidate_sort_key, reverse=True)[0])),
+                reverse=True,
+            )
+            tracking_group = list(eligible_tracking_groups[0])
+            first_tracking_order = tracking_group[0].get("order") if isinstance(tracking_group[0].get("order"), dict) else {}
+            tracking_group_value = _norm_tracking_value(first_tracking_order.get("tracking_number", "") or tracking_group[0].get("tracking_number", "") or "")
+
+    tracking_group.sort(key=_candidate_sort_key, reverse=True)
+
+    if len(tracking_group) >= 2:
+        rr["resolution_mode"] = "combined_tracking"
+        rr["display_candidates"] = tracking_group
+        rr["merge_candidates"] = _build_merge_payload(tracking_group)
+        rr["repeat_buyer_warning"] = _ui(
+            "Did you combine or merge these orders into one shipping label? These eBay orders share tracking number {tracking}.",
+            tracking=tracking_group_value or label_tracking,
+        )
+        rr["reason_human"] = _ui("Multiple eBay orders share this exact tracking number. This looks like a combined shipment.")
+        return rr
+
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
+        key = _norm_unresolved_buyer_key(
+            candidate.get("ship_name", "") or order.get("ship_name", ""),
+            candidate.get("ship_postal", "") or order.get("ship_postal", ""),
+        )
+        if not key[0] or not key[1]:
+            continue
+        groups.setdefault(key, []).append(candidate)
+
+    repeat_group: list[dict[str, Any]] = []
+    for grouped in groups.values():
+        if len(grouped) < 2:
+            continue
+        grouped.sort(key=_candidate_sort_key, reverse=True)
+        repeat_group = grouped
+        break
+
+    if len(repeat_group) >= 2:
+        rr["resolution_mode"] = "repeat_buyer"
+        rr["display_candidates"] = repeat_group
+        rr["merge_candidates"] = []
+        rr["repeat_buyer_warning"] = _ui(
+            "Repeat buyer detected: {count} orders share this buyer + ZIP. Choose the most recent order unless you intentionally merged shipments.",
+            count=len(repeat_group),
+        )
+        rr["reason_human"] = _ui("Could not confidently match this label because this buyer has multiple orders in the report.")
+        rr["repeat_buyer_count"] = len(repeat_group)
+        return rr
+
+    rr["resolution_mode"] = "ambiguous"
+    rr["display_candidates"] = candidates
+    rr["merge_candidates"] = []
+    rr["repeat_buyer_warning"] = ""
+    rr["repeat_buyer_count"] = 0
+    return rr
+
 def _unresolved_for_ui() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in _unresolved():
         rr = dict(row)
         rr["reason_human"] = _human_reason(str(row.get("reason", "")))
+        rr = _annotate_unresolved_row(rr)
         out.append(rr)
     return out
 
@@ -1560,6 +1683,11 @@ def _layout_ui_defaults() -> dict[str, Any]:
         "summary_page_wrap_mode": str(layout.get("summary_page_wrap_mode", layout.get("wrap_mode", "word"))),
         "summary_page_text_align": str(layout.get("summary_page_text_align", layout.get("text_align", "left"))),
         "summary_page_margin": int(layout.get("summary_page_margin", 24)),
+        "overflow_page_font_size": int(layout.get("overflow_page_font_size", layout.get("backside_font_size", layout.get("font_size", 20)))),
+        "overflow_page_line_spacing": int(layout.get("overflow_page_line_spacing", layout.get("backside_line_spacing", layout.get("line_spacing", 24)))),
+        "overflow_page_wrap_mode": str(layout.get("overflow_page_wrap_mode", layout.get("wrap_mode", "word"))),
+        "overflow_page_text_align": str(layout.get("overflow_page_text_align", layout.get("text_align", "left"))),
+        "overflow_page_margin": int(layout.get("overflow_page_margin", layout.get("edge_inset_x", 24))),
         "total_display_mode": str(layout.get("total_display_mode", "grand_total")),
         "text_align": str(layout.get("text_align", "left")),
         "wrap_mode": str(layout.get("wrap_mode", "word")),
@@ -1574,6 +1702,7 @@ def _layout_ui_defaults() -> dict[str, Any]:
         "archive_retention_days": int(settings.config.get("admin", {}).get("archive_retention_days", 14)),
         "ui_language_mode": str(ui_cfg.get("language_mode", "en") or "en"),
         "ui_font_mode": str(ui_cfg.get("font_mode", "default") or "default"),
+        "ui_theme_mode": str(ui_cfg.get("theme_mode", "dark") or "dark"),
         "output_sort_mode": str(output_sort.get("mode", "processed")),
         "sort_priority_1": str((priorities + ["", "", "", ""])[0]),
         "sort_priority_2": str((priorities + ["", "", "", ""])[1]),
@@ -1641,6 +1770,11 @@ def _build_preview_config(
     summary_page_wrap_mode: str = "word",
     summary_page_text_align: str = "left",
     summary_page_margin: int = 24,
+    overflow_page_font_size: int = 20,
+    overflow_page_line_spacing: int = 24,
+    overflow_page_wrap_mode: str = "word",
+    overflow_page_text_align: str = "left",
+    overflow_page_margin: int = 24,
     total_display_mode: str = "grand_total",
 ) -> dict[str, Any]:
     cfg = copy.deepcopy(settings.config)
@@ -1666,6 +1800,11 @@ def _build_preview_config(
     layout["summary_page_wrap_mode"] = str(summary_page_wrap_mode)
     layout["summary_page_text_align"] = str(summary_page_text_align)
     layout["summary_page_margin"] = int(summary_page_margin)
+    layout["overflow_page_font_size"] = int(overflow_page_font_size)
+    layout["overflow_page_line_spacing"] = int(overflow_page_line_spacing)
+    layout["overflow_page_wrap_mode"] = str(overflow_page_wrap_mode)
+    layout["overflow_page_text_align"] = str(overflow_page_text_align)
+    layout["overflow_page_margin"] = int(overflow_page_margin)
     layout["total_display_mode"] = "subtotal" if str(total_display_mode or "").strip().lower() == "subtotal" else "grand_total"
     layout["text_align"] = str(text_align)
     layout["wrap_mode"] = str(wrap_mode)
@@ -2131,6 +2270,17 @@ def create_app() -> FastAPI:
         state = "ON" if next_font == "comic" else "OFF"
         return _redirect_ui(dest, "Comic Mode {state}", state=state)
 
+    @app.post("/theme/mode-toggle")
+    def theme_mode_toggle(request: Request):
+        cfg = settings.config
+        ui_cfg = cfg.setdefault("ui", {})
+        cur_mode = str(ui_cfg.get("theme_mode", "dark") or "dark").strip().lower()
+        next_mode = "light" if cur_mode == "dark" else "dark"
+        ui_cfg["theme_mode"] = next_mode
+        settings.save(cfg)
+        dest = request.headers.get("referer") or "/"
+        return _redirect_ui(dest, "Theme: {mode}", mode=("Dark" if next_mode == "dark" else "Light"))
+
     @app.post("/app/close")
     def close_app():
         _launch_stop_script()
@@ -2174,6 +2324,11 @@ def create_app() -> FastAPI:
         summary_page_wrap_mode: str = Query("word"),
         summary_page_text_align: str = Query("left"),
         summary_page_margin: int = Query(24),
+        overflow_page_font_size: int = Query(20),
+        overflow_page_line_spacing: int = Query(24),
+        overflow_page_wrap_mode: str = Query("word"),
+        overflow_page_text_align: str = Query("left"),
+        overflow_page_margin: int = Query(24),
         total_display_mode: str = Query("grand_total"),
         text_align: str = Query("left"),
         wrap_mode: str = Query("word"),
@@ -2216,6 +2371,11 @@ def create_app() -> FastAPI:
                 summary_page_wrap_mode=summary_page_wrap_mode,
                 summary_page_text_align=summary_page_text_align,
                 summary_page_margin=summary_page_margin,
+                overflow_page_font_size=overflow_page_font_size,
+                overflow_page_line_spacing=overflow_page_line_spacing,
+                overflow_page_wrap_mode=overflow_page_wrap_mode,
+                overflow_page_text_align=overflow_page_text_align,
+                overflow_page_margin=overflow_page_margin,
                 total_display_mode=total_display_mode,
                 text_align=text_align,
                 wrap_mode=wrap_mode,
@@ -2994,7 +3154,8 @@ def create_app() -> FastAPI:
 
         asin = (item_asin or "").strip().upper()
         if p == "amazon" and not asin and key.upper().startswith("B") and len(key) == 10:
-            asin = key.upper()
+            asin = key.upper()
+
 
         t = (title or "").strip()
         label = (custom_label or "").strip()
@@ -3141,6 +3302,11 @@ def create_app() -> FastAPI:
         summary_page_wrap_mode: str = Form("word"),
         summary_page_text_align: str = Form("left"),
         summary_page_margin: int = Form(24),
+        overflow_page_font_size: int = Form(20),
+        overflow_page_line_spacing: int = Form(24),
+        overflow_page_wrap_mode: str = Form("word"),
+        overflow_page_text_align: str = Form("left"),
+        overflow_page_margin: int = Form(24),
         total_display_mode: str = Form("grand_total"),
         text_align: str = Form("left"),
         wrap_mode: str = Form("word"),
@@ -3170,6 +3336,7 @@ def create_app() -> FastAPI:
         sort_dir_carrier: str = Form("asc"),
         ui_language_mode: str = Form("en"),
         ui_font_mode: str = Form("default"),
+        ui_theme_mode: str = Form("dark"),
     ):
         cfg = _build_preview_config(
             margin_direction=margin_direction,
@@ -3195,8 +3362,13 @@ def create_app() -> FastAPI:
             summary_page_wrap_mode=summary_page_wrap_mode,
             summary_page_text_align=summary_page_text_align,
             summary_page_margin=summary_page_margin,
-                total_display_mode=total_display_mode,
-                text_align=text_align,
+            overflow_page_font_size=overflow_page_font_size,
+            overflow_page_line_spacing=overflow_page_line_spacing,
+            overflow_page_wrap_mode=overflow_page_wrap_mode,
+            overflow_page_text_align=overflow_page_text_align,
+            overflow_page_margin=overflow_page_margin,
+            total_display_mode=total_display_mode,
+            text_align=text_align,
             wrap_mode=wrap_mode,
             line_layout_mode=line_layout_mode,
             field_order_csv=field_order_csv,
@@ -3228,8 +3400,11 @@ def create_app() -> FastAPI:
             ui_language_mode = "en"
         if ui_font_mode not in ("default", "comic", "wingdings"):
             ui_font_mode = "default"
+        if ui_theme_mode not in ("light", "dark"):
+            ui_theme_mode = "dark"
         ui_cfg["language_mode"] = ui_language_mode
         ui_cfg["font_mode"] = ui_font_mode
+        ui_cfg["theme_mode"] = ui_theme_mode
         ui_cfg["comic_mode"] = (ui_font_mode == "comic")
         cfg.setdefault("print_layout", {})["comic_mode"] = False
         settings.save(cfg)
@@ -3361,8 +3536,13 @@ def create_app() -> FastAPI:
         return _redirect_ui("/unprocessed", "Queue item not found")
 
     @app.post("/resolve/assign")
-    async def resolve_assign(label_pdf: str = Form(...), order_id: str = Form(...), variant_choice: str = Form("")):
-        result = batch_manager.resolve_unmatched(label_pdf, order_id, variant_choice)
+    async def resolve_assign(request: Request):
+        form = await request.form()
+        label_pdf = str(form.get("label_pdf", "") or "")
+        order_id = str(form.get("order_id", "") or "")
+        variant_choice = str(form.get("variant_choice", "") or "")
+        merge_order_ids = [str(x or "") for x in form.getlist("merge_order_ids")]
+        result = batch_manager.resolve_unmatched(label_pdf, order_id, variant_choice, merge_order_ids=merge_order_ids)
         if result.get("ok"):
             parts = [_ui("Resolved and output generated")]
             combined = result.get("combined", {})
@@ -3379,29 +3559,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

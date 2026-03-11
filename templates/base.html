@@ -7,9 +7,9 @@
   <link rel="icon" type="image/x-icon" href="/static/app_icon.ico?v=7">
   <link rel="icon" type="image/png" sizes="256x256" href="/static/app_icon_256.png?v=7">
   <link rel="apple-touch-icon" href="/static/app_icon_256.png?v=7">
-  <link rel="stylesheet" href="/static/style.css?v=20260307c">
+  <link rel="stylesheet" href="/static/style.css?v=20260310dark9">
 </head>
-<body class="ui-font-{{ ui_font_mode|default('default') }} {% if comic_mode %}comic-mode{% endif %}">
+<body class="theme-{{ ui_theme_mode|default('dark') }} ui-font-{{ ui_font_mode|default('default') }} {% if comic_mode %}comic-mode{% endif %}">
   <header id="appHeader">
     <div class="app-brand">
       <img class="app-brand-icon" src="/static/app_icon_source.svg?v=7" alt="">
@@ -25,6 +25,9 @@
         <a href="/manual-entry">{{ tr("Manual Entry") }}</a>
       </nav>
       <div class="nav-right">
+        <form class="nav-theme" action="/theme/mode-toggle" method="post">
+          <button class="btn btn-md btn-outline" type="submit">{% if ui_theme_mode|default('dark') == 'dark' %}{{ tr("Dark: ON") }}{% else %}{{ tr("Dark: OFF") }}{% endif %}</button>
+        </form>
         <form class="nav-comic" action="/theme/comic-toggle" method="post">
           <button class="btn btn-md btn-secondary" type="submit">{% if comic_mode %}{{ tr("Comic: ON") }}{% else %}{{ tr("Comic: OFF") }}{% endif %}</button>
         </form>
@@ -178,6 +181,8 @@
   </script>
 </body>
 </html>
+
+
 
 
 

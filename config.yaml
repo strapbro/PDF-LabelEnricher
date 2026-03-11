@@ -2,6 +2,7 @@ ui:
   comic_mode: false
   language_mode: en
   font_mode: default
+  theme_mode: light
 paths:
   incoming_batch_folder: incoming/batch
   manual_incoming_folder: incoming/manual
@@ -48,15 +49,28 @@ print_layout:
   spill_font_size: 8
   spill_line_spacing: 9
   compact_threshold: 4
+  summary_page_min_items: 4
+  summary_page_mode: half_page
+  summary_page_orientation: normal
+  summary_page_font_size: 12
+  summary_page_line_spacing: 12
+  summary_page_wrap_mode: word
+  summary_page_text_align: left
+  summary_page_margin: 24
+  overflow_page_font_size: 20
+  overflow_page_line_spacing: 24
+  overflow_page_wrap_mode: word
+  overflow_page_text_align: left
+  overflow_page_margin: 24
+  total_display_mode: subtotal
   field_order:
   - qty
   - label
-  - total
+  - subtotal
   - location
-  - title
-  inline_fields_csv: ''
+  inline_fields_csv: qty,label,location
   inline_separator: ' | '
-  line_groups_csv: qty,label;total,location
+  line_groups_csv: qty,label;subtotal,location
   spill_edge_inset_x: 4
   spill_edge_inset_y: 4
 new_item_defaults:

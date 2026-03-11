@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Any
 
@@ -267,6 +267,8 @@ KO_TRANSLATIONS: dict[str, str] = {
     "Open Last Combined Anyway": "마지막 결합본 그대로 열기",
     "Open Order": "주문 열기",
     "Open Order Tabs (Current Sort)": "주문 탭 열기 (현재 정렬)",
+    "Open All Order Tabs (Current Sort)": "모든 주문 탭 열기 (현재 정렬)",
+    "Open Selected Order Tabs": "선택한 주문 탭 열기",
     "Open Processed Folder": "Processed 폴더 열기",
     "Open the shared location, sort by most recent if needed, then drag items.csv between the two windows.": "공유 위치를 열고 필요하면 최근 수정순으로 정렬한 뒤, 두 창 사이로 items.csv를 드래그하세요.",
     "Open your shared Drive/Sheet link": "공유 Drive/Sheet 링크 열기",
@@ -733,6 +735,8 @@ ZH_CN_TRANSLATIONS: dict[str, str] = {
     "Open Last Combined Anyway": "仍然打开上次的合并 PDF",
     "Open Order": "打开订单",
     "Open Order Tabs (Current Sort)": "按当前排序打开订单标签页",
+    "Open All Order Tabs (Current Sort)": "按当前排序打开全部订单标签页",
+    "Open Selected Order Tabs": "打开所选订单标签页",
     "Open Processed Folder": "打开 Processed 文件夹",
     "Open the shared location, sort by most recent if needed, then drag items.csv between the two windows.": "打开共享位置，如有需要按最近修改排序，然后在两个窗口之间拖动 items.csv。",
     "Open your shared Drive/Sheet link": "打开共享 Drive/Sheet 链接",
@@ -1218,6 +1222,8 @@ ZH_TW_TRANSLATIONS: dict[str, str] = {
     "Open Last Combined Anyway": "仍然開啟上次的合並 PDF",
     "Open Order": "開啟订单",
     "Open Order Tabs (Current Sort)": "按目前排序開啟订单標籤頁",
+    "Open All Order Tabs (Current Sort)": "按目前排序開啟全部订单標籤頁",
+    "Open Selected Order Tabs": "開啟所選订单標籤頁",
     "Open Processed Folder": "開啟 Processed 資料夾",
     "Open the shared location, sort by most recent if needed, then drag items.csv between the two windows.": "開啟共享位置，如有需要按最近修改排序，然後在两个窗口之间拖动 items.csv。",
     "Open your shared Drive/Sheet link": "開啟共享 Drive/Sheet 連結",
