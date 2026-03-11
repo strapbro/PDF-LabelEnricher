@@ -40,6 +40,14 @@ def _path_sort_key(path: Path) -> list[Any]:
     return _natural_text_key(str(path))
 
 
+def _norm_tracking_value(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
+def _norm_tracking_value(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
 
 class BatchManager:
     def __init__(self, settings: SettingsManager) -> None:
@@ -143,6 +151,91 @@ class BatchManager:
             atomic_write_json(target_path, rows)
         return {"applied": applied, "remaining": len(keep_overrides)}
 
+
+    def _sum_order_quantity(self, order: dict[str, Any]) -> int:
+        total = 0
+        for item in order.get("items", []) or []:
+            try:
+                total += int(item.get("quantity", 1) or 1)
+            except Exception:
+                total += 1
+        return total
+
+    def _merged_order_from_queue_candidates(self, target: dict[str, Any], order_ids: list[str]) -> dict[str, Any] | None:
+        wanted: list[str] = []
+        for order_id in order_ids:
+            oid = str(order_id or "").strip()
+            if oid and oid not in wanted:
+                wanted.append(oid)
+        if len(wanted) < 2:
+            return None
+
+        candidates_by_id: dict[str, dict[str, Any]] = {}
+        for candidate in target.get("candidates", []) or []:
+            oid = str(candidate.get("order_id", "") or "").strip()
+            order = candidate.get("order") if isinstance(candidate.get("order"), dict) else None
+            if oid and order is not None:
+                candidates_by_id[oid] = order
+
+        selected_orders: list[dict[str, Any]] = []
+        for oid in wanted:
+            order = candidates_by_id.get(oid)
+            if order is None:
+                return None
+            if str(order.get("platform", "") or "").strip().lower() != "ebay":
+                return None
+            selected_orders.append(copy.deepcopy(order))
+
+        if len(selected_orders) < 2:
+            return None
+
+        tracking_values = {_norm_tracking_value(order.get("tracking_number", "") or "") for order in selected_orders if _norm_tracking_value(order.get("tracking_number", "") or "")}
+        if len(tracking_values) > 1:
+            return None
+
+        primary = selected_orders[0]
+        merged = copy.deepcopy(primary)
+        merged_items: list[dict[str, Any]] = []
+        total_paid = 0.0
+        subtotal_paid = 0.0
+        item_subtotal_paid = 0.0
+        shipping_subtotal_paid = 0.0
+        sale_date = str(primary.get("sale_date", "") or "")
+        sale_date_sort = str(primary.get("sale_date_sort", "") or "")
+
+        for order in selected_orders:
+            merged_items.extend(copy.deepcopy(order.get("items", []) or []))
+            try:
+                total_paid += float(order.get("total_paid", 0.0) or 0.0)
+            except Exception:
+                pass
+            try:
+                subtotal_paid += float(order.get("subtotal_paid", 0.0) or 0.0)
+            except Exception:
+                pass
+            try:
+                item_subtotal_paid += float(order.get("item_subtotal_paid", 0.0) or 0.0)
+            except Exception:
+                pass
+            try:
+                shipping_subtotal_paid += float(order.get("shipping_subtotal_paid", 0.0) or 0.0)
+            except Exception:
+                pass
+            cur_sort = str(order.get("sale_date_sort", "") or "")
+            if cur_sort and cur_sort > sale_date_sort:
+                sale_date_sort = cur_sort
+                sale_date = str(order.get("sale_date", "") or sale_date)
+
+        merged["items"] = merged_items
+        merged["total_paid"] = round(total_paid, 2)
+        merged["subtotal_paid"] = round(subtotal_paid, 2)
+        merged["item_subtotal_paid"] = round(item_subtotal_paid, 2)
+        merged["shipping_subtotal_paid"] = round(shipping_subtotal_paid, 2)
+        merged["merged_order_ids"] = wanted
+        merged["merged_order_count"] = len(wanted)
+        merged["sale_date"] = sale_date
+        merged["sale_date_sort"] = sale_date_sort
+        return merged
     def scan_inputs(self) -> dict[str, Any]:
         files = self._all_batch_files()
         labels = self._find_label_pdfs(files)
@@ -689,7 +782,116 @@ class BatchManager:
                         "candidates": [],
                     }
                 else:
-                    m = match_label(label_pdf, compatible_orders, platform_hint=match_hint if match_hint else "")
+                    exact_tracking_orders: list[dict[str, Any]] = []
+                    exact_tracking = _norm_tracking_value(label_signals.get("tracking_number", "") or "")
+                    if str(match_hint or platform).strip().lower() == "ebay" and exact_tracking:
+                        for order in compatible_orders.values():
+                            if _norm_tracking_value(order.get("tracking_number", "") or "") == exact_tracking:
+                                exact_tracking_orders.append(copy.deepcopy(order))
+                    if len(exact_tracking_orders) >= 2:
+                        exact_tracking_orders.sort(key=lambda order: (str(order.get("sale_date_sort", "") or order.get("sale_date", "") or ""), str(order.get("order_id", "") or "")), reverse=True)
+                        merged_order = copy.deepcopy(exact_tracking_orders[0])
+                        merged_items: list[dict[str, Any]] = []
+                        total_paid = 0.0
+                        subtotal_paid = 0.0
+                        item_subtotal_paid = 0.0
+                        shipping_subtotal_paid = 0.0
+                        merged_ids: list[str] = []
+                        for order in exact_tracking_orders:
+                            oid = str(order.get("order_id", "") or "").strip()
+                            if oid and oid not in merged_ids:
+                                merged_ids.append(oid)
+                            merged_items.extend(copy.deepcopy(order.get("items", []) or []))
+                            try:
+                                total_paid += float(order.get("total_paid", 0.0) or 0.0)
+                            except Exception:
+                                pass
+                            try:
+                                subtotal_paid += float(order.get("subtotal_paid", 0.0) or 0.0)
+                            except Exception:
+                                pass
+                            try:
+                                item_subtotal_paid += float(order.get("item_subtotal_paid", 0.0) or 0.0)
+                            except Exception:
+                                pass
+                            try:
+                                shipping_subtotal_paid += float(order.get("shipping_subtotal_paid", 0.0) or 0.0)
+                            except Exception:
+                                pass
+                        merged_order["items"] = merged_items
+                        merged_order["total_paid"] = round(total_paid, 2)
+                        merged_order["subtotal_paid"] = round(subtotal_paid, 2)
+                        merged_order["item_subtotal_paid"] = round(item_subtotal_paid, 2)
+                        merged_order["shipping_subtotal_paid"] = round(shipping_subtotal_paid, 2)
+                        merged_order["merged_order_ids"] = merged_ids
+                        merged_order["merged_order_count"] = len(merged_ids)
+                        m = {
+                            "status": "matched",
+                            "method": "exact_tracking_multi_order",
+                            "confidence": 1.25,
+                            "order": merged_order,
+                            "candidates": [],
+                        }
+                    else:
+                        m = match_label(label_pdf, compatible_orders, platform_hint=match_hint if match_hint else "")
+                        if m.get("status") != "matched" and str(match_hint or platform).strip().lower() == "ebay":
+                            candidate_tracking_groups: dict[str, list[dict[str, Any]]] = {}
+                            for candidate in m.get("candidates", []) or []:
+                                candidate_order = candidate.get("order") if isinstance(candidate.get("order"), dict) else None
+                                if candidate_order is None:
+                                    continue
+                                candidate_tracking = _norm_tracking_value(candidate_order.get("tracking_number", "") or candidate.get("tracking_number", "") or "")
+                                if not candidate_tracking:
+                                    continue
+                                candidate_tracking_groups.setdefault(candidate_tracking, []).append(candidate)
+                            eligible_groups = [group for group in candidate_tracking_groups.values() if len(group) >= 2]
+                            if eligible_groups:
+                                eligible_groups.sort(key=lambda group: (len(group), max(float(c.get("score", 0.0) or 0.0) for c in group)), reverse=True)
+                                best_group = eligible_groups[0]
+                                best_group.sort(key=lambda c: (str((c.get("order") or {}).get("sale_date_sort", "") or (c.get("order") or {}).get("sale_date", "") or ""), str(c.get("order_id", "") or "")), reverse=True)
+                                merged_order = copy.deepcopy(best_group[0]["order"])
+                                merged_items: list[dict[str, Any]] = []
+                                total_paid = 0.0
+                                subtotal_paid = 0.0
+                                item_subtotal_paid = 0.0
+                                shipping_subtotal_paid = 0.0
+                                merged_ids: list[str] = []
+                                for candidate in best_group:
+                                    candidate_order = copy.deepcopy(candidate.get("order") or {})
+                                    oid = str(candidate_order.get("order_id", "") or candidate.get("order_id", "") or "").strip()
+                                    if oid and oid not in merged_ids:
+                                        merged_ids.append(oid)
+                                    merged_items.extend(copy.deepcopy(candidate_order.get("items", []) or []))
+                                    try:
+                                        total_paid += float(candidate_order.get("total_paid", 0.0) or 0.0)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        subtotal_paid += float(candidate_order.get("subtotal_paid", 0.0) or 0.0)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        item_subtotal_paid += float(candidate_order.get("item_subtotal_paid", 0.0) or 0.0)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        shipping_subtotal_paid += float(candidate_order.get("shipping_subtotal_paid", 0.0) or 0.0)
+                                    except Exception:
+                                        pass
+                                merged_order["items"] = merged_items
+                                merged_order["total_paid"] = round(total_paid, 2)
+                                merged_order["subtotal_paid"] = round(subtotal_paid, 2)
+                                merged_order["item_subtotal_paid"] = round(item_subtotal_paid, 2)
+                                merged_order["shipping_subtotal_paid"] = round(shipping_subtotal_paid, 2)
+                                merged_order["merged_order_ids"] = merged_ids
+                                merged_order["merged_order_count"] = len(merged_ids)
+                                m = {
+                                    "status": "matched",
+                                    "method": "candidate_tracking_multi_order",
+                                    "confidence": 1.1,
+                                    "order": merged_order,
+                                    "candidates": [],
+                                }
 
                 if m["status"] != "matched":
                     label_signals = _signals_for(label_pdf)
@@ -1688,7 +1890,7 @@ class BatchManager:
             "combined": combined,
         }
 
-    def resolve_unmatched(self, label_pdf: str, order_id: str, variant_choice: str = "") -> dict[str, Any]:
+    def resolve_unmatched(self, label_pdf: str, order_id: str, variant_choice: str = "", merge_order_ids: list[str] | None = None) -> dict[str, Any]:
         queue = self._load_unresolved_queue()
         kept: list[dict[str, Any]] = []
         target: dict[str, Any] | None = None
@@ -1711,6 +1913,37 @@ class BatchManager:
         if order is None:
             return {"ok": False, "error": "Order ID not in candidates"}
 
+        selected_merge_ids: list[str] = []
+        for raw in merge_order_ids or []:
+            oid = str(raw or "").strip()
+            if oid and oid not in selected_merge_ids:
+                selected_merge_ids.append(oid)
+        if order_id and order_id not in selected_merge_ids:
+            selected_merge_ids.insert(0, order_id)
+
+        if len(selected_merge_ids) < 2 and str(order.get("platform", "") or "").strip().lower() == "ebay":
+            selected_tracking = _norm_tracking_value(order.get("tracking_number", "") or "")
+            if selected_tracking:
+                auto_merge_ids: list[str] = []
+                for candidate in target.get("candidates", []) or []:
+                    candidate_order = candidate.get("order") if isinstance(candidate.get("order"), dict) else None
+                    if candidate_order is None:
+                        continue
+                    candidate_tracking = _norm_tracking_value(candidate_order.get("tracking_number", "") or candidate.get("tracking_number", "") or "")
+                    if candidate_tracking != selected_tracking:
+                        continue
+                    candidate_id = str(candidate.get("order_id", "") or candidate_order.get("order_id", "") or "").strip()
+                    if candidate_id and candidate_id not in auto_merge_ids:
+                        auto_merge_ids.append(candidate_id)
+                if len(auto_merge_ids) >= 2 and order_id in auto_merge_ids:
+                    selected_merge_ids = auto_merge_ids
+
+        if len(selected_merge_ids) >= 2:
+            merged = self._merged_order_from_queue_candidates(target, selected_merge_ids)
+            if merged is None:
+                return {"ok": False, "error": "Could not merge the selected eBay orders for this label"}
+            order = merged
+
         if str(target.get("reason", "")) == "multi_variation_choice_required":
             return {"ok": False, "error": "Use variation queue actions to save choices first, then generate all selected variations."}
 
@@ -1730,6 +1963,7 @@ class BatchManager:
             "remaining": len(kept),
             "batch_updated": bool(write_result.get("batch_updated")),
             "combined": combined,
+            "merged_order_ids": selected_merge_ids,
         }
 
     def remove_unresolved_entry(self, label_pdf: str) -> bool:
@@ -2003,21 +2237,3 @@ class BatchManager:
                 shutil.rmtree(p, ignore_errors=True)
                 removed += 1
         return removed
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

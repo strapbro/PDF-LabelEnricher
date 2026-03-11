@@ -40,6 +40,9 @@ def _label_text_zip_hit(ship_postal: str, signals: dict[str, Any]) -> bool:
     zip5 = "".join(ch for ch in (ship_postal or "") if ch.isdigit())[:5]
     hay = "".join(ch for ch in str(signals.get("text", "") or "") if ch.isdigit())
     return bool(zip5 and hay and zip5 in hay)
+
+def _order_sale_sort_value(order: dict[str, Any]) -> str:
+    return str(order.get("sale_date_sort", "") or order.get("sale_date", "") or "")
 def _effective_platform_hint(initial_hint: str, signals: dict[str, Any]) -> str:
     hint = (initial_hint or "").strip().lower()
     if hint in ("amazon", "ebay"):
@@ -124,9 +127,8 @@ def best_candidates(label_pdf: Path, orders: dict[str, dict[str, Any]], platform
                 }
             )
 
-    candidates.sort(key=lambda x: x["score"], reverse=True)
-    return candidates[:3]
-
+    candidates.sort(key=lambda x: (x["score"], _order_sale_sort_value(x.get("order", {}) or {}), x.get("order_id", "")), reverse=True)
+    return candidates[:6]
 
 def match_label(label_pdf: Path, orders: dict[str, dict[str, Any]], platform_hint: str = "") -> dict[str, Any]:
     cands = best_candidates(label_pdf, orders, platform_hint)

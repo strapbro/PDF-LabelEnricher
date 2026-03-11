@@ -457,6 +457,9 @@
    position: fixed;
    inset: 0;
    z-index: 9999;
+   display: grid;
+   place-items: center;
+   padding: 24px;
  }
 
  .app-confirm-backdrop {
@@ -468,8 +471,9 @@
 
  .app-confirm-dialog {
    position: relative;
+   width: min(520px, calc(100vw - 48px));
    max-width: 520px;
-   margin: 14vh auto 0;
+   margin: 0;
    background: rgba(255, 255, 255, 0.88);
  }
 
@@ -940,8 +944,19 @@
    z-index: 0;
  }
 
- body.theme-dark>* {
+ body.theme-dark > :not(#appConfirm) {
    position: relative;
+   z-index: 1;
+ }
+
+ body.theme-dark .app-confirm {
+   z-index: 2147483647 !important;
+   isolation: isolate;
+ }
+
+ body.theme-dark .app-confirm-dialog,
+ body.theme-dark .app-confirm-backdrop {
+   position: absolute;
    z-index: 1;
  }
 
@@ -1543,3 +1558,36 @@
    background: linear-gradient(135deg, rgba(255, 191, 116, 0.99), rgba(245, 144, 71, 0.99) 52%, rgba(179, 94, 31, 0.99)) !important;
    border-color: rgba(255, 224, 184, 0.68) !important;
  }
+
+body.theme-dark .stale-warning {
+  border-color: rgba(120, 153, 214, 0.28) !important;
+  background: linear-gradient(180deg, rgba(19, 31, 57, 0.92), rgba(11, 22, 41, 0.96)) !important;
+  color: #dbe7ff !important;
+  box-shadow: inset 0 1px 0 rgba(205, 225, 255, 0.06), 0 16px 34px rgba(2, 8, 20, 0.22);
+}
+
+body.theme-dark .stale-warning strong {
+  color: #f4f8ff;
+}
+
+body.theme-dark .stale-warning .btn-outline {
+  border-color: rgba(133, 172, 244, 0.32) !important;
+  background: linear-gradient(180deg, rgba(18, 31, 58, 0.94), rgba(11, 22, 40, 0.96)) !important;
+  color: var(--pm-ink) !important;
+}
+
+body.theme-dark .stale-warning .btn-primary {
+  border-color: rgba(145, 205, 255, 0.4) !important;
+}
+
+body.theme-dark [style*="rgba(241,233,212,0.42)"],
+body.theme-dark [style*="rgba(241, 233, 212, 0.42)"] {
+  border-color: rgba(120, 153, 214, 0.24) !important;
+  background: linear-gradient(180deg, rgba(20, 32, 58, 0.88), rgba(11, 22, 40, 0.94)) !important;
+  color: #dbe6ff !important;
+}
+
+body.theme-dark [style*="rgba(241,233,212,0.42)"] strong,
+body.theme-dark [style*="rgba(241, 233, 212, 0.42)"] strong {
+  color: #f5f8ff !important;
+}

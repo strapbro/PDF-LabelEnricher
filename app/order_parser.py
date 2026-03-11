@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import re
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -78,6 +79,18 @@ def _money(value: Any) -> float:
         return 0.0
 
 
+
+def _parse_ebay_sale_date(value: Any) -> tuple[str, str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return "", ""
+    for fmt in ("%b-%d-%y", "%b-%d-%Y", "%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            parsed = datetime.strptime(raw, fmt)
+            return raw, parsed.date().isoformat()
+        except Exception:
+            continue
+    return raw, ""
 def _clean_text(value: Any) -> str:
     return str(value or "").strip()
 
@@ -465,8 +478,15 @@ def parse_ebay_csv(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any
                     "_item_subtotal_sum": 0.0,
                     "_shipping_subtotal_sum": 0.0,
                     "_summary_qty": 0,
+                    "sale_date": "",
+                    "sale_date_sort": "",
                 },
             )
+            sale_date_raw, sale_date_sort = _parse_ebay_sale_date(row.get("Sale Date"))
+            if sale_date_raw and not rec.get("sale_date"):
+                rec["sale_date"] = sale_date_raw
+            if sale_date_sort and not rec.get("sale_date_sort"):
+                rec["sale_date_sort"] = sale_date_sort
 
             raw_item_number = str(row.get("Item Number", "")).strip()
             item_id = _normalize_ebay_item_number(raw_item_number)
@@ -564,8 +584,3 @@ def parse_ebay_csv(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any
 
     warnings = {"scientific_notation_item_numbers": scientific_notation_rows} if scientific_notation_rows else {}
     return records, warnings
-
-
-
-
-

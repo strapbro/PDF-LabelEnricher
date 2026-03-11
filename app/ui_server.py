@@ -226,11 +226,133 @@ def _human_reason(reason: str) -> str:
         return "Unknown reason."
     return reason
 
+def _norm_unresolved_buyer_key(name: str, postal: str) -> tuple[str, str]:
+    clean_name = re.sub(r"[^a-z0-9]+", " ", str(name or "").strip().lower()).strip()
+    zip5 = "".join(ch for ch in str(postal or "") if ch.isdigit())[:5]
+    return clean_name, zip5
+
+
+def _norm_tracking_value(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
+def _candidate_quantity_total(order: dict[str, Any]) -> int:
+    total = 0
+    for item in order.get("items", []) or []:
+        try:
+            total += int(item.get("quantity", 1) or 1)
+        except Exception:
+            total += 1
+    return total
+
+
+def _annotate_unresolved_row(row: dict[str, Any]) -> dict[str, Any]:
+    rr = dict(row)
+    candidates = list(rr.get("candidates", []) or [])
+    label_tracking = _norm_tracking_value(str(rr.get("tracking_number", "") or ""))
+
+    def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[str, str]:
+        order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
+        return (
+            str(order.get("sale_date_sort", "") or order.get("sale_date", "") or ""),
+            str(candidate.get("order_id", "") or ""),
+        )
+
+    def _build_merge_payload(grouped: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        payload: list[dict[str, Any]] = []
+        for idx, candidate in enumerate(grouped):
+            order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
+            payload.append({
+                "order_id": str(candidate.get("order_id", "") or ""),
+                "sale_date": str(order.get("sale_date", "") or ""),
+                "is_latest": idx == 0,
+                "item_count": len(order.get("items", []) or []),
+                "quantity_total": _candidate_quantity_total(order),
+                "total_paid": order.get("total_paid", 0.0),
+                "title": ((order.get("items", []) or [{}])[0].get("title", "") if (order.get("items", []) or []) else ""),
+                "tracking_number": str(order.get("tracking_number", "") or candidate.get("tracking_number", "") or ""),
+            })
+        return payload
+
+    tracking_groups: dict[str, list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        candidate_tracking = _norm_tracking_value((candidate.get("order") or {}).get("tracking_number", "") or candidate.get("tracking_number", "") or "")
+        if not candidate_tracking:
+            continue
+        tracking_groups.setdefault(candidate_tracking, []).append(candidate)
+
+    tracking_group: list[dict[str, Any]] = []
+    tracking_group_value = label_tracking
+    if label_tracking and label_tracking in tracking_groups:
+        tracking_group = list(tracking_groups.get(label_tracking, []))
+    else:
+        eligible_tracking_groups = [group for group in tracking_groups.values() if len(group) >= 2]
+        if eligible_tracking_groups:
+            eligible_tracking_groups.sort(
+                key=lambda group: (len(group), _candidate_sort_key(sorted(group, key=_candidate_sort_key, reverse=True)[0])),
+                reverse=True,
+            )
+            tracking_group = list(eligible_tracking_groups[0])
+            first_tracking_order = tracking_group[0].get("order") if isinstance(tracking_group[0].get("order"), dict) else {}
+            tracking_group_value = _norm_tracking_value(first_tracking_order.get("tracking_number", "") or tracking_group[0].get("tracking_number", "") or "")
+
+    tracking_group.sort(key=_candidate_sort_key, reverse=True)
+
+    if len(tracking_group) >= 2:
+        rr["resolution_mode"] = "combined_tracking"
+        rr["display_candidates"] = tracking_group
+        rr["merge_candidates"] = _build_merge_payload(tracking_group)
+        rr["repeat_buyer_warning"] = _ui(
+            "Did you combine or merge these orders into one shipping label? These eBay orders share tracking number {tracking}.",
+            tracking=tracking_group_value or label_tracking,
+        )
+        rr["reason_human"] = _ui("Multiple eBay orders share this exact tracking number. This looks like a combined shipment.")
+        return rr
+
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
+        key = _norm_unresolved_buyer_key(
+            candidate.get("ship_name", "") or order.get("ship_name", ""),
+            candidate.get("ship_postal", "") or order.get("ship_postal", ""),
+        )
+        if not key[0] or not key[1]:
+            continue
+        groups.setdefault(key, []).append(candidate)
+
+    repeat_group: list[dict[str, Any]] = []
+    for grouped in groups.values():
+        if len(grouped) < 2:
+            continue
+        grouped.sort(key=_candidate_sort_key, reverse=True)
+        repeat_group = grouped
+        break
+
+    if len(repeat_group) >= 2:
+        rr["resolution_mode"] = "repeat_buyer"
+        rr["display_candidates"] = repeat_group
+        rr["merge_candidates"] = []
+        rr["repeat_buyer_warning"] = _ui(
+            "Repeat buyer detected: {count} orders share this buyer + ZIP. Choose the most recent order unless you intentionally merged shipments.",
+            count=len(repeat_group),
+        )
+        rr["reason_human"] = _ui("Could not confidently match this label because this buyer has multiple orders in the report.")
+        rr["repeat_buyer_count"] = len(repeat_group)
+        return rr
+
+    rr["resolution_mode"] = "ambiguous"
+    rr["display_candidates"] = candidates
+    rr["merge_candidates"] = []
+    rr["repeat_buyer_warning"] = ""
+    rr["repeat_buyer_count"] = 0
+    return rr
+
 def _unresolved_for_ui() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in _unresolved():
         rr = dict(row)
         rr["reason_human"] = _human_reason(str(row.get("reason", "")))
+        rr = _annotate_unresolved_row(rr)
         out.append(rr)
     return out
 
@@ -3414,8 +3536,13 @@ def create_app() -> FastAPI:
         return _redirect_ui("/unprocessed", "Queue item not found")
 
     @app.post("/resolve/assign")
-    async def resolve_assign(label_pdf: str = Form(...), order_id: str = Form(...), variant_choice: str = Form("")):
-        result = batch_manager.resolve_unmatched(label_pdf, order_id, variant_choice)
+    async def resolve_assign(request: Request):
+        form = await request.form()
+        label_pdf = str(form.get("label_pdf", "") or "")
+        order_id = str(form.get("order_id", "") or "")
+        variant_choice = str(form.get("variant_choice", "") or "")
+        merge_order_ids = [str(x or "") for x in form.getlist("merge_order_ids")]
+        result = batch_manager.resolve_unmatched(label_pdf, order_id, variant_choice, merge_order_ids=merge_order_ids)
         if result.get("ok"):
             parts = [_ui("Resolved and output generated")]
             combined = result.get("combined", {})
@@ -3432,29 +3559,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
