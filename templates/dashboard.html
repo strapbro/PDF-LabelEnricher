@@ -104,9 +104,9 @@
   <div>
     <h3>{{ tr("Maintenance") }}</h3>
     <div class="actions-grid helper-actions">
-      <form action="/staged/clear" method="post" data-confirm="{{ tr('Clear all staged files in incoming/batch?') }}"><button class="btn btn-sm btn-outline" type="submit">{{ tr("Clear Staged Files") }}</button></form>
-      <form action="/resolve/clear" method="post" data-confirm="{{ tr('Clear all unresolved queue items?') }}"><input type="hidden" name="from_page" value="dashboard"><button class="btn btn-sm btn-outline" type="submit">{{ tr("Clear Unprocessed Queue") }}</button></form>
-      <form action="/items/clear-needs-review" method="post"><input type="hidden" name="from_page" value="dashboard"><input type="hidden" name="mode" value="clear_flags"><button class="btn btn-sm btn-outline" type="submit">{{ tr("Clear Items Needing Review") }}</button></form>
+      <form id="clearStagedFilesForm" action="/staged/clear" method="post" data-confirm="{{ tr('Clear all staged files in incoming/batch?') }}"><button id="clearStagedFilesBtn" class="btn btn-sm btn-outline" type="submit">{{ tr("Clear Staged Files") }}</button></form>
+      <form id="clearUnprocessedQueueForm" action="/resolve/clear" method="post" data-confirm="{{ tr('Clear all unresolved queue items?') }}"><input type="hidden" name="from_page" value="dashboard"><button id="clearUnprocessedQueueBtn" class="btn btn-sm btn-outline" type="submit">{{ tr("Clear Unprocessed Queue") }}</button></form>
+      <form id="clearNeedsReviewDashboardForm" action="/items/clear-needs-review" method="post"><input type="hidden" name="from_page" value="dashboard"><input type="hidden" name="mode" value="clear_flags"><button id="clearNeedsReviewDashboardBtn" class="btn btn-sm btn-outline" type="submit">{{ tr("Clear Items Needing Review") }}</button></form>
     </div>
   </div>
 </section>
@@ -366,7 +366,57 @@ document.getElementById('uploadForm').addEventListener('submit', () => {
   }, 0);
 });
 
+const clearStagedFilesBtn = document.getElementById('clearStagedFilesBtn');
+const clearStagedFilesForm = document.getElementById('clearStagedFilesForm');
+const clearUnprocessedQueueBtn = document.getElementById('clearUnprocessedQueueBtn');
+const clearUnprocessedQueueForm = document.getElementById('clearUnprocessedQueueForm');
+const clearNeedsReviewDashboardBtn = document.getElementById('clearNeedsReviewDashboardBtn');
+const clearNeedsReviewDashboardForm = document.getElementById('clearNeedsReviewDashboardForm');
+
+function bindDashboardConfirmButton(button, form) {
+  if (!button || !form) return;
+  button.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const message = form.getAttribute('data-confirm');
+    if (!message) {
+      form.submit();
+      return;
+    }
+    const ok = await showAppConfirm(message);
+    if (ok) {
+      form.submit();
+    }
+  });
+}
+
+bindDashboardConfirmButton(clearStagedFilesBtn, clearStagedFilesForm);
+bindDashboardConfirmButton(clearUnprocessedQueueBtn, clearUnprocessedQueueForm);
 const reviewClearForms = document.querySelectorAll('form[action="/items/clear-needs-review"]');
+if (clearNeedsReviewDashboardBtn && clearNeedsReviewDashboardForm) {
+  clearNeedsReviewDashboardBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const modeInput = clearNeedsReviewDashboardForm.querySelector('input[name="mode"]');
+    const autoCount = Number('{{ auto_added_review_count or 0 }}');
+    if (!modeInput) return;
+    modeInput.value = 'clear_flags';
+
+    if (autoCount > 0) {
+      const proceed = await showAppConfirm(fmt(T.autoAddedContinue, { count: String(autoCount) }));
+      if (!proceed) return;
+      const deleteRows = await showAppConfirm(T.deleteAutoAdded);
+      modeInput.value = deleteRows ? 'delete_auto_added' : 'clear_flags';
+      clearNeedsReviewDashboardForm.submit();
+      return;
+    }
+
+    const ok = await showAppConfirm(T.clearReviewFlags);
+    if (ok) {
+      clearNeedsReviewDashboardForm.submit();
+    }
+  });
+}
 reviewClearForms.forEach((form) => {
   form.addEventListener('submit', async (e) => {
     const modeInput = form.querySelector('input[name="mode"]');
