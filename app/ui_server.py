@@ -250,12 +250,24 @@ def _annotate_unresolved_row(row: dict[str, Any]) -> dict[str, Any]:
     rr = dict(row)
     candidates = list(rr.get("candidates", []) or [])
     label_tracking = _norm_tracking_value(str(rr.get("tracking_number", "") or ""))
+    top_candidate = candidates[0] if candidates else {}
 
     def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[str, str]:
         order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
         return (
             str(order.get("sale_date_sort", "") or order.get("sale_date", "") or ""),
             str(candidate.get("order_id", "") or ""),
+        )
+
+    def _candidate_tracking(candidate: dict[str, Any]) -> str:
+        order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
+        return _norm_tracking_value(order.get("tracking_number", "") or candidate.get("tracking_number", "") or "")
+
+    def _candidate_buyer_key(candidate: dict[str, Any]) -> tuple[str, str]:
+        order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
+        return _norm_unresolved_buyer_key(
+            candidate.get("ship_name", "") or order.get("ship_name", ""),
+            candidate.get("ship_postal", "") or order.get("ship_postal", ""),
         )
 
     def _build_merge_payload(grouped: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -276,7 +288,7 @@ def _annotate_unresolved_row(row: dict[str, Any]) -> dict[str, Any]:
 
     tracking_groups: dict[str, list[dict[str, Any]]] = {}
     for candidate in candidates:
-        candidate_tracking = _norm_tracking_value((candidate.get("order") or {}).get("tracking_number", "") or candidate.get("tracking_number", "") or "")
+        candidate_tracking = _candidate_tracking(candidate)
         if not candidate_tracking:
             continue
         tracking_groups.setdefault(candidate_tracking, []).append(candidate)
@@ -286,15 +298,10 @@ def _annotate_unresolved_row(row: dict[str, Any]) -> dict[str, Any]:
     if label_tracking and label_tracking in tracking_groups:
         tracking_group = list(tracking_groups.get(label_tracking, []))
     else:
-        eligible_tracking_groups = [group for group in tracking_groups.values() if len(group) >= 2]
-        if eligible_tracking_groups:
-            eligible_tracking_groups.sort(
-                key=lambda group: (len(group), _candidate_sort_key(sorted(group, key=_candidate_sort_key, reverse=True)[0])),
-                reverse=True,
-            )
-            tracking_group = list(eligible_tracking_groups[0])
-            first_tracking_order = tracking_group[0].get("order") if isinstance(tracking_group[0].get("order"), dict) else {}
-            tracking_group_value = _norm_tracking_value(first_tracking_order.get("tracking_number", "") or tracking_group[0].get("tracking_number", "") or "")
+        top_tracking = _candidate_tracking(top_candidate)
+        if top_tracking and len(tracking_groups.get(top_tracking, [])) >= 2:
+            tracking_group = list(tracking_groups.get(top_tracking, []))
+            tracking_group_value = top_tracking
 
     tracking_group.sort(key=_candidate_sort_key, reverse=True)
 
@@ -311,22 +318,16 @@ def _annotate_unresolved_row(row: dict[str, Any]) -> dict[str, Any]:
 
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for candidate in candidates:
-        order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
-        key = _norm_unresolved_buyer_key(
-            candidate.get("ship_name", "") or order.get("ship_name", ""),
-            candidate.get("ship_postal", "") or order.get("ship_postal", ""),
-        )
+        key = _candidate_buyer_key(candidate)
         if not key[0] or not key[1]:
             continue
         groups.setdefault(key, []).append(candidate)
 
     repeat_group: list[dict[str, Any]] = []
-    for grouped in groups.values():
-        if len(grouped) < 2:
-            continue
-        grouped.sort(key=_candidate_sort_key, reverse=True)
-        repeat_group = grouped
-        break
+    top_buyer_key = _candidate_buyer_key(top_candidate)
+    if top_buyer_key[0] and top_buyer_key[1] and len(groups.get(top_buyer_key, [])) >= 2:
+        repeat_group = list(groups.get(top_buyer_key, []))
+        repeat_group.sort(key=_candidate_sort_key, reverse=True)
 
     if len(repeat_group) >= 2:
         rr["resolution_mode"] = "repeat_buyer"
@@ -442,6 +443,22 @@ def _norm_merge_text(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").strip().lower()).strip()
 
 
+def _title_bucket_keys(value: str) -> list[str]:
+    norm = _norm_merge_text(value)
+    if not norm:
+        return []
+    tokens = [tok for tok in norm.split() if len(tok) >= 3]
+    keys: list[str] = []
+    seen: set[str] = set()
+    for candidate in [norm[:24], " ".join(tokens[:2]), tokens[0] if tokens else ""]:
+        cand = str(candidate or "").strip()
+        if not cand or cand in seen:
+            continue
+        seen.add(cand)
+        keys.append(cand)
+    return keys
+
+
 def _row_display_name(row: dict[str, Any]) -> str:
     return str(row.get("custom_label") or row.get("item_title") or row.get("amazon_sku") or row.get("amazon_asin") or row.get("ebay_item_number") or "Untitled").strip()
 
@@ -468,11 +485,39 @@ def _find_hint_for_row(row: dict[str, Any], hints: list[dict[str, str]]) -> dict
 def _build_items_assist(rows: list[dict[str, Any]], hints: list[dict[str, str]]) -> tuple[dict[str, dict[str, str]], dict[str, list[dict[str, Any]]]]:
     hint_matches: dict[str, dict[str, str]] = {}
     merge_candidates: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        key = str(row.get("_row_key", "") or "")
+    hint_by_ebay: dict[str, dict[str, str]] = {}
+    hint_by_asin: dict[str, dict[str, str]] = {}
+    for hint in hints:
+        hint_ebay = str(hint.get("ebay_item_number", "") or "").strip()
+        hint_asin = str(hint.get("asin", "") or "").strip().upper()
+        if hint_ebay and hint_ebay not in hint_by_ebay:
+            hint_by_ebay[hint_ebay] = hint
+        if hint_asin and hint_asin not in hint_by_asin:
+            hint_by_asin[hint_asin] = hint
+
+    row_meta_by_key: dict[str, dict[str, Any]] = {}
+    label_groups: dict[str, list[str]] = {}
+    title_groups: dict[str, list[str]] = {}
+    title_bucket_groups: dict[str, list[str]] = {}
+    hint_signature_groups: dict[tuple[str, str, str, str], list[str]] = {}
+
+    def _append_group(group_map: dict[Any, list[str]], key: Any, row_key: str) -> None:
         if not key:
+            return
+        group_map.setdefault(key, []).append(row_key)
+
+    for row in rows:
+        row_key = str(row.get("_row_key", "") or "")
+        if not row_key:
             continue
-        hint = _find_hint_for_row(row, hints)
+
+        ebay = str(row.get("ebay_item_number", "") or "").strip()
+        asin = str(row.get("amazon_asin", "") or "").strip().upper()
+        hint = hint_by_ebay.get(ebay) if ebay else None
+        if hint is None and asin:
+            hint = hint_by_asin.get(asin)
+
+        hint_signature: tuple[str, str, str, str] | None = None
         if hint:
             hint_payload = {
                 "label": str(hint.get("label", "") or "").strip(),
@@ -480,72 +525,111 @@ def _build_items_assist(rows: list[dict[str, Any]], hints: list[dict[str, str]])
                 "asin": str(hint.get("asin", "") or "").strip().upper(),
                 "ebay_item_number": str(hint.get("ebay_item_number", "") or "").strip(),
             }
+            hint_signature = (
+                hint_payload["label"],
+                hint_payload["location"],
+                hint_payload["asin"],
+                hint_payload["ebay_item_number"],
+            )
             already_applied = True
             if hint_payload["label"] and str(row.get("custom_label", "") or "").strip() != hint_payload["label"]:
                 already_applied = False
             if hint_payload["location"] and str(row.get("location", "") or "").strip() != hint_payload["location"]:
                 already_applied = False
-            if hint_payload["asin"] and str(row.get("amazon_asin", "") or "").strip().upper() != hint_payload["asin"]:
+            if hint_payload["asin"] and asin != hint_payload["asin"]:
                 already_applied = False
-            if hint_payload["ebay_item_number"] and str(row.get("ebay_item_number", "") or "").strip() != hint_payload["ebay_item_number"]:
+            if hint_payload["ebay_item_number"] and ebay != hint_payload["ebay_item_number"]:
                 already_applied = False
             if not already_applied:
-                hint_matches[key] = hint_payload
-    for row in rows:
-        row_key = str(row.get("_row_key", "") or "")
-        if not row_key:
-            continue
-        row_label = _norm_merge_text(str(row.get("custom_label", "") or ""))
-        row_title = _norm_merge_text(str(row.get("item_title", "") or ""))
-        row_loc = _norm_merge_text(str(row.get("location", "") or ""))
-        row_var = _norm_merge_text(str(row.get("variation_options", "") or ""))
-        row_has_ebay, row_has_amz = _row_identity_bits(row)
-        row_hint = hint_matches.get(row_key)
+                hint_matches[row_key] = hint_payload
+                _append_group(hint_signature_groups, hint_signature, row_key)
+
+        label = _norm_merge_text(str(row.get("custom_label", "") or ""))
+        title = _norm_merge_text(str(row.get("item_title", "") or ""))
+        location = _norm_merge_text(str(row.get("location", "") or ""))
+        variation = _norm_merge_text(str(row.get("variation_options", "") or ""))
+        title_buckets = _title_bucket_keys(title)
+        has_ebay, has_amz = _row_identity_bits(row)
+
+        meta = {
+            "row": row,
+            "row_key": row_key,
+            "label": label,
+            "title": title,
+            "location": location,
+            "variation": variation,
+            "title_buckets": title_buckets,
+            "has_ebay": has_ebay,
+            "has_amz": has_amz,
+            "hint_signature": hint_signature if row_key in hint_matches else None,
+        }
+        row_meta_by_key[row_key] = meta
+
+        _append_group(label_groups, label, row_key)
+        _append_group(title_groups, title, row_key)
+        for bucket in title_buckets:
+            _append_group(title_bucket_groups, bucket, row_key)
+
+    for row_key, meta in row_meta_by_key.items():
+        candidate_keys: set[str] = set()
+        if meta["hint_signature"]:
+            candidate_keys.update(hint_signature_groups.get(meta["hint_signature"], []))
+        if meta["label"]:
+            candidate_keys.update(label_groups.get(meta["label"], []))
+        if meta["title"]:
+            candidate_keys.update(title_groups.get(meta["title"], []))
+        for bucket in meta["title_buckets"]:
+            candidate_keys.update(title_bucket_groups.get(bucket, []))
+        candidate_keys.discard(row_key)
+
         ranked: list[dict[str, Any]] = []
-        for other in rows:
-            other_key = str(other.get("_row_key", "") or "")
-            if not other_key or other_key == row_key:
+        for other_key in candidate_keys:
+            other_meta = row_meta_by_key.get(other_key)
+            if other_meta is None:
                 continue
-            other_has_ebay, other_has_amz = _row_identity_bits(other)
-            cross_platform = (row_has_ebay and other_has_amz) or (row_has_amz and other_has_ebay) or str(row.get("platform", "")) == "both" or str(other.get("platform", "")) == "both"
+
+            cross_platform = (
+                (meta["has_ebay"] and other_meta["has_amz"])
+                or (meta["has_amz"] and other_meta["has_ebay"])
+                or str(meta["row"].get("platform", "") or "") == "both"
+                or str(other_meta["row"].get("platform", "") or "") == "both"
+            )
+
             reasons: list[str] = []
             score = 0
-            other_hint = hint_matches.get(other_key)
-            if row_hint and other_hint and row_hint == other_hint:
+            if meta["hint_signature"] and meta["hint_signature"] == other_meta["hint_signature"]:
                 score += 300
                 reasons.append("same hint import ties these platform IDs together")
             if not cross_platform and score == 0:
                 continue
-            other_label = _norm_merge_text(str(other.get("custom_label", "") or ""))
-            other_title = _norm_merge_text(str(other.get("item_title", "") or ""))
-            other_loc = _norm_merge_text(str(other.get("location", "") or ""))
-            other_var = _norm_merge_text(str(other.get("variation_options", "") or ""))
-            if row_label and other_label and row_label == other_label:
+            if meta["label"] and meta["label"] == other_meta["label"]:
                 score += 140
                 reasons.append("same custom label")
-            if row_title and other_title:
-                if row_title == other_title:
+            if meta["title"] and other_meta["title"]:
+                if meta["title"] == other_meta["title"]:
                     score += 100
                     reasons.append("same title")
-                else:
-                    ratio = SequenceMatcher(None, row_title, other_title).ratio()
+                elif set(meta["title_buckets"]) & set(other_meta["title_buckets"]):
+                    ratio = SequenceMatcher(None, meta["title"], other_meta["title"]).ratio()
                     if ratio >= 0.92:
                         score += 70
                         reasons.append(f"very similar title ({ratio:.0%})")
-            if row_loc and other_loc and row_loc == other_loc:
+            if meta["location"] and meta["location"] == other_meta["location"]:
                 score += 20
                 reasons.append("same location")
-            if row_var and other_var and row_var == other_var:
+            if meta["variation"] and meta["variation"] == other_meta["variation"]:
                 score += 25
                 reasons.append("same variation options")
             if score < 120:
                 continue
+            other_row = other_meta["row"]
             ranked.append({
                 "row_key": other_key,
                 "score": score,
-                "label": _row_display_name(other),
-                "preview": _join_ui_parts([_row_display_name(other), ", ".join(reasons[:2]) if reasons else "possible duplicate"], sep=" | "),
+                "label": _row_display_name(other_row),
+                "preview": _join_ui_parts([_row_display_name(other_row), ", ".join(reasons[:2]) if reasons else "possible duplicate"], sep=" | "),
             })
+
         ranked.sort(key=lambda x: (-int(x.get("score", 0)), str(x.get("label", "")).lower()))
         merge_candidates[row_key] = ranked[:5]
     return hint_matches, merge_candidates

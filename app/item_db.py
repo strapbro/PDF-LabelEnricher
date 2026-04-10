@@ -237,17 +237,37 @@ class ItemDB:
     def __init__(self, csv_path: Path, defaults: dict[str, bool]) -> None:
         self.csv_path = csv_path
         self.defaults = defaults
+        self._cached_rows: list[dict[str, str]] | None = None
+        self._cached_sig: tuple[int, int] | None = None
         if not self.csv_path.exists():
             self.save_rows([])
+
+    def _file_sig(self) -> tuple[int, int] | None:
+        if not self.csv_path.exists():
+            return None
+        try:
+            stat = self.csv_path.stat()
+            return (int(stat.st_mtime_ns), int(stat.st_size))
+        except Exception:
+            return None
+
+    def _clone_rows(self, rows: list[dict[str, str]]) -> list[dict[str, str]]:
+        return [dict(row) for row in rows]
 
     def load_rows(self) -> list[dict[str, str]]:
         if not self.csv_path.exists():
             return []
+        sig = self._file_sig()
+        if sig is not None and self._cached_sig == sig and self._cached_rows is not None:
+            return self._clone_rows(self._cached_rows)
         with self.csv_path.open("r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
             rows = [_normalize_row(r) for r in reader]
         rows = [r for r in rows if r.get("item_id") or r.get("ebay_item_number") or r.get("amazon_sku") or r.get("amazon_asin")]
-        return _merge_rows(rows)
+        merged = _merge_rows(rows)
+        self._cached_rows = self._clone_rows(merged)
+        self._cached_sig = sig
+        return self._clone_rows(merged)
 
     @property
     def backups_dir(self) -> Path:
@@ -421,6 +441,8 @@ class ItemDB:
             for row in canonical:
                 writer.writerow({k: row.get(k, "") for k in FIELDS})
         tmp.replace(self.csv_path)
+        self._cached_rows = self._clone_rows(canonical)
+        self._cached_sig = self._file_sig()
         self._append_change_log(action, before_rows, canonical)
 
     def index(self) -> dict[tuple[str, str], dict[str, str]]:
@@ -1122,7 +1144,6 @@ class ItemDB:
         if cleared or deleted:
             self.save_rows(kept, action=("clear_needs_review_delete_auto" if delete_auto else "clear_needs_review_flags"))
         return {"cleared": cleared, "deleted": deleted}
-
 
 
 

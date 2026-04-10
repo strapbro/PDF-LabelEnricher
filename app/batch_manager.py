@@ -1209,7 +1209,7 @@ class BatchManager:
             parts.append(f"TRK {tracking}")
         if order_id:
             parts.append(f"ORD {order_id}")
-        if postal and (recipient or tracking):
+        if postal:
             parts.append(f"ZIP {postal}")
 
         return " | ".join(parts) if parts else label_pdf.name
