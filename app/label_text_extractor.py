@@ -70,6 +70,10 @@ def _looks_like_ebay_label_pdf(pdf_path: Path) -> bool:
 
 
 def _ocr_windows_image_lines(image_path: Path) -> list[str]:
+    try:
+        image_path = image_path.resolve()
+    except Exception:
+        pass
     ps_script = f"""
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]
@@ -125,6 +129,20 @@ def _ocr_ebay_ups_recipient_block(pdf_path: Path) -> list[str]:
         return []
 
 
+def _ocr_ebay_ups_full_page_lines(pdf_path: Path) -> list[str]:
+    try:
+        with fitz.open(str(pdf_path)) as doc:
+            if doc.page_count <= 0:
+                return []
+            page = doc[0]
+            with tempfile.TemporaryDirectory(prefix="label_ocr_") as tmpdir:
+                out_path = Path(tmpdir) / "ebay_ups_full_page.png"
+                page.get_pixmap(matrix=fitz.Matrix(3, 3).prerotate(270), alpha=False).save(str(out_path))
+                return _ocr_windows_image_lines(out_path)
+    except Exception:
+        return []
+
+
 def _extract_tracking(full_text: str) -> str:
     compact = re.sub(r"[^A-Za-z0-9]", "", full_text).upper()
 
@@ -165,12 +183,30 @@ def _detect_carrier(full_text: str, tracking_number: str) -> str:
 
 
 def _candidate_lines(text: str, words_text: str) -> list[str]:
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    lines = _split_inline_shipto_lines([ln.strip() for ln in text.splitlines() if ln.strip()])
     if words_text:
         # Keep a coarse words fallback in case text lines are badly rotated,
         # but avoid single-token OCR scraps that can look like a city name.
         lines.append(_normalize_space(words_text))
     return lines
+
+
+def _split_inline_shipto_lines(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    pattern = re.compile(r"^(ship\s*to|shipto|deliver to|recipient|to)\s*:?\s*(.+)$", re.IGNORECASE)
+    for raw in lines:
+        line = _normalize_space(raw)
+        if not line:
+            continue
+        match = pattern.match(line)
+        if match:
+            out.append(f"{match.group(1)}:")
+            remainder = _normalize_space(match.group(2))
+            if remainder:
+                out.append(remainder)
+            continue
+        out.append(line)
+    return out
 
 
 def _is_noise_line(line: str) -> bool:
@@ -203,11 +239,28 @@ def _is_noise_line(line: str) -> bool:
 
 def _extract_shipto_block(lines: list[str]) -> list[str]:
     anchors = ["ship to", "shipto", "to:", "deliver to", "recipient"]
+    best_block: list[str] = []
+    best_score = -10
     for i, ln in enumerate(lines[:120]):
         ll = ln.lower()
-        if any(a in ll for a in anchors):
-            return lines[i + 1 : min(i + 10, len(lines))]
-    return []
+        if not any(a in ll for a in anchors):
+            continue
+        block = lines[i + 1 : min(i + 10, len(lines))]
+        if not block:
+            continue
+        score = 0
+        if any(_valid_recipient_candidate(candidate, "", "") for candidate in block[:3]):
+            score += 4
+        if any(_looks_like_street_line(candidate) for candidate in block[:4]):
+            score += 2
+        if any(ZIP_RE.search(candidate) for candidate in block[:5]):
+            score += 3
+        if block and re.search(r"\d", block[0]):
+            score -= 1
+        if score > best_score:
+            best_score = score
+            best_block = block
+    return best_block
 
 
 def _looks_like_person_name(line: str) -> bool:
@@ -373,9 +426,10 @@ def _extract_positioned_shipto_block(pdf_path: Path) -> list[str]:
 
 
 def _recipient_from_shipto_text(text: str, postal: str, pdf_name: str) -> str:
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    lines = _split_inline_shipto_lines([ln.strip() for ln in text.splitlines() if ln.strip()])
+    anchors = ("ship to", "shipto", "to:", "deliver to", "recipient")
     for i, line in enumerate(lines):
-        if "ship to" not in line.lower():
+        if not any(anchor in line.lower() for anchor in anchors):
             continue
         for cand in lines[i + 1 : min(i + 8, len(lines))]:
             if _valid_recipient_candidate(cand, postal, pdf_name):
@@ -446,6 +500,19 @@ def _pick_zip(block: list[str], all_text: str) -> str:
     return ""
 
 
+def _pick_zip_from_ocr_lines(lines: list[str]) -> str:
+    shipto_block = _extract_shipto_block(lines)
+    if shipto_block:
+        postal = _pick_zip(shipto_block, "\n".join(lines))
+        if postal:
+            return postal
+
+    all_zips = list(ZIP_RE.finditer("\n".join(lines)))
+    if all_zips:
+        return _format_zip_match(all_zips[-1])
+    return ""
+
+
 def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
     text, words_text = _extract_text(pdf_path)
     search_text = _normalize_space(f"{text} {words_text}")
@@ -468,18 +535,27 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
     # the recipient panel only when the normal text pass did not produce usable
     # recipient or ZIP signals.
     if _looks_like_ebay_label_pdf(pdf_path) and (not postal or not recipient):
-        ocr_lines = _ocr_ebay_ups_recipient_block(pdf_path)
+        ocr_lines = _split_inline_shipto_lines(_ocr_ebay_ups_recipient_block(pdf_path))
         if ocr_lines:
             ocr_text = "\n".join(ocr_lines)
-            text = "\n".join(part for part in [text, ocr_text] if part.strip())
-            search_text = _normalize_space(f"{search_text} {ocr_text}")
-            lower = search_text.lower()
-            lines = _candidate_lines(text, words_text)
-            shipto_block = _extract_shipto_block(lines)
-            postal = postal or _pick_zip(shipto_block, search_text)
-            recipient = recipient or _pick_recipient(shipto_block, lines, postal, pdf_path.name, text)
-            tracking = tracking or _extract_tracking(search_text)
-            carrier = _detect_carrier(search_text, tracking)
+            ocr_shipto_block = _extract_shipto_block(ocr_lines)
+            if not postal:
+                postal = _pick_zip_from_ocr_lines(ocr_lines)
+            if not recipient:
+                recipient = _pick_recipient(ocr_shipto_block, ocr_lines, postal, pdf_path.name, ocr_text)
+        if not recipient:
+            full_page_ocr_lines = _split_inline_shipto_lines(_ocr_ebay_ups_full_page_lines(pdf_path))
+            if full_page_ocr_lines:
+                full_page_ocr_text = "\n".join(full_page_ocr_lines)
+                full_page_shipto_block = _extract_shipto_block(full_page_ocr_lines)
+                full_page_postal = _pick_zip_from_ocr_lines(full_page_ocr_lines)
+                full_page_recipient = _pick_recipient(full_page_shipto_block, full_page_ocr_lines, full_page_postal, pdf_path.name, full_page_ocr_text)
+                if full_page_recipient:
+                    recipient = full_page_recipient
+                    if full_page_postal:
+                        postal = full_page_postal
+                elif not postal and full_page_postal:
+                    postal = full_page_postal
 
     amz_match = AMZ_ORDER_RE.search(search_text)
     ebay_match = EBAY_ORDER_RE.search(search_text)
@@ -501,4 +577,3 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
         "order_id_ebay": ebay_match.group(0) if ebay_match else "",
         "recipient_name": recipient,
     }
-
