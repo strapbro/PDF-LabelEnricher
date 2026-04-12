@@ -523,10 +523,12 @@ class ItemDB:
         self.save_rows(rows)
         return row
 
-    def update_rows_from_form(self, form: dict[str, str]) -> tuple[int, int]:
+    def update_rows_from_form(self, form: dict[str, str]) -> dict[str, int]:
         rows = self.load_rows()
         kept: list[dict[str, str]] = [dict(r) for r in rows]
         deleted = 0
+        merged = 0
+        skipped_merges = 0
         source_page = (form.get("source_page", "") or "").strip().lower()
 
         # Save by stable row identity (not positional index), so filtered/sorted UI views
@@ -536,8 +538,11 @@ class ItemDB:
             if k.endswith("_row_key") and k.startswith("row_"):
                 submitted_prefixes.append(k[: -len("_row_key")])
 
-        row_by_key: dict[str, dict[str, str]] = {self._row_identity(r): r for r in kept}
+        original_rows: list[tuple[str, dict[str, str]]] = [(self._row_identity(r), r) for r in kept]
+        row_by_key: dict[str, dict[str, str]] = {row_key: row for row_key, row in original_rows}
         delete_keys: set[str] = set()
+        merge_targets: dict[str, str] = {}
+        merge_order: list[str] = []
 
         if submitted_prefixes:
             for prefix in submitted_prefixes:
@@ -568,10 +573,58 @@ class ItemDB:
                     row["needs_review_reason"] = ""
                 row.update(_normalize_row(row))
 
+                merge_target_key = (form.get(prefix + "_merge_target_key", "") or "").strip()
+                if merge_target_key and merge_target_key != row_key:
+                    merge_targets[row_key] = merge_target_key
+                    if row_key not in merge_order:
+                        merge_order.append(row_key)
+
             if delete_keys:
                 before = len(kept)
                 kept = [r for r in kept if self._row_identity(r) not in delete_keys]
                 deleted = before - len(kept)
+
+            if merge_targets:
+                def _resolve_final_target(source_key: str) -> str | None:
+                    current = source_key
+                    seen = {source_key}
+                    target_key = merge_targets.get(current, "")
+                    if not target_key:
+                        return None
+                    while target_key:
+                        if target_key in seen:
+                            return None
+                        if target_key in delete_keys:
+                            return None
+                        seen.add(target_key)
+                        current = target_key
+                        target_key = merge_targets.get(current, "")
+                    return current if current != source_key else None
+
+                merged_source_keys: set[str] = set()
+                for source_key in merge_order:
+                    if source_key in delete_keys or source_key in merged_source_keys:
+                        continue
+                    final_target_key = _resolve_final_target(source_key)
+                    if not final_target_key:
+                        skipped_merges += 1
+                        continue
+                    if final_target_key in delete_keys:
+                        skipped_merges += 1
+                        continue
+                    source_row = row_by_key.get(source_key)
+                    target_row = row_by_key.get(final_target_key)
+                    if source_row is None or target_row is None or source_row is target_row:
+                        skipped_merges += 1
+                        continue
+                    merged_row = _merge_two_rows(dict(target_row), dict(source_row))
+                    target_row.clear()
+                    target_row.update(merged_row)
+                    merged_source_keys.add(source_key)
+                    merged += 1
+
+                if merged_source_keys:
+                    kept = [row for row_key, row in original_rows if row_key not in delete_keys and row_key not in merged_source_keys]
         else:
             # Backward compatibility fallback for older forms that do not include row keys.
             fallback_kept: list[dict[str, str]] = []
@@ -599,7 +652,12 @@ class ItemDB:
                 fallback_kept.append(row)
             kept = fallback_kept
         self.save_rows(kept)
-        return len(kept), deleted
+        return {
+            "kept": len(kept),
+            "deleted": deleted,
+            "merged": merged,
+            "skipped_merges": skipped_merges,
+        }
 
     def apply_hint_to_row(self, row_key: str, hint: dict[str, str]) -> dict[str, Any] | None:
         rows = self.load_rows()
@@ -1144,7 +1202,6 @@ class ItemDB:
         if cleared or deleted:
             self.save_rows(kept, action=("clear_needs_review_delete_auto" if delete_auto else "clear_needs_review_flags"))
         return {"cleared": cleared, "deleted": deleted}
-
 
 
 

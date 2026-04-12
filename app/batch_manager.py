@@ -48,6 +48,33 @@ def _norm_tracking_value(value: str) -> str:
     return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
 
 
+def _candidate_tracking_merge_group(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not candidates:
+        return []
+
+    def _candidate_tracking(candidate: dict[str, Any]) -> str:
+        order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
+        return _norm_tracking_value(order.get("tracking_number", "") or candidate.get("tracking_number", "") or "")
+
+    top_candidate = candidates[0]
+    top_tracking = _candidate_tracking(top_candidate)
+    if not top_tracking:
+        return []
+
+    matching_group = [candidate for candidate in candidates if _candidate_tracking(candidate) == top_tracking]
+    if len(matching_group) < 2:
+        return []
+
+    matching_group.sort(
+        key=lambda candidate: (
+            str((candidate.get("order") or {}).get("sale_date_sort", "") or (candidate.get("order") or {}).get("sale_date", "") or ""),
+            str(candidate.get("order_id", "") or ""),
+        ),
+        reverse=True,
+    )
+    return matching_group
+
+
 
 class BatchManager:
     def __init__(self, settings: SettingsManager) -> None:
@@ -835,19 +862,8 @@ class BatchManager:
                     else:
                         m = match_label(label_pdf, compatible_orders, platform_hint=match_hint if match_hint else "")
                         if m.get("status") != "matched" and str(match_hint or platform).strip().lower() == "ebay":
-                            candidate_tracking_groups: dict[str, list[dict[str, Any]]] = {}
-                            for candidate in m.get("candidates", []) or []:
-                                candidate_order = candidate.get("order") if isinstance(candidate.get("order"), dict) else None
-                                if candidate_order is None:
-                                    continue
-                                candidate_tracking = _norm_tracking_value(candidate_order.get("tracking_number", "") or candidate.get("tracking_number", "") or "")
-                                if not candidate_tracking:
-                                    continue
-                                candidate_tracking_groups.setdefault(candidate_tracking, []).append(candidate)
-                            eligible_groups = [group for group in candidate_tracking_groups.values() if len(group) >= 2]
-                            if eligible_groups:
-                                eligible_groups.sort(key=lambda group: (len(group), max(float(c.get("score", 0.0) or 0.0) for c in group)), reverse=True)
-                                best_group = eligible_groups[0]
+                            best_group = _candidate_tracking_merge_group(m.get("candidates", []) or [])
+                            if best_group:
                                 best_group.sort(key=lambda c: (str((c.get("order") or {}).get("sale_date_sort", "") or (c.get("order") or {}).get("sale_date", "") or ""), str(c.get("order_id", "") or "")), reverse=True)
                                 merged_order = copy.deepcopy(best_group[0]["order"])
                                 merged_items: list[dict[str, Any]] = []
