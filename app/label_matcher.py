@@ -23,6 +23,40 @@ def _norm_text(value: str) -> str:
     return " ".join("".join(ch.lower() if ch.isalnum() else " " for ch in (value or "")).split())
 
 
+def _norm_buyer_key(name: str, postal: str) -> tuple[str, str]:
+    clean_name = _norm_text(name)
+    zip5 = "".join(ch for ch in str(postal or "") if ch.isdigit())[:5]
+    return clean_name, zip5
+
+
+def _candidate_buyer_key(candidate: dict[str, Any]) -> tuple[str, str]:
+    order = candidate.get("order") if isinstance(candidate.get("order"), dict) else {}
+    return _norm_buyer_key(
+        str(order.get("ship_name", "") or ""),
+        str(order.get("ship_postal", "") or ""),
+    )
+
+
+def _repeat_buyer_candidates(cands: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not cands:
+        return []
+    top_key = _candidate_buyer_key(cands[0])
+    if not top_key[0] or not top_key[1]:
+        return []
+    grouped = [c for c in cands if _candidate_buyer_key(c) == top_key]
+    if len(grouped) < 2:
+        return []
+    grouped.sort(
+        key=lambda candidate: (
+            float(candidate.get("score", 0.0) or 0.0),
+            _order_sale_sort_value(candidate.get("order", {}) or {}),
+            str(candidate.get("order_id", "") or ""),
+        ),
+        reverse=True,
+    )
+    return grouped
+
+
 def _label_text_name_score(ship_name: str, signals: dict[str, Any]) -> float:
     target = _norm_text(ship_name)
     hay = _norm_text(str(signals.get("text", "") or ""))
@@ -135,6 +169,7 @@ def match_label(label_pdf: Path, orders: dict[str, dict[str, Any]], platform_hin
     if not cands:
         return {"status": "unresolved", "reason": "no_candidates", "candidates": []}
     top = cands[0]
+    repeat_group = _repeat_buyer_candidates(cands)
 
     # If filename order ID matched, accept immediately.
     if "filename_order_id" in top.get("reasons", []):
@@ -154,6 +189,16 @@ def match_label(label_pdf: Path, orders: dict[str, dict[str, Any]], platform_hin
             "method": ",".join(top["reasons"]) or "id_or_tracking",
             "order": top["order"],
             "candidates": cands,
+        }
+
+    # Repeat-buyer eBay labels are too risky to auto-resolve from name + ZIP alone.
+    # Route them to the manual queue unless we have an explicit hard signal.
+    if repeat_group:
+        return {
+            "status": "unresolved",
+            "reason": "repeat_buyer_ambiguous",
+            "candidates": repeat_group,
+            "signals": cands[0].get("signals") if cands else {},
         }
 
     # Zip + name can be enough for eBay/carrier labels, but keep strict margin.

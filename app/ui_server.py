@@ -210,6 +210,8 @@ def _human_reason(reason: str) -> str:
 
     if r == "ambiguous_or_low_confidence":
         return "Could not confidently match this label to one order."
+    if r == "repeat_buyer_ambiguous":
+        return "This buyer has multiple matching orders in the report, so the label needs manual confirmation."
     if r == "amazon_order_not_found_in_report":
         return "Amazon label order ID was not found in the uploaded Amazon report."
     if r == "no_compatible_order_source":
@@ -2569,11 +2571,25 @@ def create_app() -> FastAPI:
         source_page = str(form.get("source_page", "items") or "items").strip().lower()
         target = "/items/review" if source_page == "review" else "/items"
         try:
-            kept, deleted = item_db.update_rows_from_form(dict(form))
+            result = item_db.update_rows_from_form(dict(form))
+            kept = int(result.get("kept", 0))
+            deleted = int(result.get("deleted", 0))
+            merged = int(result.get("merged", 0))
+            skipped_merges = int(result.get("skipped_merges", 0))
             if source_page == "review":
                 remaining = _needs_review_count()
-                return _redirect_ui(target, "Saved review changes. Remaining items needing review: {remaining}", remaining=remaining)
-            return _redirect_ui(target, "Saved {kept} row(s); deleted {deleted} row(s)", kept=kept, deleted=deleted)
+                parts = [_ui("Saved review changes. Remaining items needing review: {remaining}", remaining=remaining)]
+                if merged:
+                    parts.append(_ui("Merged {count} row(s)", count=merged))
+                if skipped_merges:
+                    parts.append(_ui("Skipped {count} invalid merge selection(s)", count=skipped_merges))
+                return _redirect_with_message(target, _join_ui_parts(parts, sep=". "))
+            parts = [_ui("Saved {kept} row(s); deleted {deleted} row(s)", kept=kept, deleted=deleted)]
+            if merged:
+                parts.append(_ui("Merged {count} row(s)", count=merged))
+            if skipped_merges:
+                parts.append(_ui("Skipped {count} invalid merge selection(s)", count=skipped_merges))
+            return _redirect_with_message(target, _join_ui_parts(parts, sep=". "))
         except PermissionError:
             return _redirect_ui(
                 target,

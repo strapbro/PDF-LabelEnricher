@@ -143,7 +143,7 @@
     <button id="itemsFilterClear" class="btn btn-outline items-action-btn" type="button">{{ tr("Clear Filter") }}</button>
   </div>
   <p class="items-tip">{{ tr("Tip: click column headers to sort. Click again to reverse.") }}</p>
-  <p class="items-tip">{{ tr("Needs Review is a system status for items that require human attention. Merge candidates are suggestions only; nothing merges until you confirm.") }}</p>
+  <p class="items-tip">{{ tr("Needs Review is a system status for items that require human attention. Merge candidates are suggestions only; choose targets and click Save Changes once to apply them together.") }}</p>
 
   <form id="itemsSaveForm" action="/items/save" method="post">
     <input type="hidden" name="source_page" value="{{ page_mode or 'items' }}">
@@ -160,7 +160,7 @@
             <th data-sort="text" data-col-key="variation_options">{{ tr("Variation Options") }}</th>
             <th data-sort="text" data-col-key="location">{{ tr("Location") }}</th>
             <th data-sort="text" data-col-key="hint_match">{{ tr("Hint Match") }}</th>
-            <th data-sort="text" data-col-key="merge_with">{{ tr("Merge With") }}</th>
+            <th data-sort="text" data-col-key="merge_with">{{ tr("Merge Into") }}</th>
             <th data-sort="text" data-col-key="status">{{ tr("Status") }}</th>
             <th data-sort="text" data-col-key="delete">{{ tr("Delete Row/Item") }}</th>
           </tr>
@@ -199,13 +199,13 @@
             <td>
               {% if candidates %}
                 <div class="merge-form inline-action-form" data-row-key="{{ row_key }}" data-source-page="{{ page_mode or 'items' }}">
-                  <select name="target_key" class="merge-select" required>
-                    <option value="">{{ tr("Choose merge target...") }}</option>
+                  <select name="row_{{ loop.index0 }}_merge_target_key" class="merge-select">
+                    <option value="">{{ tr("No merge") }}</option>
                     {% for c in candidates %}
                       <option value="{{ c.row_key }}" data-preview="{{ c.preview }}">{{ c.label }} | {{ c.preview }}</option>
                     {% endfor %}
                   </select>
-                  <button type="button" class="btn btn-success items-action-btn btn-compact merge-btn">{{ tr("Merge") }}</button>
+                  <div class="merge-stage-note">{{ tr("Optional: pick a target row, then click Save Changes once.") }}</div>
                 </div>
               {% else %}
                 <span class="muted">{{ tr("No strong merge candidate") }}</span>
@@ -328,6 +328,7 @@
 .status-review { color: #b26a00; font-weight: 700; }
 .items-table tr.needs-review-row td { background: #fff8e1; }
 .items-table tr.pending-delete td { background: #ffe3e3 !important; opacity: 0.75; }
+.items-table tr.pending-merge-row td { background: #eef8f0; }
 .delete-row-btn { background:#d62828; color:#fff; border:0; border-radius:6px; padding:4px 10px; cursor:pointer; font-weight:700; }
 .delete-row-btn:hover { background:#b71f1f; }
 .undo-row-btn { margin-left:6px; background:#6c757d; color:#fff; border:0; border-radius:6px; padding:4px 8px; cursor:pointer; }
@@ -344,6 +345,7 @@
 .inline-action-form { display:flex; flex-direction:column; gap:6px; }
 .btn-compact { min-height: 32px; }
 .merge-select { min-width: 280px; }
+.merge-stage-note { font-size: 12px; color: #5e715f; line-height: 1.35; }
 .muted { color:#6b756d; font-size:12px; }
 .save-btn { min-width: 150px; }
 .save-passive { opacity: 0.68; filter: saturate(0.72); }
@@ -394,6 +396,7 @@
   const filterInput = document.getElementById('itemsFilter');
   const filterClearBtn = document.getElementById('itemsFilterClear');
   const widthBtn = document.getElementById('itemsWidthToggle');
+  const itemsSaveForm = document.getElementById('itemsSaveForm');
   const saveBtn = document.getElementById('saveChangesBtn');
   const itemsReplaceForm = document.getElementById('itemsReplaceForm');
   const itemsReplaceInput = document.getElementById('itemsReplaceInput');
@@ -425,6 +428,11 @@
     compactView: {{ tr("Compact View")|tojson }},
     confirmDeleteRow: {{ tr("Mark this row for deletion when you save?")|tojson }},
     chooseTarget: {{ tr("Choose a merge target first.")|tojson }},
+    mergeIdleNote: {{ tr("Optional: pick a target row, then click Save Changes once.")|tojson }},
+    mergeQueuedNote: {{ tr("Queued: this row will merge into the selected target when you click Save Changes.")|tojson }},
+    saveChangesBase: {{ tr("Save Changes")|tojson }},
+    saveChangesQueued: {{ tr("Save Changes ({count} merges queued)", count="__COUNT__")|tojson }},
+    confirmQueuedMerges: {{ tr("Save changes and apply {count} queued merge(s)?", count="__COUNT__")|tojson }},
     mergePreview: {{ tr("Merge this row into:\n\n{preview}\n\nThis keeps one combined row with shared label/location and both platform IDs.", preview="__PREVIEW__")|tojson }},
     mergePreviewError: {{ tr("Could not build merge preview")|tojson }},
     mergeOldA: {{ tr("Old Row A")|tojson }},
@@ -456,12 +464,30 @@
   }
 
   function markDirty() {
-    if (isDirty) return;
     isDirty = true;
     if (saveBtn) {
       saveBtn.classList.remove('btn-secondary', 'save-passive');
       saveBtn.classList.add('btn-success');
     }
+    updatePendingMergeState();
+  }
+
+  function updatePendingMergeState() {
+    const mergeSelects = Array.from(table.querySelectorAll('.merge-select'));
+    let queuedCount = 0;
+    mergeSelects.forEach((select) => {
+      const wrap = select.closest('.merge-form');
+      const row = select.closest('tr');
+      const note = wrap?.querySelector('.merge-stage-note');
+      const hasValue = !!String(select.value || '').trim();
+      if (row) row.classList.toggle('pending-merge-row', hasValue);
+      if (note) note.textContent = hasValue ? T.mergeQueuedNote : T.mergeIdleNote;
+      if (hasValue) queuedCount += 1;
+    });
+    if (saveBtn) {
+      saveBtn.textContent = queuedCount > 0 ? fmt(T.saveChangesQueued, { count: queuedCount }) : T.saveChangesBase;
+    }
+    return queuedCount;
   }
 
   function syncStickyScrollbar() {
@@ -502,10 +528,23 @@
   });
 
   const rows = Array.from(table.querySelectorAll('tbody tr'));
+  function rowSearchText(row) {
+    const parts = [];
+    if (row?.textContent) parts.push(row.textContent);
+    row?.querySelectorAll('input, textarea, select').forEach((field) => {
+      const value = 'value' in field ? String(field.value || '') : '';
+      if (value) parts.push(value);
+      if (field instanceof HTMLSelectElement) {
+        const selectedText = field.selectedOptions?.[0]?.textContent || '';
+        if (selectedText) parts.push(selectedText);
+      }
+    });
+    return parts.join(' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
   function applyFilter() {
     const q = (filterInput?.value || '').trim().toLowerCase();
     rows.forEach((row) => {
-      row.style.display = !q || row.textContent.toLowerCase().includes(q) ? '' : 'none';
+      row.style.display = !q || rowSearchText(row).includes(q) ? '' : 'none';
     });
   }
   filterInput?.addEventListener('input', applyFilter);
@@ -673,8 +712,8 @@
   });
 
   table.querySelectorAll('input, select, textarea').forEach((el) => {
-    el.addEventListener('input', markDirty);
-    el.addEventListener('change', markDirty);
+    el.addEventListener('input', () => { markDirty(); applyFilter(); });
+    el.addEventListener('change', () => { markDirty(); applyFilter(); });
   });
 
   table.querySelectorAll('.copy-btn').forEach((btn) => {
@@ -692,6 +731,7 @@
       input.value = '';
       input.focus();
       markDirty();
+      applyFilter();
     });
   });
 
@@ -774,6 +814,7 @@
         if (hintCell) {
           hintCell.innerHTML = '<div class="assist-box"><div class="assist-title">' + T.hintAppliedTitle + '</div><div class="assist-sub">' + T.hintAppliedSub + '</div><button type="button" class="btn btn-outline items-action-btn btn-compact undo-hint-btn">' + T.undoHint + '</button></div>';
           markDirty();
+          applyFilter();
           const undoBtn = hintCell.querySelector('.undo-hint-btn');
           undoBtn?.addEventListener('click', async () => {
             setField('custom_label', previousValues.custom_label);
@@ -782,6 +823,7 @@
             setField('amazon_asin', previousValues.amazon_asin);
             hintCell.innerHTML = previousHintHtml;
             markDirty();
+            applyFilter();
           });
         }
       } catch (err) {
@@ -792,105 +834,28 @@
       return;
     }
 
-    const mergeBtn = e.target.closest('.merge-btn');
-    if (!mergeBtn) return;
-    const form = mergeBtn.closest('.merge-form');
-    if (!form) return;
-    const select = form.querySelector('.merge-select');
-    if (!select || !select.value) {
-      await window.showAppAlert(T.chooseTarget);
-      return;
-    }
-    const rowKey = String(form.dataset.rowKey || '');
-    const targetKey = String(select.value || '');
-    try {
-      const params = new URLSearchParams({ row_key: rowKey, target_key: targetKey });
-      const response = await fetch('/items/merge-preview?' + params.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.ok || !data.preview) {
-        await window.showAppAlert(data.error || T.mergePreviewError);
+  });
+
+  table.querySelectorAll('.merge-select').forEach((select) => {
+    select.addEventListener('change', () => {
+      if (!select.value) {
+        updatePendingMergeState();
         return;
       }
-      const preview = data.preview;
-      if (mergePreviewBody) {
-        mergePreviewBody.innerHTML = [
-          mergeRowHtml(T.mergeOldA, 'merge-preview-row-old', preview.primary || {}),
-          mergeRowHtml(T.mergeOldB, 'merge-preview-row-old', preview.secondary || {}),
-          mergeRowHtml(T.mergeNew, 'merge-preview-row-new', preview.merged || {}),
-        ].join('');
-      }
-      pendingMergePayload = { rowKey, targetKey, sourcePage: String(form.dataset.sourcePage || 'items') };
-      if (mergePreviewModal) mergePreviewModal.hidden = false;
-    } catch (err) {
-      await window.showAppAlert(T.mergePreviewError);
-    }
-  });
-
-  const mergePreviewModal = document.getElementById('mergePreviewModal');
-  const mergePreviewBody = document.getElementById('mergePreviewBody');
-  const mergePreviewClose = document.getElementById('mergePreviewClose');
-  const mergePreviewCancel = document.getElementById('mergePreviewCancel');
-  const mergePreviewConfirm = document.getElementById('mergePreviewConfirm');
-  let pendingMergePayload = null;
-
-  function platformLabel(value) {
-    if (value === 'amazon') return T.platformAmazon;
-    if (value === 'ebay') return T.platformEbay;
-    if (value === 'both') return T.platformBoth;
-    return value || '';
-  }
-
-  function mergeRowHtml(versionLabel, cssClass, row) {
-    const safe = (value) => String(value || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-    return `
-      <tr class="${cssClass}">
-        <td class="${cssClass === 'merge-preview-row-new' ? 'merge-preview-version-new' : 'merge-preview-version-old'}">${safe(versionLabel)}</td>
-        <td>${safe(platformLabel(row.platform || ''))}</td>
-        <td>${safe(row.ebay_item_number || '')}</td>
-        <td>${safe(row.amazon_sku || '')}</td>
-        <td>${safe(row.amazon_asin || '')}</td>
-        <td>${safe(row.item_title || '')}</td>
-        <td>${safe(row.custom_label || '')}</td>
-        <td>${safe(row.variation_options || '')}</td>
-        <td>${safe(row.location || '')}</td>
-      </tr>`;
-  }
-
-  function closeMergePreview() {
-    pendingMergePayload = null;
-    if (mergePreviewBody) mergePreviewBody.innerHTML = '';
-    if (mergePreviewModal) mergePreviewModal.hidden = true;
-  }
-
-  mergePreviewClose?.addEventListener('click', closeMergePreview);
-  mergePreviewCancel?.addEventListener('click', closeMergePreview);
-  mergePreviewModal?.addEventListener('click', (e) => {
-    if (e.target === mergePreviewModal) closeMergePreview();
-  });
-  mergePreviewConfirm?.addEventListener('click', () => {
-    const payload = pendingMergePayload;
-    closeMergePreview();
-    if (!payload) return;
-    const submitForm = document.createElement('form');
-    submitForm.method = 'POST';
-    submitForm.action = '/items/merge';
-    submitForm.style.display = 'none';
-    [
-      ['row_key', payload.rowKey],
-      ['target_key', payload.targetKey],
-      ['source_page', payload.sourcePage],
-    ].forEach(([name, value]) => {
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = name;
-      input.value = value || '';
-      submitForm.appendChild(input);
+      markDirty();
     });
-    document.body.appendChild(submitForm);
-    submitForm.submit();
   });
 
+  itemsSaveForm?.addEventListener('submit', async (e) => {
+    const queuedCount = updatePendingMergeState();
+    if (queuedCount <= 0) return;
+    e.preventDefault();
+    const ok = await window.showAppConfirm(fmt(T.confirmQueuedMerges, { count: queuedCount }));
+    if (!ok) return;
+    itemsSaveForm.submit();
+  });
 
+  updatePendingMergeState();
 
   if (clearNeedsReviewForm) {
     clearNeedsReviewForm.addEventListener('submit', async (e) => {
