@@ -599,6 +599,11 @@ def _build_items_assist(rows: list[dict[str, Any]], hints: list[dict[str, str]])
 
             reasons: list[str] = []
             score = 0
+            min_merge_score = 120
+            fuzzy_title_score = 70
+            same_location = bool(meta["location"] and meta["location"] == other_meta["location"])
+            same_variation = bool(meta["variation"] and meta["variation"] == other_meta["variation"])
+            supporting_score = (20 if same_location else 0) + (25 if same_variation else 0)
             if meta["hint_signature"] and meta["hint_signature"] == other_meta["hint_signature"]:
                 score += 300
                 reasons.append("same hint import ties these platform IDs together")
@@ -611,18 +616,21 @@ def _build_items_assist(rows: list[dict[str, Any]], hints: list[dict[str, str]])
                 if meta["title"] == other_meta["title"]:
                     score += 100
                     reasons.append("same title")
-                elif set(meta["title_buckets"]) & set(other_meta["title_buckets"]):
+                elif (
+                    set(meta["title_buckets"]) & set(other_meta["title_buckets"])
+                    and score + supporting_score + fuzzy_title_score >= min_merge_score
+                ):
                     ratio = SequenceMatcher(None, meta["title"], other_meta["title"]).ratio()
                     if ratio >= 0.92:
-                        score += 70
+                        score += fuzzy_title_score
                         reasons.append(f"very similar title ({ratio:.0%})")
-            if meta["location"] and meta["location"] == other_meta["location"]:
+            if same_location:
                 score += 20
                 reasons.append("same location")
-            if meta["variation"] and meta["variation"] == other_meta["variation"]:
+            if same_variation:
                 score += 25
                 reasons.append("same variation options")
-            if score < 120:
+            if score < min_merge_score:
                 continue
             other_row = other_meta["row"]
             ranked.append({
