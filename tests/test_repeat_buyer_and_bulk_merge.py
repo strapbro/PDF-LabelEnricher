@@ -9,6 +9,7 @@ from unittest.mock import patch
 from app.batch_manager import _candidate_tracking_merge_group
 from app.item_db import ItemDB, ItemRecord
 from app.label_matcher import match_label
+from app import ui_server
 
 
 class RepeatBuyerMatcherTests(unittest.TestCase):
@@ -261,6 +262,43 @@ class ItemsSearchTemplateTests(unittest.TestCase):
             template,
             re.compile(r"undoBtn\?\.addEventListener\('click', async \(\) => \{.*?markDirty\(\);\s+applyFilter\(\);", re.S),
         )
+
+
+class ItemsAssistPerformanceTests(unittest.TestCase):
+    def test_fuzzy_title_comparison_skips_pairs_that_cannot_reach_merge_threshold(self) -> None:
+        rows: list[dict[str, str]] = []
+        for i in range(120):
+            is_ebay = i % 2 == 0
+            rows.append(
+                {
+                    "platform": "ebay" if is_ebay else "amazon",
+                    "ebay_item_number": str(250000000000 + i) if is_ebay else "",
+                    "amazon_sku": "" if is_ebay else f"SKU-{i:04d}",
+                    "amazon_asin": "",
+                    "item_id": str(i),
+                    "item_title": f"Shark replacement motor assembly model {i:04d}",
+                    "custom_label": "",
+                    "variation_options": "",
+                    "location": "",
+                }
+            )
+
+        keyed_rows = ui_server._rows_with_keys(rows)
+
+        class CountingSequenceMatcher:
+            calls = 0
+
+            def __init__(self, _junk: object, _left: str, _right: str) -> None:
+                type(self).calls += 1
+
+            def ratio(self) -> float:
+                return 0.0
+
+        with patch("app.ui_server.SequenceMatcher", CountingSequenceMatcher):
+            _hint_matches, merge_candidates = ui_server._build_items_assist(keyed_rows, [])
+
+        self.assertEqual(CountingSequenceMatcher.calls, 0)
+        self.assertTrue(all(not candidates for candidates in merge_candidates.values()))
 
 
 if __name__ == "__main__":
