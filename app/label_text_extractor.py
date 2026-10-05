@@ -8,6 +8,7 @@ from typing import Any
 
 import fitz
 from pypdf import PdfReader
+from .platform_detector import parse_order_id_from_filename
 
 
 ZIP_RE = re.compile(r"\b(\d{5})(?:-?(\d{4}))?\b")
@@ -76,6 +77,7 @@ def _ocr_windows_image_lines(image_path: Path) -> list[str]:
         pass
     ps_script = f"""
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding
 $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]
 $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType=WindowsRuntime]
 $null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, ContentType=WindowsRuntime]
@@ -100,6 +102,7 @@ $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult]
             ["powershell", "-NoProfile", "-Command", ps_script],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=20,
             check=False,
         )
@@ -144,21 +147,14 @@ def _ocr_ebay_ups_full_page_lines(pdf_path: Path) -> list[str]:
 
 
 def _extract_tracking(full_text: str) -> str:
-    compact = re.sub(r"[^A-Za-z0-9]", "", full_text).upper()
-
-    m = TRACKING_UPS_RE.search(compact)
-    if m:
-        return m.group(0).upper()
-
-    m = TRACKING_USPS_RE.search(compact)
-    if m:
-        return m.group(1)
-
-    for m in TRACKING_FEDEX_RE.finditer(compact):
-        val = m.group(1)
-        if len(val) >= 12:
-            return val
-
+    # Compact individual token groups, not the entire label (which joins names,
+    # ZIPs and unrelated digits to tracking numbers and destroys boundaries).
+    groups = re.findall(r"(?<![A-Za-z0-9])1Z(?:[ \t]*[A-Za-z0-9]){16}(?![A-Za-z0-9])|(?<!\d)\d(?:[ \t-]*\d){11,25}(?!\d)", full_text, re.I)
+    compact = [re.sub(r"[^A-Za-z0-9]", "", group).upper() for group in groups]
+    for pattern in (TRACKING_UPS_RE, TRACKING_USPS_RE, TRACKING_FEDEX_RE):
+        for value in compact:
+            if pattern.fullmatch(value):
+                return value
     return ""
 
 
@@ -513,7 +509,74 @@ def _pick_zip_from_ocr_lines(lines: list[str]) -> str:
     return ""
 
 
-def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
+def _recipient_address_from_lines(lines: list[str]) -> tuple[str, str]:
+    """Require an anchored destination, a street and a city/state/ZIP together."""
+    cleaned: list[str] = []
+    active = False
+    for line in lines:
+        line = _normalize_space(line).replace("—", "-").replace("–", "-")
+        match = re.match(r"^(?:SHIP\s*TO|SHIPTO|DELIVER TO|RECIPIENT|SHIP)\s*:?\s*(.*)$", line, re.I)
+        if match:
+            cleaned.append("SHIP TO:")
+            if match.group(1):
+                cleaned.append(match.group(1))
+            active = True
+            continue
+        to = re.match(r"^TO\s*:\s*(.*)$", line, re.I)
+        if to:
+            if not active:
+                cleaned.append("SHIP TO:")
+                active = True
+            if to.group(1):
+                cleaned.append(to.group(1))
+            continue
+        cleaned.append(line)
+
+    destinations: list[tuple[str, str]] = []
+    for i, line in enumerate(cleaned):
+        if line != "SHIP TO:":
+            continue
+        block = cleaned[i + 1:i + 9]
+        if "SHIP TO:" in block:
+            block = block[:block.index("SHIP TO:")]
+        for j, city in enumerate(block):
+            postal = re.search(r"\b[A-Z]{2}\s+(\d{5})(?:\s*-\s*(\d{4}))?\b", city.upper())
+            if not postal or j < 2:
+                continue
+            before = block[:j]
+            street_index = next((k for k, value in enumerate(before) if _looks_like_street_line(value)
+                                 or re.search(r"\bP\.?\s*O\.?\s+BOX\s+\d+", value, re.I)
+                                 or re.match(r"^\d+\s+[A-Za-z]", value)), None)
+            if street_index is None or street_index == 0:
+                continue
+            name = before[0]
+            if re.search(r"\d", name) or not re.search(r"[A-Za-z]{3}", name) or _is_noise_line(name):
+                continue
+            zip_code = postal.group(1) + ("-" + postal.group(2) if postal.group(2) else "")
+            destinations.append((name, zip_code))
+            break
+    unique = set(destinations)
+    return next(iter(unique)) if len(unique) == 1 else ("", "")
+
+
+def _ocr_shipping_label(pdf_path: Path) -> tuple[list[str], str]:
+    best: list[str] = []
+    try:
+        with fitz.open(str(pdf_path)) as document, tempfile.TemporaryDirectory(prefix="label_ocr_") as temporary:
+            for rotation in (0, 90, 180, 270):
+                image_path = Path(temporary) / f"label_{rotation}.png"
+                document[0].get_pixmap(matrix=fitz.Matrix(3, 3).prerotate(rotation), alpha=False).save(str(image_path))
+                lines = _ocr_windows_image_lines(image_path)
+                if len(" ".join(lines)) > len(" ".join(best)):
+                    best = lines
+                if _recipient_address_from_lines(lines)[0] or AMZ_ORDER_RE.search(" ".join(lines)) or EBAY_ORDER_RE.search(" ".join(lines)):
+                    return lines, "recognized"
+    except Exception:
+        return [], "unavailable_or_unreadable"
+    return best, "insufficient_recipient_evidence" if best else "unavailable_or_unreadable"
+
+
+def extract_label_signals(pdf_path: Path, allow_ocr: bool = True) -> dict[str, Any]:
     text, words_text = _extract_text(pdf_path)
     search_text = _normalize_space(f"{text} {words_text}")
     lower = search_text.lower()
@@ -530,13 +593,19 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
         recipient = _pick_recipient(positional_shipto_block, positional_shipto_block + lines, postal, pdf_path.name, positional_text)
     tracking = _extract_tracking(search_text)
     carrier = _detect_carrier(search_text, tracking)
+    ocr_used = False
+    ocr_general_used = False
+    ocr_status = "not_needed"
+    verified_recipient, verified_postal = _recipient_address_from_lines(text.splitlines())
 
     # eBay UPS labels often have no embedded text; use a tight OCR crop around
     # the recipient panel only when the normal text pass did not produce usable
     # recipient or ZIP signals.
-    if _looks_like_ebay_label_pdf(pdf_path) and (not postal or not recipient):
+    if allow_ocr and _looks_like_ebay_label_pdf(pdf_path) and (not postal or not recipient):
         ocr_lines = _split_inline_shipto_lines(_ocr_ebay_ups_recipient_block(pdf_path))
         if ocr_lines:
+            ocr_used = True
+            search_text += " " + _normalize_space(" ".join(ocr_lines))
             ocr_text = "\n".join(ocr_lines)
             ocr_shipto_block = _extract_shipto_block(ocr_lines)
             if not postal:
@@ -546,6 +615,8 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
         if not recipient:
             full_page_ocr_lines = _split_inline_shipto_lines(_ocr_ebay_ups_full_page_lines(pdf_path))
             if full_page_ocr_lines:
+                ocr_used = True
+                search_text += " " + _normalize_space(" ".join(full_page_ocr_lines))
                 full_page_ocr_text = "\n".join(full_page_ocr_lines)
                 full_page_shipto_block = _extract_shipto_block(full_page_ocr_lines)
                 full_page_postal = _pick_zip_from_ocr_lines(full_page_ocr_lines)
@@ -557,6 +628,19 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
                 elif not postal and full_page_postal:
                     postal = full_page_postal
 
+    if (allow_ocr and not parse_order_id_from_filename(pdf_path)
+            and not AMZ_ORDER_RE.search(search_text) and not EBAY_ORDER_RE.search(search_text)
+            and (not recipient or not postal)):
+        ocr_general_used = True
+        ocr_used = True
+        ocr_lines, ocr_status = _ocr_shipping_label(pdf_path)
+        verified_recipient, verified_postal = _recipient_address_from_lines(ocr_lines)
+        recipient, postal = verified_recipient, verified_postal
+        search_text += " " + _normalize_space(" ".join(ocr_lines))
+        if ocr_lines:
+            tracking = _extract_tracking("\n".join(ocr_lines)) or tracking
+    carrier = _detect_carrier(search_text, tracking)
+    lower = search_text.lower()
     amz_match = AMZ_ORDER_RE.search(search_text)
     ebay_match = EBAY_ORDER_RE.search(search_text)
 
@@ -576,4 +660,8 @@ def extract_label_signals(pdf_path: Path) -> dict[str, Any]:
         "order_id_amazon": amz_match.group(0) if amz_match else "",
         "order_id_ebay": ebay_match.group(0) if ebay_match else "",
         "recipient_name": recipient,
+        "recipient_block_verified": bool(verified_recipient and verified_postal),
+        "ocr_used": ocr_used,
+        "ocr_general_used": ocr_general_used,
+        "ocr_status": ocr_status,
     }

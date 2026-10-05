@@ -9,7 +9,7 @@
   <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
     <input id="fileInput" type="file" name="files" multiple required style="display:none;">
     <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="{{ tr('Drop files or click to choose files') }}">
-      <div class="drop-title">{{ tr("Drag & drop .zip/.pdf/.csv/.txt here") }}</div>
+      <div class="drop-title">{{ tr("Drag & drop .zip/.pdf/.png/.csv/.txt here") }}</div>
       <div class="drop-sub">{{ tr("or click anywhere in this box to choose files") }}</div>
       <div class="drop-choose">{{ tr("Choose Files") }}</div>
     </div>
@@ -41,7 +41,7 @@
   <div class="card stat-card {{ 'stat-ok' if status.label_source_count > 0 else 'stat-miss' }}">
     <div class="stat-label">{{ tr("Label Sources") }}</div>
     <div class="stat-value">{{ status.label_source_count }}</div>
-    <div class="stat-sub">{{ tr("PDF + ZIP") }}</div>
+    <div class="stat-sub">{{ tr("PDF + PNG + ZIP") }}</div>
   </div>
   <div class="card stat-card {{ 'stat-ok' if status.ebay_csv_found else 'stat-miss' }}">
     <div class="stat-label">{{ tr("eBay CSV") }}</div>
@@ -112,7 +112,7 @@
 </section>
 
 <section class="card tiny-meta">
-  <strong>{{ tr("Staged breakdown:") }}</strong> {{ tr("PDF") }} {{ status.pdf_count }}, {{ tr("ZIP") }} {{ status.zip_count }}, {{ tr("CSV") }} {{ status.csv_count }}, {{ tr("TXT") }} {{ status.txt_count }}
+  <strong>{{ tr("Staged breakdown:") }}</strong> {{ tr("PDF") }} {{ status.pdf_count }}, {{ tr("PNG") }} {{ status.png_count }}, {{ tr("ZIP") }} {{ status.zip_count }}, {{ tr("CSV") }} {{ status.csv_count }}, {{ tr("TXT") }} {{ status.txt_count }}
 </section>
 
 <section class="card tiny-meta staged-file-list">
@@ -269,6 +269,7 @@ const T = {
   ebayPdf: {{ tr("eBay PDF")|tojson }},
   amazonPdf: {{ tr("Amazon PDF")|tojson }},
   pdf: {{ tr("PDF")|tojson }},
+  png: {{ tr("PNG")|tojson }},
   file: {{ tr("File")|tojson }},
   autoAddedContinue: {{ tr("There are {count} auto-added review row(s). Continue?", count="__COUNT__")|tojson }},
   deleteAutoAdded: {{ tr("Also delete auto-added rows from items.csv? Click Cancel to keep rows and only clear flags.")|tojson }},
@@ -305,6 +306,7 @@ function refreshPending() {
       return T.csv;
     }
     if (lower.endsWith('.txt')) return T.amazonTxt;
+    if (lower.endsWith('.png')) return T.png;
     if (lower.endsWith('.pdf')) {
       if (lower.includes('ebay')) return T.ebayPdf;
       if (lower.includes('amazon') || lower.includes('amzn')) return T.amazonPdf;
