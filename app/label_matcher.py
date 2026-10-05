@@ -93,12 +93,13 @@ def _effective_platform_hint(initial_hint: str, signals: dict[str, Any]) -> str:
     return ""
 
 
-def best_candidates(label_pdf: Path, orders: dict[str, dict[str, Any]], platform_hint: str) -> list[dict[str, Any]]:
-    signals = extract_label_signals(label_pdf)
+def best_candidates(label_pdf: Path, orders: dict[str, dict[str, Any]], platform_hint: str,
+                    signals: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    signals = signals if signals is not None else extract_label_signals(label_pdf)
     candidates: list[dict[str, Any]] = []
     filename_order_id = parse_order_id_from_filename(label_pdf)
     filename_order_norm = _norm_order_id(filename_order_id)
-    effective_hint = _effective_platform_hint(platform_hint, signals)
+    effective_hint = "amazon" if filename_order_id else _effective_platform_hint(platform_hint, signals)
 
     for order_id, rec in orders.items():
         rec_platform = str(rec.get("platform", "") or "").strip().lower()
@@ -161,13 +162,19 @@ def best_candidates(label_pdf: Path, orders: dict[str, dict[str, Any]], platform
                 }
             )
 
-    candidates.sort(key=lambda x: (x["score"], _order_sale_sort_value(x.get("order", {}) or {}), x.get("order_id", "")), reverse=True)
+    candidates.sort(key=lambda x: ("filename_order_id" in x["reasons"],
+                                   any(r.startswith("label_order_id") for r in x["reasons"]),
+                                   "tracking" in x["reasons"], x["score"],
+                                   _order_sale_sort_value(x.get("order", {}) or {}), x.get("order_id", "")), reverse=True)
     return candidates[:6]
 
-def match_label(label_pdf: Path, orders: dict[str, dict[str, Any]], platform_hint: str = "") -> dict[str, Any]:
-    cands = best_candidates(label_pdf, orders, platform_hint)
+def match_label(label_pdf: Path, orders: dict[str, dict[str, Any]], platform_hint: str = "",
+                signals: dict[str, Any] | None = None) -> dict[str, Any]:
+    signals = signals if signals is not None else extract_label_signals(label_pdf)
+    cands = best_candidates(label_pdf, orders, platform_hint, signals=signals)
     if not cands:
-        return {"status": "unresolved", "reason": "no_candidates", "candidates": []}
+        reason = "ocr_unavailable_or_unreadable" if signals.get("ocr_status") == "unavailable_or_unreadable" else "no_candidates"
+        return {"status": "unresolved", "reason": reason, "candidates": [], "signals": signals}
     top = cands[0]
     repeat_group = _repeat_buyer_candidates(cands)
 
@@ -183,6 +190,11 @@ def match_label(label_pdf: Path, orders: dict[str, dict[str, Any]], platform_hin
 
     # Explicit IDs/tracking are high confidence.
     if any(r in top.get("reasons", []) for r in ["tracking", "label_order_id_amazon", "label_order_id_ebay"]) and top["score"] >= 1.0:
+        has_order_id = any(r.startswith("label_order_id") for r in top.get("reasons", []))
+        tracking_candidates = [c for c in cands if "tracking" in c.get("reasons", [])]
+        if not has_order_id and len(tracking_candidates) > 1:
+            return {"status": "unresolved", "reason": "ambiguous_or_low_confidence",
+                    "candidates": tracking_candidates, "signals": signals}
         return {
             "status": "matched",
             "confidence": top["score"],
@@ -200,6 +212,20 @@ def match_label(label_pdf: Path, orders: dict[str, dict[str, Any]], platform_hin
             "candidates": repeat_group,
             "signals": cands[0].get("signals") if cands else {},
         }
+
+    # General OCR and anonymous mixed-platform labels need exact destination
+    # agreement, never whole-label sender/ZIP substring hits or fuzzy guessing.
+    effective_hint = _effective_platform_hint(platform_hint, signals)
+    if signals.get("ocr_general_used") or not effective_hint:
+        key = _norm_buyer_key(signals.get("recipient_name", ""), signals.get("ship_postal", ""))
+        exact = [order for order in orders.values()
+                 if (not effective_hint or order.get("platform") == effective_hint)
+                 and _norm_buyer_key(order.get("ship_name", ""), order.get("ship_postal", "")) == key]
+        if signals.get("recipient_block_verified") and key[0] and len(key[1]) == 5 and len(exact) == 1:
+            return {"status": "matched", "confidence": 1.0, "method": "exact_recipient_zip",
+                    "order": exact[0], "candidates": cands}
+        reason = "ocr_unavailable_or_unreadable" if signals.get("ocr_status") == "unavailable_or_unreadable" else "ambiguous_or_low_confidence"
+        return {"status": "unresolved", "reason": reason, "candidates": cands, "signals": signals}
 
     # Zip + name can be enough for eBay/carrier labels, but keep strict margin.
     if any(r in top.get("reasons", []) for r in ["zip", "label_text_zip"]) and "recipient_name" in top.get("reasons", []):

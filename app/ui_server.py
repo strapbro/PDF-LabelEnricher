@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import tempfile
 import threading
-import zipfile
 from difflib import SequenceMatcher
 from datetime import datetime
 from pathlib import Path
@@ -28,8 +27,10 @@ from fastapi.templating import Jinja2Templates
 from .batch_manager import BatchManager
 from .i18n import normalize_ui_language, translate_ui
 from .label_text_extractor import extract_label_signals
+from .label_sources import extract_archives, prepare_label_sources, staged_files
 from .overlay_renderer import build_overlay_lines, create_info_panel_overlay_pdf, create_overlay_pdf, get_page_size
 from .pdf_merge import merge_overlays_on_first_page
+from .platform_detector import detect_platform_from_path
 from .settings_manager import SettingsManager
 from .utils import sanitize_filename, setup_logging
 
@@ -216,6 +217,8 @@ def _human_reason(reason: str) -> str:
         return "Amazon label order ID was not found in the uploaded Amazon report."
     if r == "no_compatible_order_source":
         return "No compatible order source was found for this label platform in the current staged batch."
+    if r == "ocr_unavailable_or_unreadable":
+        return "Local Windows OCR could not read this label. Assign the order manually."
     if r.startswith("missing_required_fields:"):
         code = r.split(":", 1)[1]
         mapping = {
@@ -882,50 +885,19 @@ def _manual_sort_key(path: Path) -> list[Any]:
 def _expand_manual_label_pdf(src: Path) -> list[Path]:
     if src.suffix.lower() != ".pdf" or "packing slip" in src.name.lower():
         return []
-    try:
-        reader = PdfReader(str(src))
-    except Exception:
-        logging.exception("Failed to open manual PDF while checking page count: %s", src)
+    if "_label_sources" in src.parts or "_split_pages" in src.parts:
         return [src]
-
-    if len(reader.pages) <= 1:
-        return [src]
-
-    split_dir = _manual_split_runtime_dir()
-    base = sanitize_filename(src.stem) or "label"
-    out: list[Path] = []
-    for i, page in enumerate(reader.pages, start=1):
-        one = split_dir / f"{base}__p{i:03d}.pdf"
-        try:
-            writer = PdfWriter()
-            writer.add_page(page)
-            with one.open("wb") as f:
-                writer.write(f)
-            out.append(one)
-        except Exception:
-            logging.exception("Failed to split manual PDF page %s from %s", i, src)
-    return out or [src]
+    sources = prepare_label_sources(_manual_incoming_folder(), [src],
+                                    _manual_incoming_folder() / "_label_sources", settings.config)
+    return [Path(s["pdf"]) for s in sources]
 
 
 def _manual_label_pdf_paths() -> list[Path]:
     manual_root = _manual_incoming_folder()
     _extract_zip_files_into(manual_root)
-    split_dir = _manual_split_runtime_dir()
-    shutil.rmtree(split_dir, ignore_errors=True)
-    split_dir.mkdir(parents=True, exist_ok=True)
-
-    expanded: list[Path] = []
-    seen: set[str] = set()
-    for p in sorted(manual_root.rglob("*.pdf"), key=_manual_sort_key):
-        if "packing slip" in p.name.lower() or "_split_pages" in p.parts:
-            continue
-        key = str(p.resolve()) if p.exists() else str(p)
-        if key in seen:
-            continue
-        seen.add(key)
-        expanded.extend(_expand_manual_label_pdf(p))
-    expanded.sort(key=_manual_sort_key)
-    return expanded
+    sources = prepare_label_sources(manual_root, staged_files(manual_root),
+                                    manual_root / "_label_sources", settings.config)
+    return [Path(s["pdf"]) for s in sources]
 
 def _resolve_manual_label_paths(label_pdf: str) -> list[Path]:
     manual_root = _manual_incoming_folder().resolve()
@@ -952,39 +924,23 @@ def _resolve_manual_label_paths(label_pdf: str) -> list[Path]:
 
 
 def _extract_zip_files_into(root: Path) -> None:
-    root.mkdir(parents=True, exist_ok=True)
-    unzip_root = root / "_unzipped"
-    unzip_root.mkdir(parents=True, exist_ok=True)
-    for zip_path in sorted(root.glob("*.zip"), key=_manual_sort_key):
-        dest_root = unzip_root / (sanitize_filename(zip_path.stem) or zip_path.stem or "zip")
-        shutil.rmtree(dest_root, ignore_errors=True)
-        dest_root.mkdir(parents=True, exist_ok=True)
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                for member in zf.infolist():
-                    if member.is_dir():
-                        continue
-                    target_name = Path(member.filename).name
-                    if not target_name:
-                        continue
-                    dest = dest_root / target_name
-                    with zf.open(member) as src, dest.open("wb") as out:
-                        shutil.copyfileobj(src, out)
-        except zipfile.BadZipFile:
-            continue
+    extract_archives(root)
 
 def _available_label_pdfs(extract_zip: bool = False) -> list[Path]:
     if extract_zip:
         batch_manager._extract_zip_files()
-    files = [Path(p) for p in batch_manager.scan_inputs().get("files", []) if str(p).lower().endswith(".pdf")]
-    labels = [p for p in files if "packing slip" not in p.name.lower()]
+    files = batch_manager._all_batch_files()
+    sources = prepare_label_sources(settings.incoming_batch_folder, files,
+                                    settings.incoming_batch_folder / "_label_sources", settings.config)
+    labels = [Path(s["pdf"]) for s in sources]
     if not labels:
         latest = batch_manager.latest_batch_snapshot()
         batch_dir_raw = str((latest or {}).get("batch_dir", "") or "").strip()
         batch_dir = Path(batch_dir_raw) if batch_dir_raw else None
         if batch_dir and batch_dir.exists():
             archive_dir = batch_dir / "input_archive"
-            archived = [p for p in archive_dir.glob("*.pdf") if "packing slip" not in p.name.lower()]
+            source_dir = batch_dir / "label_sources"
+            archived = list(source_dir.glob("*.pdf")) if source_dir.exists() else [p for p in archive_dir.glob("*.pdf") if "packing slip" not in p.name.lower()]
             if archived:
                 labels = archived
             else:

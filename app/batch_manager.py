@@ -5,7 +5,6 @@ import json
 import logging
 import re
 import shutil
-import zipfile
 
 import fitz
 from datetime import datetime, timedelta
@@ -15,6 +14,7 @@ from typing import Any
 from pypdf import PdfReader, PdfWriter
 
 from .item_db import ItemDB
+from .label_sources import extract_archives, prepare_label_sources, staged_files
 from .label_text_extractor import extract_label_signals
 from .label_matcher import match_label
 from .order_parser import parse_amazon_packing_slips, parse_amazon_tsv, parse_ebay_csv
@@ -81,6 +81,7 @@ class BatchManager:
         self.settings = settings
         self.item_db = ItemDB(settings.items_csv_path, settings.config.get("new_item_defaults", {}))
         self.unresolved_queue_path = settings.processed_root_folder / "unresolved_queue.json"
+        self._label_sources: dict[str, dict[str, Any]] = {}
 
     def _batch_resolution_overrides_path(self, batch_dir: Path | None) -> Path | None:
         if batch_dir is None:
@@ -274,6 +275,7 @@ class BatchManager:
         pdf_count = len([p for p in files if p.suffix.lower() == ".pdf"])
         csv_count = len([p for p in files if p.suffix.lower() == ".csv"])
         txt_count = len([p for p in files if p.suffix.lower() == ".txt"])
+        png_count = len([p for p in files if p.suffix.lower() == ".png"])
 
         return {
             "label_count": len(labels),
@@ -283,6 +285,7 @@ class BatchManager:
             "pdf_count": pdf_count,
             "csv_count": csv_count,
             "txt_count": txt_count,
+            "png_count": png_count,
             "ebay_csv_found": ebay_csv is not None,
             "amazon_txt_found": amazon_txt is not None,
             "unresolved_count": len(unresolved),
@@ -293,29 +296,22 @@ class BatchManager:
     def _all_batch_files(self) -> list[Path]:
         root = self.settings.incoming_batch_folder
         root.mkdir(parents=True, exist_ok=True)
-        files = sorted([p for p in root.rglob("*") if p.is_file()], key=_path_sort_key)
-        return [p for p in files if "_split_pages" not in p.parts]
+        return staged_files(root)
 
     def _extract_zip_files(self) -> list[Path]:
-        extracted: list[Path] = []
         root = self.settings.incoming_batch_folder
-        for z in sorted(root.glob("*.zip"), key=_path_sort_key):
-            dest = root / "_unzipped" / z.stem
-            dest.mkdir(parents=True, exist_ok=True)
-            try:
-                with zipfile.ZipFile(z, "r") as zf:
-                    zf.extractall(dest)
-                extracted.extend([p for p in dest.rglob("*.pdf")])
-            except Exception:
-                logging.exception("Failed to extract ZIP: %s", z)
-        return extracted
+        extract_archives(root)
+        return [p for p in staged_files(root) if p.suffix.lower() in (".pdf", ".png")]
 
     def _find_label_pdfs(self, files: list[Path]) -> list[Path]:
         out: list[Path] = []
+        png_parents = {p.parent for p in files if p.suffix.lower() == ".png" and parse_order_id_from_filename(p)}
         for p in files:
-            if p.suffix.lower() != ".pdf":
+            if p.suffix.lower() != ".pdf" and not (p.suffix.lower() == ".png" and parse_order_id_from_filename(p)):
                 continue
             if "packing slip" in p.name.lower():
+                continue
+            if p.name.lower() == "0_mergedlabeldoc.pdf" and p.parent in png_parents:
                 continue
             out.append(p)
         return out
@@ -327,38 +323,11 @@ class BatchManager:
         return d
 
     def _expand_multi_page_label_pdfs(self, label_pdfs: list[Path]) -> list[Path]:
-        out: list[Path] = []
-        split_dir = self._split_runtime_dir()
-
-        # Fresh split output each batch run to avoid stale page files.
-        shutil.rmtree(split_dir, ignore_errors=True)
-        split_dir.mkdir(parents=True, exist_ok=True)
-
-        for src in label_pdfs:
-            try:
-                reader = PdfReader(str(src))
-            except Exception:
-                logging.exception("Failed to open PDF while checking page count: %s", src)
-                out.append(src)
-                continue
-
-            pages = len(reader.pages)
-            if pages <= 1:
-                out.append(src)
-                continue
-
-            base = sanitize_filename(src.stem) or "label"
-            for i, page in enumerate(reader.pages, start=1):
-                one = split_dir / f"{base}__p{i:03d}.pdf"
-                try:
-                    writer = PdfWriter()
-                    writer.add_page(page)
-                    with one.open("wb") as f:
-                        writer.write(f)
-                    out.append(one)
-                except Exception:
-                    logging.exception("Failed to split page %s from %s", i, src)
-        return out
+        runtime = self.settings.incoming_batch_folder / "_label_sources"
+        shutil.rmtree(runtime, ignore_errors=True)
+        sources = prepare_label_sources(self.settings.incoming_batch_folder, label_pdfs, runtime, self.settings.config)
+        self._label_sources = {Path(s["pdf"]).name: s for s in sources}
+        return [Path(s["pdf"]) for s in sources]
 
     def _find_packing_slips(self, files: list[Path]) -> list[Path]:
         out: list[Path] = []
@@ -480,6 +449,8 @@ class BatchManager:
             kind = 'eBay CSV'
         elif path.suffix.lower() == '.zip':
             kind = 'Amazon ZIP' if ('amzn' in lower or 'amazon' in lower) else 'ZIP'
+        elif path.suffix.lower() == '.png':
+            kind = 'PNG'
         elif path.suffix.lower() == '.pdf':
             plat = detect_platform_from_path(path)
             kind = f"{plat.title()} PDF" if plat in ('amazon', 'ebay') else 'PDF'
@@ -496,9 +467,8 @@ class BatchManager:
     def _should_filter_amazon_report_by_label_ids(self, amazon_label_pdfs: list[Path], amazon_ids: set[str]) -> bool:
         if not amazon_label_pdfs or not amazon_ids:
             return False
-        # Only apply strict overlap filtering when filename order IDs cover most Amazon labels.
-        coverage = len(amazon_ids) / max(1, len(amazon_label_pdfs))
-        return coverage >= 0.7
+        # An anonymous reprint's order must remain available even beside an ID batch.
+        return all(parse_order_id_from_filename(p) in amazon_ids for p in amazon_label_pdfs)
     def _build_orders(self, files: list[Path], label_pdfs: list[Path]) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
         ebay_csvs = self._find_ebay_csvs(files)
         amazon_txts = self._find_amazon_txts(files)
@@ -512,7 +482,8 @@ class BatchManager:
             for rec in parsed_ebay.values():
                 self._merge_order_record(orders, rec)
 
-        amazon_label_pdfs = [p for p in label_pdfs if detect_platform_from_path(p) == "amazon"]
+        amazon_label_pdfs = [p for p in label_pdfs
+                             if self._label_sources.get(p.name, {}).get("platform", detect_platform_from_path(p)) != "ebay"]
         amazon_ids = self._extract_amazon_order_ids_from_labels(amazon_label_pdfs)
         filter_by_ids = self._should_filter_amazon_report_by_label_ids(amazon_label_pdfs, amazon_ids)
         for amazon_txt in amazon_txts:
@@ -677,8 +648,8 @@ class BatchManager:
             return ebay, "ebay"
         if unknown and not amz and not ebay:
             return unknown, ""
-        # Mixed-platform staged batch + unknown label platform: do not cross-match.
-        return {}, ""
+        # The matcher requires unique exact destination evidence for unknown labels.
+        return all_orders, ""
     def _build_preflight_partition(
         self,
         label_pdfs: list[Path],
@@ -706,10 +677,13 @@ class BatchManager:
 
     def process_batch(self) -> dict[str, Any]:
         logging.info("Batch start")
-        self._extract_zip_files()
-        files = self._all_batch_files()
-        label_pdfs = self._find_label_pdfs(files)
-        label_pdfs = self._expand_multi_page_label_pdfs(label_pdfs)
+        try:
+            self._extract_zip_files()
+            files = self._all_batch_files()
+            label_pdfs = self._expand_multi_page_label_pdfs(self._find_label_pdfs(files))
+        except Exception as ex:
+            logging.exception("Failed to prepare shipping label inputs")
+            return {"ok": False, "error": f"Could not prepare label inputs: {ex}"}
         if not label_pdfs:
             sync = self._sync_packing_slips_to_item_db(files)
             if sync.get("processed_slips", 0) <= 0:
@@ -742,19 +716,50 @@ class BatchManager:
         if not orders:
             return {"ok": False, "error": "No order data found. Add eBay OrdersReport CSV and/or Amazon Order Report TXT."}
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         batch_dir = self.settings.processed_root_folder / f"batch_{ts}"
         output_dir = batch_dir / "output_pdfs"
         archive_dir = batch_dir / "input_archive"
         output_dir.mkdir(parents=True, exist_ok=True)
         archive_dir.mkdir(parents=True, exist_ok=True)
 
+        # Keep canonical sources with their batch, independent of staging cleanup.
+        source_dir = batch_dir / "label_sources"
+        source_dir.mkdir(parents=True, exist_ok=True)
+        durable: list[Path] = []
+        for source in label_pdfs:
+            target = source_dir / source.name
+            shutil.copy2(source, target)
+            self._label_sources[source.name]["pdf"] = str(target)
+            durable.append(target)
+        label_pdfs = durable
+        atomic_write_json(source_dir / "manifest.json", self._label_sources)
+        order_source_dir = batch_dir / "order_sources"
+        order_source_dir.mkdir(parents=True, exist_ok=True)
+        packing_slips = set(self._find_packing_slips(files))
+        for source in files:
+            if source.suffix.lower() not in (".txt", ".csv") and source not in packing_slips:
+                continue
+            relative = source.relative_to(self.settings.incoming_batch_folder)
+            target = order_source_dir / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
         unresolved_queue = self._load_unresolved_queue()
         signals_cache: dict[str, dict[str, Any]] = {}
         def _signals_for(path: Path) -> dict[str, Any]:
             key = str(path)
             if key not in signals_cache:
-                signals_cache[key] = extract_label_signals(path)
+                signals = extract_label_signals(path, allow_ocr=False)
+                hard_ids = (parse_order_id_from_filename(path), signals.get("order_id_amazon"), signals.get("order_id_ebay"))
+                tracking = _norm_tracking_value(signals.get("tracking_number", ""))
+                has_exact_tracking = bool(tracking and any(_norm_tracking_value(o.get("tracking_number", "")) == tracking for o in orders.values()))
+                if not any(oid in orders for oid in hard_ids if oid) and not has_exact_tracking and (not signals.get("recipient_name") or not signals.get("ship_postal")):
+                    signals = extract_label_signals(path)
+                signals_cache[key] = signals
+                source_hint = self._label_sources.get(path.name, {}).get("platform")
+                if source_hint in ("amazon", "ebay"):
+                    signals_cache[key]["platform_hint"] = source_hint
             return signals_cache[key]
         preflight = self._build_preflight_partition(label_pdfs, orders, _signals_for)
         report: dict[str, Any] = {
@@ -775,7 +780,10 @@ class BatchManager:
 
         for label_pdf in label_pdfs:
             try:
-                unresolved_queue = [q for q in unresolved_queue if str(q.get("label_pdf", "")) != str(label_pdf)]
+                source_id = self._label_sources.get(label_pdf.name, {}).get("source_id")
+                unresolved_queue = [q for q in unresolved_queue
+                                    if str(q.get("label_pdf", "")) != str(label_pdf)
+                                    and not (source_id and q.get("source_id") == source_id)]
                 label_signals = _signals_for(label_pdf)
                 platform = str(preflight.get("label_platforms", {}).get(str(label_pdf), "unknown") or "unknown")
                 compatible_orders, match_hint = self._compatible_orders_for_label(platform, preflight.get("orders_partition", {}), orders)
@@ -860,7 +868,7 @@ class BatchManager:
                             "candidates": [],
                         }
                     else:
-                        m = match_label(label_pdf, compatible_orders, platform_hint=match_hint if match_hint else "")
+                        m = match_label(label_pdf, compatible_orders, platform_hint=match_hint or "", signals=label_signals)
                         if m.get("status") != "matched" and str(match_hint or platform).strip().lower() == "ebay":
                             best_group = _candidate_tracking_merge_group(m.get("candidates", []) or [])
                             if best_group:
@@ -1065,6 +1073,15 @@ class BatchManager:
                 report["summary"]["errors"] += 1
                 report["results"].append({"label_pdf": str(label_pdf), "status": "error", "error": str(ex)})
 
+        for row in report["results"]:
+            source = self._label_sources.get(Path(row.get("label_pdf", "")).name, {})
+            row["source_id"] = source.get("source_id", "")
+            row["source"] = source
+        for row in unresolved_queue:
+            source = self._label_sources.get(Path(row.get("label_pdf", "")).name, {})
+            if str(row.get("label_pdf", "")).startswith(str(source_dir)):
+                row["source_id"] = source.get("source_id", "")
+                row["source"] = source
         atomic_write_json(batch_dir / "batch_report.json", report)
         self._save_unresolved_queue(unresolved_queue)
         self._archive_inputs(files, archive_dir)
@@ -1166,6 +1183,21 @@ class BatchManager:
         output_dir.mkdir(parents=True, exist_ok=True)
         out = self._render_one_label(source_pdf, order, idx, output_dir)
 
+        # A label resolved after another batch still needs to belong to the
+        # latest batch's replay manifest, rather than relying on an older path.
+        source_dir = latest / "label_sources"
+        source_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = source_dir / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+        if queue_entry.get("source"):
+            source = dict(queue_entry["source"])
+            target = source_dir / source_pdf.name
+            if target.resolve() != source_pdf.resolve():
+                shutil.copy2(source_pdf, target)
+            source["pdf"] = str(target)
+            manifest[target.name] = source
+            atomic_write_json(manifest_path, manifest)
+
         report_path = latest / "batch_report.json"
         report: dict[str, Any] = {}
         if report_path.exists():
@@ -1206,6 +1238,10 @@ class BatchManager:
                 )
             )
 
+        for row in results:
+            if row.get("label_pdf") == target_label_pdf and queue_entry.get("source"):
+                row["source"] = manifest[source_pdf.name]
+                row["source_id"] = queue_entry.get("source_id", "")
         report["results"] = results
         self._recount_batch_summary(report)
         atomic_write_json(report_path, report)
@@ -2071,6 +2107,30 @@ class BatchManager:
         }
 
     def _restage_from_archive(self, archive: Path, selected_label_names: set[str] | None = None) -> int:
+        manifest_path = archive.parent / "label_sources" / "manifest.json"
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            selected_sources = {name: source for name, source in manifest.items()
+                                if selected_label_names is None or name in selected_label_names}
+            for name, source in selected_sources.items():
+                if not Path(source["pdf"]).exists():
+                    raise FileNotFoundError(f"Archived label source is missing: {name}")
+            self.clear_staged_files()
+            root = self.settings.incoming_batch_folder
+            replay = root / "_replay"
+            replay.mkdir(parents=True, exist_ok=True)
+            for name, source in selected_sources.items():
+                shutil.copy2(source["pdf"], replay / name)
+            atomic_write_json(root / "_source_manifest.json", selected_sources)
+            copied = len(selected_sources)
+            order_sources = archive.parent / "order_sources"
+            for source in order_sources.rglob("*"):
+                if source.is_file():
+                    target = root / "_order_sources" / source.relative_to(order_sources)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+                    copied += 1
+            return copied
         source_files = [p for p in archive.rglob("*") if p.is_file()]
         if not source_files:
             return 0
