@@ -14,7 +14,7 @@ from typing import Any
 from pypdf import PdfReader, PdfWriter
 
 from .item_db import ItemDB
-from .label_sources import extract_archives, prepare_label_sources, staged_files
+from .label_sources import extract_archives, inset_letter_label, prepare_label_sources, restage_label_source, staged_files
 from .label_text_extractor import extract_label_signals
 from .label_matcher import match_label
 from .order_parser import parse_amazon_packing_slips, parse_amazon_tsv, parse_ebay_csv
@@ -1305,6 +1305,13 @@ class BatchManager:
         return clone
 
     def _normalize_label_source(self, label_pdf: Path, order: dict[str, Any], output_dir: Path) -> Path:
+        if str(order.get("platform", "")).lower().strip() == "amazon":
+            out_path = output_dir / "_normalized" / f"inset_{sanitize_filename(label_pdf.stem)}.pdf"
+            try:
+                return out_path if inset_letter_label(label_pdf, out_path, self.settings.config) else label_pdf
+            except Exception:
+                logging.exception("Failed to check Amazon label margin clearance: %s", label_pdf)
+                return label_pdf
         if str(order.get("platform", "")).lower().strip() != "ebay":
             return label_pdf
         layout = self.settings.config.get("print_layout", {})
@@ -2120,7 +2127,7 @@ class BatchManager:
             replay = root / "_replay"
             replay.mkdir(parents=True, exist_ok=True)
             for name, source in selected_sources.items():
-                shutil.copy2(source["pdf"], replay / name)
+                selected_sources[name] = restage_label_source(source, replay / name, archive, self.settings.config)
             atomic_write_json(root / "_source_manifest.json", selected_sources)
             copied = len(selected_sources)
             order_sources = archive.parent / "order_sources"

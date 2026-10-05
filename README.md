@@ -85,11 +85,18 @@ their companion `0_MergedLabelDoc.pdf`. Nested ZIPs, including Drive downloads,
 are supported. Individual PNGs with Amazon order IDs also work.
 
 Each 4x6 label becomes one US Letter page at its original physical size, with
-original image pixels retained. The default placement matches known-good Amazon
-USPS PDF Right samples: a counterclockwise 90-degree rotation into a 6x4-inch
-rectangle at x=18, y=28.8 points from the page's top-left. Bottom-half printing
-shifts that placement by 396 points. Existing Amazon Letter and eBay rendering,
-output sorting, and overflow pages retain their existing behavior.
+original image pixels retained. The default placement centers the complete label
+in the top half-sheet, clear of the narrow enrichment margins: a counterclockwise
+90-degree rotation into a 6x4-inch rectangle at x=90, y=54 points from the page's
+top-left. Bottom-half printing shifts that placement by 396 points. Amazon Letter
+labels that crowd a side enrichment margin get a small horizontal shift when
+the artwork fits safely between the configured margins, with an 18-point gap.
+The shift preserves native image pixels, vector barcodes and physical size; it
+uses a lightweight ink-bounds check, without OCR or new dependencies. Labels
+that already have clearance, touch the page edge, or cannot fit without scaling
+stay in their existing positions. Reprocessing always starts with the saved
+source so shifts do not accumulate. Existing eBay rendering, output sorting,
+and overflow pages retain their existing behavior.
 
 Standalone 4x6 merged PDFs are also supported. Purchase summary pages and their
 headingless continuation pages are excluded. For anonymous or image-only labels,
@@ -102,11 +109,13 @@ contains that tracking number.
 
 Canonical source PDFs and source provenance are saved with each processed batch.
 They remain available for preview, manual assignment, and full or selected
-reprocessing after staging cleanup. Original uploads remain in `input_archive`.
+reprocessing after staging cleanup. Reprocessing rebuilds 4x6 placement using the
+current settings, including for batches created before the centering fix.
+Original uploads remain in `input_archive`.
 
 An optional `input_normalization.amazon_4x6_letter_rect` setting in `config.yaml`
 can adjust placement. Its four top-left-coordinate values default to
-`[18, 28.8, 450, 316.8]`; the rectangle must stay exactly 432x288 points and inside
+`[90, 54, 522, 342]`; the rectangle must stay exactly 432x288 points and inside
 the Letter page. This does not change the image scale or require a format mode.
 
 Run regression checks with `python -m unittest discover -s tests -v`. Tests create

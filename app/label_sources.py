@@ -1,8 +1,8 @@
 """Discover physical labels and adapt new Amazon inputs to the existing renderer.
 
-Coordinates are in PyMuPDF's top-left system. The default USPS transform was
-measured against known-good Amazon PDF Right samples: a 6x4 landscape label at
-(18, 28.8), rotated counterclockwise from the original 4x6 image.
+Coordinates are in PyMuPDF's top-left system. A 6x4 landscape label is centered
+in the selected Letter half-sheet, clear of the narrow enrichment margins, and
+rotated counterclockwise from the original 4x6 image.
 """
 from __future__ import annotations
 
@@ -17,11 +17,13 @@ from typing import Any
 import fitz
 
 from .platform_detector import detect_platform_from_path, parse_order_id_from_filename
+from .overlay_renderer import side_margin_content_bounds
 from .utils import atomic_write_json, sanitize_filename
 
 LETTER_SIZE = (612, 792)
 LABEL_SIZE = (288, 432)
-LETTER_LABEL_RECT = (18, 28.8, 450, 316.8)
+LETTER_LABEL_RECT = (90, 54, 522, 342)
+LEGACY_LETTER_LABEL_RECT = (18, 28.8, 450, 316.8)
 RUNTIME_DIRS = {"_split_pages", "_label_sources"}
 SUMMARY_TITLE = "list of orders with successful label purchase"
 
@@ -116,6 +118,92 @@ def normalize_png(source: Path, destination: Path, config: dict[str, Any]) -> No
         normalize_page(image_pdf, 0, destination, config)
 
 
+def inset_letter_label(source: Path, destination: Path, config: dict[str, Any]) -> bool:
+    """Nudge crowded Letter artwork without scaling or rewriting its pixels."""
+    limits = side_margin_content_bounds(config, *LETTER_SIZE)
+    if limits is None:
+        return False
+    with fitz.open(str(source)) as document:
+        page = document[0]
+        if len(document) != 1 or page.rotation or abs(page.rect.width - 612) > .1 or abs(page.rect.height - 792) > .1:
+            return False
+        boxes = [fitz.Rect(box) for kind, box, *_ in page.get_bboxlog() if kind != "ignore-text"]
+        if not boxes:
+            return False
+        ink = fitz.Rect()
+        for box in boxes:
+            ink |= box
+        # A full-page bitmap includes white paper. A small grayscale preview
+        # finds its actual ink; this is a bounds check, never OCR or output data.
+        if any(box.contains(page.rect) for box in boxes):
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(.5, .5), colorspace=fitz.csGRAY, alpha=False)
+            dark = [i for i, value in enumerate(pixmap.samples) if value < 200]
+            if not dark:
+                return False
+            xs = [i % pixmap.width for i in dark]
+            ys = [i // pixmap.width for i in dark]
+            ink = fitz.Rect(min(xs) * 2, min(ys) * 2, (max(xs) + 1) * 2, (max(ys) + 1) * 2)
+        # Edge-touching or out-of-page ink may already be cropped upstream.
+        # Never move it farther off-paper, or shrink an oversized label to fit.
+        if not (page.rect + (2, 2, -2, -2)).contains(ink):
+            return False
+        minimum_shift, maximum_shift = limits[0] - ink.x0, limits[1] - ink.x1
+        if minimum_shift > maximum_shift:
+            return False
+        shift = min(max(0.0, minimum_shift), maximum_shift)
+        if abs(shift) < .01:
+            return False
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with fitz.open() as output:
+            output.new_page(width=612, height=792).show_pdf_page(
+                page.rect + (shift, 0, shift, 0), document, 0)
+            output.save(str(destination))
+    return True
+
+
+def restage_label_source(record: dict[str, Any], destination: Path, archive: Path,
+                         config: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild 4x6 placement during replay without moving old Letter labels."""
+    source = dict(record)
+    if source.get("format") not in ("amazon_4x6_png", "4x6_pdf"):
+        shutil.copy2(source["pdf"], destination)
+        return source
+    raw = (archive / source.get("original_source", "")).resolve()
+    rebuilt = False
+    if raw.is_relative_to(archive.resolve()) and raw.is_file():
+        if raw.suffix.lower() == ".png":
+            normalize_png(raw, destination, config)
+            rebuilt = True
+        elif raw.suffix.lower() == ".pdf":
+            with fitz.open(str(raw)) as document:
+                number = int(source.get("page", 1)) - 1
+                if 0 <= number < len(document) and is_4x6(document[number].rect):
+                    normalize_page(document, number, destination, config)
+                    rebuilt = True
+    if not rebuilt:
+        # Later replays retain the canonical PDF rather than another copy of
+        # the original download. Its recorded rectangle isolates the complete
+        # label and prevents accumulated shifts or loss of native pixels.
+        with fitz.open(str(source["pdf"])) as document, fitz.open() as output:
+            clip = source.get("normalization_rect")
+            if clip is None:
+                images = document[0].get_images()
+                if source.get("format") == "amazon_4x6_png" and len(images) == 1:
+                    clip = document[0].get_image_rects(images[0][0])[0]
+                else:
+                    clip = fitz.Rect(LEGACY_LETTER_LABEL_RECT)
+                    bounds = fitz.Rect()
+                    for _, box, *_ in document[0].get_bboxlog():
+                        bounds |= fitz.Rect(box)
+                    if not bounds.is_empty and (bounds.y0 + bounds.y1) / 2 > 396:
+                        clip += (0, 396, 0, 396)
+            output.new_page(width=612, height=792).show_pdf_page(
+                label_rect(config), document, 0, clip=fitz.Rect(clip))
+            output.save(str(destination))
+    source["normalization_rect"] = list(label_rect(config))
+    return source
+
+
 def _summary_continuation(text: str) -> bool:
     # Amazon's second summary page has no heading, only order IDs and bullets.
     remaining = re.sub(r"\d{3}-\d{7}-\d{7}", "", text)
@@ -157,7 +245,8 @@ def prepare_label_sources(root: Path, files: list[Path], destination: Path,
         if source.suffix.lower() == ".png":
             out = destination / (base + ".pdf")
             normalize_png(source, out, config)
-            sources.append({**original, "source_id": digest, "format": "amazon_4x6_png", "pdf": str(out)})
+            sources.append({**original, "source_id": digest, "format": "amazon_4x6_png",
+                            "normalization_rect": list(label_rect(config)), "pdf": str(out)})
             continue
         with fitz.open(str(source)) as document:
             in_summary = False
@@ -182,7 +271,8 @@ def prepare_label_sources(root: Path, files: list[Path], destination: Path,
                         single.insert_pdf(document, from_page=number, to_page=number)
                         single.save(str(out))
                 source_id = original.get("source_id") or hashlib.sha256(f"{identity}:{number}".encode()).hexdigest()[:12]
-                sources.append({**original, "source_id": source_id,
+                placement = {"normalization_rect": list(label_rect(config))} if small else {}
+                sources.append({**original, **placement, "source_id": source_id,
                                 "page": original.get("page", number + 1),
                                 "format": original.get("format", "4x6_pdf" if small else "pdf"),
                                 "pdf": str(out)})

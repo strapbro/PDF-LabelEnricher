@@ -14,7 +14,8 @@ import fitz
 
 from app.batch_manager import BatchManager
 from app.label_matcher import match_label
-from app.label_sources import extract_archives, prepare_label_sources, staged_files, LETTER_LABEL_RECT
+from app.label_sources import extract_archives, prepare_label_sources, restage_label_source, staged_files, LETTER_LABEL_RECT, label_rect
+from app.overlay_renderer import _safe_rect
 from app.label_text_extractor import extract_label_signals, _recipient_address_from_lines, _extract_tracking
 from app.settings_manager import SettingsManager, DEFAULT_CONFIG
 from app import ui_server
@@ -147,6 +148,22 @@ class SourceNormalizationTests(unittest.TestCase):
             (self.root / f"{index}_{oid}.png").write_bytes(label_png())
         self.assertEqual([s["order_id"] for s in self.prepare()], [ID1, ID2, ID3])
 
+    def test_4x6_label_is_centered_clear_of_enrichment_margins(self):
+        config = settings_for(self.root)._config
+        config["print_layout"].update({"edge_inset_x": 10, "edge_inset_y": 8,
+            "margin_box_height": 2000, "rotated_secondary_preset": "right_margin"})
+        for mode, center_y in (("half_sheet_top", 198), ("half_sheet_bottom", 594)):
+            config["print_layout"]["page_mode"] = mode
+            rect = label_rect(config)
+            self.assertAlmostEqual((rect.x0 + rect.x1) / 2, 306)
+            self.assertAlmostEqual((rect.y0 + rect.y1) / 2, center_y)
+            self.assertEqual((rect.width, rect.height), (432, 288))
+            for preset in ("left_margin", "right_margin"):
+                x, y, w, h = _safe_rect(config, 612, 792, preset)
+                margin = fitz.Rect(x, 792 - y - h, x + w, 792 - y)
+                self.assertFalse(rect.intersects(margin))
+                self.assertGreaterEqual(max(margin.x0 - rect.x1, rect.x0 - margin.x1), 6)
+
     def test_merged_pdf_filters_summary_and_headingless_continuation(self):
         (self.root / "merged.pdf").write_bytes(label_pdf(labels=2, summaries=2))
         sources = self.prepare()
@@ -182,6 +199,27 @@ class SourceNormalizationTests(unittest.TestCase):
         self.assertEqual(len({s["pdf"] for s in sources}), 4)
         self.assertEqual(len({s["source_id"] for s in sources}), 4)
 
+    def test_4x6_pdf_replay_preserves_vector_barcodes_and_scale(self):
+        original = self.root / "label.pdf"
+        original.write_bytes(label_pdf())
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["input_normalization"] = {"amazon_4x6_letter_rect": [18, 28.8, 450, 316.8]}
+        source = prepare_label_sources(self.root, [original], self.root / "_label_sources", config)[0]
+        source.pop("normalization_rect")  # Legacy PDF with no original download available.
+        config.pop("input_normalization")
+        for mode in ("half_sheet_bottom", "half_sheet_top"):
+            config["print_layout"]["page_mode"] = mode
+            destination = self.root / (mode + ".pdf")
+            source = restage_label_source(source, destination, self.root / "missing_archive", config)
+            source["pdf"] = str(destination)
+            with fitz.open(destination) as document:
+                self.assertIn("JANE SAMPLE", document[0].get_text())
+                safe = label_rect(config) + (-.01, -.01, .01, .01)
+                self.assertTrue(all(safe.contains(d["rect"]) for d in document[0].get_drawings()))
+                spans = [s for b in document[0].get_text("dict")["blocks"] if b["type"] == 0
+                         for line in b["lines"] for s in line["spans"]]
+                self.assertAlmostEqual(spans[0]["size"], 12, places=3)
+
     def test_new_download_with_same_filename_has_distinct_source_identity(self):
         source = self.root / "0_MergedLabelDoc.pdf"
         source.write_bytes(label_pdf(order_id=ID1))
@@ -204,6 +242,98 @@ class SourceNormalizationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             extract_archives(self.root)
         self.assertFalse((self.root.parent / "outside.pdf").exists())
+
+
+class LetterClearanceTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.settings = settings_for(self.root)
+        self.settings._config["print_layout"].update({"edge_inset_x": 10, "edge_inset_y": 8,
+            "margin_box_height": 2000, "rotated_secondary_preset": "right_margin"})
+        self.manager = BatchManager(self.settings)
+        self.output = self.root / "output"
+        self.output.mkdir()
+
+    def source(self, x=26, width=406, raster=False):
+        path = self.root / f"{x}_{ID1}.pdf"
+        with fitz.open() as doc:
+            page = doc.new_page(width=612, height=792)
+            page.insert_text((x + 10, 65), "USPS GROUND ADVANTAGE" if width > 200 else "LABEL", fontsize=12)
+            for offset in range(0, int(width), 5):
+                page.draw_rect(fitz.Rect(x + offset, 160, x + offset + 2, 210), color=None, fill=(0, 0, 0))
+            if raster:
+                image = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False).tobytes("png")
+                with fitz.open() as image_pdf:
+                    image_pdf.new_page(width=612, height=792).insert_image(fitz.Rect(0, 0, 612, 792), stream=image)
+                    image_pdf.save(str(path))
+            else:
+                doc.save(str(path))
+        return path
+
+    def test_crowded_vector_letter_moves_without_scaling(self):
+        source = self.source()
+        with patch("app.label_text_extractor._ocr_windows_image_lines") as ocr:
+            result = self.manager._normalize_label_source(source, order(), self.output)
+        ocr.assert_not_called()
+        with fitz.open(result) as doc:
+            barcode = doc[0].get_drawings()[0]["rect"]
+            self.assertGreaterEqual(barcode.x0, 46)
+            self.assertEqual((barcode.width, barcode.height), (2, 50))
+            span = doc[0].get_text("dict")["blocks"][0]["lines"][0]["spans"][0]
+            self.assertAlmostEqual(span["size"], 12, places=3)
+
+    def test_raster_letter_moves_without_resampling_native_pixels(self):
+        source = self.source(raster=True)
+        with fitz.open(source) as doc:
+            original = fitz.Pixmap(doc, doc[0].get_images()[0][0])
+        result = self.manager._normalize_label_source(source, order(), self.output)
+        with fitz.open(result) as doc:
+            image = doc[0].get_images()[0][0]
+            embedded = fitz.Pixmap(doc, image)
+            self.assertEqual(embedded.samples, original.samples)
+            rectangle = doc[0].get_image_rects(image)[0]
+            self.assertGreater(rectangle.x0, 0)
+            self.assertEqual((rectangle.width, rectangle.height), (612, 792))
+
+    def test_clear_clipped_and_oversized_sources_are_preserved(self):
+        for x, width in ((100, 406), (488, 274), (3, 595)):
+            with self.subTest(x=x):
+                source = self.source(x=x, width=width)
+                self.assertEqual(self.manager._normalize_label_source(source, order(), self.output), source)
+        self.settings._config["print_layout"]["overlay_mode"] = "backside"
+        source = self.source()
+        self.assertEqual(self.manager._normalize_label_source(source, order(), self.output), source)
+
+    def test_right_margin_moves_crowded_artwork_left_without_scaling(self):
+        self.settings._config["print_layout"].update({"placement_preset": "right_margin",
+            "rotated_primary_preset": "right_margin", "overflow_mode": "backside"})
+        source = self.source(x=500, width=100)
+        result = self.manager._normalize_label_source(source, order(), self.output)
+        with fitz.open(result) as doc:
+            barcode = doc[0].get_drawings()[-1]["rect"]
+            self.assertLessEqual(barcode.x1, 566)
+            self.assertEqual((barcode.width, barcode.height), (2, 50))
+
+    def test_repeated_reprocessing_does_not_accumulate_the_letter_shift(self):
+        source = self.source()
+        original = source.read_bytes()
+        shutil_path = self.settings.incoming_batch_folder / source.name
+        shutil_path.write_bytes(original)
+        write_orders(self.settings.incoming_batch_folder / "orders.txt", ids=(ID1,))
+        result = self.manager.process_batch()
+        positions = []
+        for iteration in range(3):
+            self.assertTrue(result["ok"], result)
+            row = result["report"]["results"][0]
+            self.assertEqual(Path(row["label_pdf"]).read_bytes(), original)
+            with fitz.open(row["output_pdf"]) as doc:
+                positions.append(tuple(doc[0].get_drawings()[0]["rect"]))
+            if iteration < 2:
+                result = self.manager.reprocess_latest_batch()
+        self.assertGreaterEqual(positions[0][0], 46)
+        self.assertTrue(all(position == positions[0] for position in positions))
 
 
 class OcrMatchingTests(unittest.TestCase):
@@ -327,6 +457,35 @@ class BatchLifecycleTests(unittest.TestCase):
         write_orders(self.incoming / "orders.txt", ids=(ID1, ID2, ID3, "114-4567890-4567890"))
         orders, _ = self.manager._build_orders(files, sources)
         self.assertIn("114-4567890-4567890", orders)
+
+    def test_reprocessing_rebuilds_4x6_placement_and_preserves_pixels(self):
+        self.stage(ids=(ID1,))
+        self.manager.settings._config["input_normalization"] = {
+            "amazon_4x6_letter_rect": [18, 28.8, 450, 316.8]}
+        first = self.manager.process_batch()
+        manifest_path = Path(first["batch_dir"]) / "label_sources" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        for source in manifest.values():
+            source.pop("normalization_rect", None)  # A batch from before this fix.
+        manifest_path.write_text(json.dumps(manifest))
+        original_pdf = first["report"]["results"][0]["label_pdf"]
+        with fitz.open(original_pdf) as doc:
+            original_pixels = fitz.Pixmap(doc, doc[0].get_images()[0][0]).samples
+        # The first replay can rebuild from the archived PNG. Subsequent replays
+        # must use saved geometry because only the canonical PDF is restaged.
+        for index, mode in enumerate(("half_sheet_top", "half_sheet_bottom", "half_sheet_top")):
+            self.manager.settings._config["input_normalization"]["amazon_4x6_letter_rect"] = [90, 54, 522, 342]
+            self.manager.settings._config["print_layout"]["page_mode"] = mode
+            result = (self.manager.reprocess_latest_batch() if index < 2
+                      else self.manager.reprocess_selected_from_latest([ID1]))
+            self.assertTrue(result["ok"], result)
+            row = result["report"]["results"][0]
+            self.assertEqual(row["source_id"], first["report"]["results"][0]["source_id"])
+            with fitz.open(row["label_pdf"]) as doc:
+                image = doc[0].get_images()[0][0]
+                self.assertEqual(fitz.Pixmap(doc, image).samples, original_pixels)
+                for actual, expected in zip(doc[0].get_image_rects(image)[0], label_rect(self.manager.settings.config)):
+                    self.assertAlmostEqual(actual, expected, places=3)
 
     def test_unresolved_source_survives_later_batch_and_resolution(self):
         self.stage(ids=(ID1,))
