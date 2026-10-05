@@ -336,6 +336,27 @@ def _safe_rect(config: dict[str, Any], page_w: float, page_h: float, preset_over
     return (page_w - edge_x - usable_w, region_y0 + edge_y, usable_w, usable_h)
 
 
+def side_margin_content_bounds(config: dict[str, Any], page_w: float, page_h: float,
+                               gap: float = 18) -> tuple[float, float] | None:
+    """Horizontal room for label ink, using the same rectangles as enrichment."""
+    layout = config.get("print_layout", {})
+    if layout.get("overlay_mode", "margin") not in ("margin", "both"):
+        return None
+    presets = [_resolve_preset(layout, "primary")]
+    if layout.get("overflow_mode") == "secondary_margin" and layout.get("orientation_mode") == "rotated_90":
+        presets.append(_resolve_preset(layout, "secondary"))
+    left, right = 0.0, page_w
+    for preset in presets:
+        if preset not in ("left_margin", "right_margin"):
+            continue
+        x, _, width, _ = _safe_rect(config, page_w, page_h, preset)
+        if preset == "left_margin":
+            left = max(left, x + width + gap)
+        else:
+            right = min(right, x - gap)
+    return (left, right) if (left, right) != (0.0, page_w) else None
+
+
 def _secondary_rect(config: dict[str, Any], page_w: float, page_h: float) -> tuple[float, float, float, float]:
     layout = config["print_layout"]
     edge_x = float(layout.get("edge_inset_x", 8))
