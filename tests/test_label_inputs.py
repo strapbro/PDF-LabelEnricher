@@ -46,8 +46,8 @@ def label_pdf(size=(288, 432), labels=1, summaries=0, order_id="") -> bytes:
         return doc.tobytes()
 
 
-def label_png(width=1216) -> bytes:
-    with fitz.open(stream=label_pdf(), filetype="pdf") as doc:
+def label_png(width=1216, order_id="") -> bytes:
+    with fitz.open(stream=label_pdf(order_id=order_id), filetype="pdf") as doc:
         return doc[0].get_pixmap(matrix=fitz.Matrix(width / 288, width / 288), alpha=False).tobytes("png")
 
 
@@ -55,7 +55,7 @@ def bulk_zip(ids=(ID1, ID2, ID3), nested=False) -> bytes:
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w") as archive:
         for index, order_id in enumerate(ids, 1):
-            archive.writestr(f"bulk/{index}_{order_id}.png", label_png())
+            archive.writestr(f"bulk/{index}_{order_id}.png", label_png(order_id=order_id))
         archive.writestr("bulk/0_MergedLabelDoc.pdf", label_pdf(labels=len(ids), summaries=2))
     if not nested:
         return stream.getvalue()

@@ -57,9 +57,9 @@ def _repeat_buyer_candidates(cands: list[dict[str, Any]]) -> list[dict[str, Any]
     return grouped
 
 
-def _label_text_name_score(ship_name: str, signals: dict[str, Any]) -> float:
+def _label_text_name_score(ship_name: str, normalized_label: str) -> float:
     target = _norm_text(ship_name)
-    hay = _norm_text(str(signals.get("text", "") or ""))
+    hay = normalized_label
     if not target or not hay:
         return 0.0
     if target in hay:
@@ -70,20 +70,20 @@ def _label_text_name_score(ship_name: str, signals: dict[str, Any]) -> float:
     return 0.0
 
 
-def _label_text_zip_hit(ship_postal: str, signals: dict[str, Any]) -> bool:
+def _label_text_zip_hit(ship_postal: str, label_digits: str) -> bool:
     zip5 = "".join(ch for ch in (ship_postal or "") if ch.isdigit())[:5]
-    hay = "".join(ch for ch in str(signals.get("text", "") or "") if ch.isdigit())
+    hay = label_digits
     return bool(zip5 and hay and zip5 in hay)
 
 def _order_sale_sort_value(order: dict[str, Any]) -> str:
     return str(order.get("sale_date_sort", "") or order.get("sale_date", "") or "")
 def _effective_platform_hint(initial_hint: str, signals: dict[str, Any]) -> str:
     hint = (initial_hint or "").strip().lower()
-    if hint in ("amazon", "ebay"):
+    if hint in ("amazon", "ebay", "walmart"):
         return hint
 
     sig_hint = str(signals.get("platform_hint", "") or "").strip().lower()
-    if sig_hint in ("amazon", "ebay"):
+    if sig_hint in ("amazon", "ebay", "walmart"):
         return sig_hint
 
     if signals.get("order_id_amazon"):
@@ -100,6 +100,9 @@ def best_candidates(label_pdf: Path, orders: dict[str, dict[str, Any]], platform
     filename_order_id = parse_order_id_from_filename(label_pdf)
     filename_order_norm = _norm_order_id(filename_order_id)
     effective_hint = "amazon" if filename_order_id else _effective_platform_hint(platform_hint, signals)
+    label_text = str(signals.get("text", "") or "")
+    normalized_label = _norm_text(label_text)
+    label_digits = "".join(ch for ch in label_text if ch.isdigit())
 
     for order_id, rec in orders.items():
         rec_platform = str(rec.get("platform", "") or "").strip().lower()
@@ -139,14 +142,14 @@ def best_candidates(label_pdf: Path, orders: dict[str, dict[str, Any]], platform
             score += 0.45
             reasons.append("zip")
             zip_hit = True
-        elif _label_text_zip_hit(str(rec.get("ship_postal", "") or ""), signals):
+        elif _label_text_zip_hit(str(rec.get("ship_postal", "") or ""), label_digits):
             score += 0.35
             reasons.append("label_text_zip")
             zip_hit = True
 
         name_score = _score_name(rec.get("ship_name", ""), signals.get("recipient_name", ""))
         if name_score < 0.72:
-            name_score = max(name_score, _label_text_name_score(str(rec.get("ship_name", "") or ""), signals))
+            name_score = max(name_score, _label_text_name_score(str(rec.get("ship_name", "") or ""), normalized_label))
         score += 0.5 * name_score
         if name_score >= 0.72:
             reasons.append("recipient_name")

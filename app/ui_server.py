@@ -23,6 +23,7 @@ from fastapi import FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 
 from .batch_manager import BatchManager
 from .i18n import normalize_ui_language, translate_ui
@@ -88,10 +89,11 @@ def _combined_pdf_browser_url(path: str, message: str = "") -> str:
 
 def _batch_counts_text(summary: dict[str, Any]) -> str:
     return _ui(
-        "Matched: {matched}, unresolved: {unresolved}, errors: {errors}",
+        "Matched: {matched}, unresolved: {unresolved}, errors: {errors}, duplicates skipped: {skipped}",
         matched=summary.get("matched", 0),
         unresolved=summary.get("unresolved", 0),
         errors=summary.get("errors", 0),
+        skipped=summary.get("duplicates_skipped", 0),
     )
 
 
@@ -422,6 +424,7 @@ def _items_link_targets(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
             ("ebay", "ebay_item_number", (row.get("ebay_item_number") or "").strip()),
             ("amazon", "amazon_sku", (row.get("amazon_sku") or "").strip()),
             ("amazon", "amazon_asin", (row.get("amazon_asin") or "").strip().upper()),
+            ("walmart", "walmart_sku", (row.get("walmart_sku") or "").strip()),
             ("ebay", "item_id", (row.get("item_id") or "").strip() if (row.get("platform") or "").strip().lower() in ("ebay", "both") else ""),
             ("amazon", "item_id", (row.get("item_id") or "").strip().upper() if (row.get("platform") or "").strip().lower() in ("amazon", "both") else ""),
         ]
@@ -468,12 +471,6 @@ def _row_display_name(row: dict[str, Any]) -> str:
     return str(row.get("custom_label") or row.get("item_title") or row.get("amazon_sku") or row.get("amazon_asin") or row.get("ebay_item_number") or "Untitled").strip()
 
 
-def _row_identity_bits(row: dict[str, Any]) -> tuple[bool, bool]:
-    has_ebay = bool(str(row.get("ebay_item_number", "") or "").strip())
-    has_amz = bool(str(row.get("amazon_sku", "") or "").strip() or str(row.get("amazon_asin", "") or "").strip())
-    return has_ebay, has_amz
-
-
 def _find_hint_for_row(row: dict[str, Any], hints: list[dict[str, str]]) -> dict[str, str] | None:
     ebay = str(row.get("ebay_item_number", "") or "").strip()
     asin = str(row.get("amazon_asin", "") or "").strip().upper()
@@ -504,6 +501,7 @@ def _build_items_assist(rows: list[dict[str, Any]], hints: list[dict[str, str]])
     label_groups: dict[str, list[str]] = {}
     title_groups: dict[str, list[str]] = {}
     title_bucket_groups: dict[str, list[str]] = {}
+    sku_groups: dict[str, list[str]] = {}
     hint_signature_groups: dict[tuple[str, str, str, str], list[str]] = {}
 
     def _append_group(group_map: dict[Any, list[str]], key: Any, row_key: str) -> None:
@@ -554,7 +552,7 @@ def _build_items_assist(rows: list[dict[str, Any]], hints: list[dict[str, str]])
         location = _norm_merge_text(str(row.get("location", "") or ""))
         variation = _norm_merge_text(str(row.get("variation_options", "") or ""))
         title_buckets = _title_bucket_keys(title)
-        has_ebay, has_amz = _row_identity_bits(row)
+        skus = {str(row.get(field, "") or "").strip() for field in ("amazon_sku", "walmart_sku")} - {""}
 
         meta = {
             "row": row,
@@ -564,14 +562,17 @@ def _build_items_assist(rows: list[dict[str, Any]], hints: list[dict[str, str]])
             "location": location,
             "variation": variation,
             "title_buckets": title_buckets,
-            "has_ebay": has_ebay,
-            "has_amz": has_amz,
+            "platforms": {platform for platform, ident in (("ebay", ebay),
+                          ("amazon", row.get("amazon_sku") or asin), ("walmart", row.get("walmart_sku"))) if ident},
+            "skus": skus,
             "hint_signature": hint_signature if row_key in hint_matches else None,
         }
         row_meta_by_key[row_key] = meta
 
         _append_group(label_groups, label, row_key)
         _append_group(title_groups, title, row_key)
+        for sku in skus:
+            _append_group(sku_groups, sku, row_key)
         for bucket in title_buckets:
             _append_group(title_bucket_groups, bucket, row_key)
 
@@ -585,6 +586,8 @@ def _build_items_assist(rows: list[dict[str, Any]], hints: list[dict[str, str]])
             candidate_keys.update(title_groups.get(meta["title"], []))
         for bucket in meta["title_buckets"]:
             candidate_keys.update(title_bucket_groups.get(bucket, []))
+        for sku in meta["skus"]:
+            candidate_keys.update(sku_groups.get(sku, []))
         candidate_keys.discard(row_key)
 
         ranked: list[dict[str, Any]] = []
@@ -593,12 +596,7 @@ def _build_items_assist(rows: list[dict[str, Any]], hints: list[dict[str, str]])
             if other_meta is None:
                 continue
 
-            cross_platform = (
-                (meta["has_ebay"] and other_meta["has_amz"])
-                or (meta["has_amz"] and other_meta["has_ebay"])
-                or str(meta["row"].get("platform", "") or "") == "both"
-                or str(other_meta["row"].get("platform", "") or "") == "both"
-            )
+            cross_platform = len(meta["platforms"] | other_meta["platforms"]) > 1
 
             reasons: list[str] = []
             score = 0
@@ -612,6 +610,9 @@ def _build_items_assist(rows: list[dict[str, Any]], hints: list[dict[str, str]])
                 reasons.append("same hint import ties these platform IDs together")
             if not cross_platform and score == 0:
                 continue
+            if meta["skus"] & other_meta["skus"]:
+                score += 140
+                reasons.append("same marketplace SKU")
             if meta["label"] and meta["label"] == other_meta["label"]:
                 score += 140
                 reasons.append("same custom label")
@@ -839,6 +840,8 @@ def _row_key(row: dict[str, Any]) -> str:
         (row.get("amazon_asin", "") or "").strip().upper(),
         (row.get("item_id", "") or "").strip(),
     ]
+    if row.get("walmart_sku"):
+        parts.append(row["walmart_sku"].strip())
     return "|".join(parts)
 
 def _rows_with_keys(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2071,9 +2074,11 @@ def create_app() -> FastAPI:
 
     @app.post("/upload")
     async def upload(
+        request: Request,
         files: list[UploadFile] = File(...),
         quick_action: str = Form("upload_only"),
         auto_print_after_process: str | None = Form(None),
+        duplicate_action: str = Form("confirm"),
     ):
         saved = 0
         for file in files:
@@ -2086,7 +2091,12 @@ def create_app() -> FastAPI:
         if quick_action != "upload_process_open":
             return _redirect_ui("/", "Uploaded {count} file(s) to staging", count=saved)
 
-        result = batch_manager.process_batch()
+        result = await run_in_threadpool(batch_manager.process_batch, duplicate_action=duplicate_action)
+        if result.get("needs_duplicate_confirmation"):
+            return _templates().TemplateResponse(request=request, name="duplicate_confirm.html", context={
+                "duplicates": result["duplicates"], "quick_action": quick_action,
+                "auto_print_after_process": auto_print_after_process or "",
+            })
         if not result.get("ok"):
             return _redirect_ui("/", "Uploaded {count} file(s). Process failed: {error}", count=saved, error=result.get("error", _ui("Batch failed")))
 
@@ -2142,8 +2152,16 @@ def create_app() -> FastAPI:
         return _redirect_ui("/", "Cleared {count} staged file(s)", count=removed)
 
     @app.post("/process")
-    def process_batch():
-        result = batch_manager.process_batch()
+    async def process_batch(request: Request, duplicate_action: str = Form("confirm"),
+                            quick_action: str = Form("process"), auto_print_after_process: str | None = Form(None)):
+        if quick_action == "upload_process_open":
+            return await upload(request=request, files=[], quick_action=quick_action,
+                                auto_print_after_process=auto_print_after_process, duplicate_action=duplicate_action)
+        result = await run_in_threadpool(batch_manager.process_batch, duplicate_action=duplicate_action)
+        if result.get("needs_duplicate_confirmation"):
+            return _templates().TemplateResponse(request=request, name="duplicate_confirm.html", context={
+                "duplicates": result["duplicates"], "quick_action": "process", "auto_print_after_process": "",
+            })
         if not result.get("ok"):
             return _redirect_with_message("/", str(result.get("error", _ui("Batch failed"))))
         report = result.get("report", {})

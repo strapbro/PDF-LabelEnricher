@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from pypdf import PdfReader
+from openpyxl import load_workbook
 
 
 AMZ_ORDER_RE = re.compile(r"\b\d{3}-\d{7}-\d{7}\b")
@@ -20,6 +21,60 @@ ASIN_LINE_RE = re.compile(r"\basin\b\s*[:#-]?\s*(B[0-9A-Z]{9})\b", re.IGNORECASE
 STREET_SUFFIX_RE = re.compile(r"\b(st|street|rd|road|ave|avenue|dr|drive|ln|lane|blvd|boulevard|ct|court|cir|circle|way|pkwy|parkway|trl|trail)\b", re.IGNORECASE)
 CITY_STATE_ZIP_RE = re.compile(r"\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b")
 SCIENTIFIC_NOTATION_ID_RE = re.compile(r"^\d+(?:\.\d+)?E[+-]?\d+$", re.IGNORECASE)
+
+
+def parse_walmart_xlsx(path: Path) -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        if "Po Details" not in workbook.sheetnames:
+            raise ValueError(f"{path.name}: expected Walmart's Po Details worksheet.")
+        sheet = workbook["Po Details"]
+        # Walmart's export declares A1 as its used range despite containing rows.
+        sheet.reset_dimensions()
+        rows = sheet.iter_rows(values_only=True)
+        headers = [str(value or "").strip() for value in next(rows, ())]
+        required = {"PO#", "Order#", "Customer Name", "Zip", "SKU", "Qty", "Item Cost"}
+        if not required.issubset(headers):
+            raise ValueError(f"{path.name}: missing Walmart columns: {', '.join(sorted(required - set(headers)))}")
+        for number, values in enumerate(rows, 2):
+            row = dict(zip(headers, values))
+            order_id = str(row.get("Order#") or "").strip()
+            if not order_id:
+                continue
+            sku = str(row.get("SKU") or "").strip()
+            quantity = float(row.get("Qty") or 0)
+            if not sku or not quantity.is_integer() or quantity <= 0:
+                raise ValueError(f"{path.name}, row {number}: SKU and a positive whole quantity are required.")
+            postal = str(row.get("Zip") or "").strip().removesuffix(".0")
+            if postal.isdigit() and len(postal) < 5:
+                postal = postal.zfill(5)
+            date = str(row.get("Order Date") or "").strip()[:10]
+            record = records.setdefault(order_id, {
+                "platform": "walmart", "order_id": order_id,
+                "purchase_order_id": str(row.get("PO#") or "").strip(),
+                "ship_name": str(row.get("Customer Name") or "").strip(),
+                "ship_postal": postal, "tracking_number": str(row.get("Tracking Number") or "").strip(),
+                "items": [], "total_paid": 0.0, "subtotal_paid": 0.0,
+                "item_subtotal_paid": 0.0, "shipping_subtotal_paid": 0.0,
+                "sale_date": date, "sale_date_sort": date, "source": "walmart_report",
+            })
+            # Treat Item Cost as a unit price; the sample only verifies Qty 1.
+            item_subtotal = _money(row.get("Item Cost")) * int(quantity)
+            shipping = _money(row.get("Shipping Cost"))
+            subtotal = item_subtotal + shipping
+            total = subtotal + _money(row.get("Tax"))
+            record["items"].append({"item_id": sku, "item_sku": sku,
+                "title": str(row.get("Item Description") or "").strip(), "quantity": int(quantity),
+                "line_total": total, "line_subtotal": subtotal,
+                "item_subtotal": item_subtotal, "shipping_subtotal": shipping})
+            record["total_paid"] += total
+            record["subtotal_paid"] += subtotal
+            record["item_subtotal_paid"] += item_subtotal
+            record["shipping_subtotal_paid"] += shipping
+    finally:
+        workbook.close()
+    return records
 
 
 def _normalize_ebay_item_number(value: Any) -> str:

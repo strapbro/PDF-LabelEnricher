@@ -16,6 +16,8 @@ def parse_order_id_from_filename(path: Path) -> str:
 def detect_platform_from_path(path: Path) -> str:
     lower = path.name.lower()
     full = str(path).lower()
+    if "walmart" in lower or (lower.startswith("po_data") and path.suffix.lower() == ".xlsx"):
+        return "walmart"
     if lower.endswith(".txt") and "order report" in lower:
         return "amazon"
     if lower.endswith(".csv") and "ordersreport" in lower:

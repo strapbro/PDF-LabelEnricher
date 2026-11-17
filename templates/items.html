@@ -154,6 +154,7 @@
             <th data-sort="text" data-col-key="platform">{{ tr("Platform") }}</th>
             <th data-sort="text" data-col-key="ebay_item_number">{{ tr("eBay Item #") }}</th>
             <th data-sort="text" data-col-key="amazon_sku">{{ tr("Amazon SKU") }}</th>
+            <th data-sort="text" data-col-key="walmart_sku">{{ tr("Walmart SKU") }}</th>
             <th data-sort="text" data-col-key="amazon_asin">{{ tr("Amazon ASIN") }}</th>
             <th data-sort="text" data-col-key="item_title">{{ tr("Item Title") }}</th>
             <th data-sort="text" data-col-key="custom_label">{{ tr("Custom Label") }}</th>
@@ -173,10 +174,11 @@
           <tr class="{% if row.needs_review == '1' %}needs-review-row{% endif %}" data-row-key="{{ row_key }}">
             <td>
               <input type="hidden" name="row_{{ loop.index0 }}_row_key" value="{{ row_key }}">
-              {% if row.platform == 'amazon' %}{{ tr("Amazon") }}{% elif row.platform == 'ebay' %}{{ tr("eBay") }}{% elif row.platform == 'both' %}{{ tr("Both") }}{% else %}{{ row.platform }}{% endif %}
+              {% if row.platform == 'amazon' %}{{ tr("Amazon") }}{% elif row.platform == 'ebay' %}{{ tr("eBay") }}{% elif row.platform == 'walmart' %}{{ tr('Walmart') }}{% elif row.platform == 'both' %}{{ tr("Linked") }}{% else %}{{ row.platform }}{% endif %}
             </td>
             <td><div class="copy-field"><input name="row_{{ loop.index0 }}_ebay_item_number" value="{{ row.ebay_item_number or '' }}"><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
             <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_sku" value="{{ row.amazon_sku or '' }}"><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
+            <td><div class="copy-field"><input name="row_{{ loop.index0 }}_walmart_sku" value="{{ row.walmart_sku or '' }}"><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
             <td><div class="copy-field"><input name="row_{{ loop.index0 }}_amazon_asin" value="{{ row.amazon_asin or '' }}"><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
             <td><div class="copy-field"><input name="row_{{ loop.index0 }}_item_title" value="{{ row.item_title or '' }}"><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
             <td><div class="copy-field"><input name="row_{{ loop.index0 }}_custom_label" value="{{ row.custom_label or '' }}"><button type="button" class="clear-cell-btn" title="{{ tr('Clear label') }}" aria-label="{{ tr('Clear custom label') }}">X</button><button type="button" class="copy-btn" title="{{ tr('Copy') }}" aria-label="{{ tr('Copy to clipboard') }}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="4" rx="1" ry="1"></rect><rect x="5" y="7" width="14" height="14" rx="2" ry="2"></rect></svg></button></div></td>
@@ -242,6 +244,7 @@
             <th>{{ tr("Platform") }}</th>
             <th>{{ tr("eBay Item #") }}</th>
             <th>{{ tr("Amazon SKU") }}</th>
+            <th>{{ tr("Walmart SKU") }}</th>
             <th>{{ tr("Amazon ASIN") }}</th>
             <th>{{ tr("Item Title") }}</th>
             <th>{{ tr("Custom Label") }}</th>
@@ -369,19 +372,20 @@
 .items-table.mode-compact th:nth-child(1), .items-table.mode-compact td:nth-child(1) { width: 90px; }
 .items-table.mode-compact th:nth-child(2), .items-table.mode-compact td:nth-child(2) { width: 155px; }
 .items-table.mode-compact th:nth-child(3), .items-table.mode-compact td:nth-child(3) { width: 170px; }
-.items-table.mode-compact th:nth-child(4), .items-table.mode-compact td:nth-child(4) { width: 145px; }
-.items-table.mode-compact th:nth-child(5), .items-table.mode-compact td:nth-child(5) { width: 330px; }
-.items-table.mode-compact th:nth-child(6), .items-table.mode-compact td:nth-child(6) { width: 260px; }
-.items-table.mode-compact th:nth-child(7), .items-table.mode-compact td:nth-child(7) { width: 180px; }
-.items-table.mode-compact th:nth-child(8), .items-table.mode-compact td:nth-child(8) { width: 145px; }
-.items-table.mode-compact th:nth-child(9), .items-table.mode-compact td:nth-child(9) { width: 260px; }
-.items-table.mode-compact th:nth-child(10), .items-table.mode-compact td:nth-child(10) { width: 320px; }
-.items-table.mode-compact th:nth-child(11), .items-table.mode-compact td:nth-child(11) { width: 230px; }
-.items-table.mode-compact th:nth-child(12), .items-table.mode-compact td:nth-child(12) { width: 120px; }
-.items-table.mode-wide th:nth-child(5), .items-table.mode-wide td:nth-child(5) { width: 520px; }
-.items-table.mode-wide th:nth-child(6), .items-table.mode-wide td:nth-child(6) { width: 420px; }
-.items-table.mode-wide th:nth-child(9), .items-table.mode-wide td:nth-child(9) { width: 320px; }
-.items-table.mode-wide th:nth-child(10), .items-table.mode-wide td:nth-child(10) { width: 480px; }
+.items-table.mode-compact th:nth-child(4), .items-table.mode-compact td:nth-child(4) { width: 170px; }
+.items-table.mode-compact th:nth-child(5), .items-table.mode-compact td:nth-child(5) { width: 145px; }
+.items-table.mode-compact th:nth-child(6), .items-table.mode-compact td:nth-child(6) { width: 330px; }
+.items-table.mode-compact th:nth-child(7), .items-table.mode-compact td:nth-child(7) { width: 260px; }
+.items-table.mode-compact th:nth-child(8), .items-table.mode-compact td:nth-child(8) { width: 180px; }
+.items-table.mode-compact th:nth-child(9), .items-table.mode-compact td:nth-child(9) { width: 145px; }
+.items-table.mode-compact th:nth-child(10), .items-table.mode-compact td:nth-child(10) { width: 260px; }
+.items-table.mode-compact th:nth-child(11), .items-table.mode-compact td:nth-child(11) { width: 320px; }
+.items-table.mode-compact th:nth-child(12), .items-table.mode-compact td:nth-child(12) { width: 230px; }
+.items-table.mode-compact th:nth-child(13), .items-table.mode-compact td:nth-child(13) { width: 120px; }
+.items-table.mode-wide th:nth-child(6), .items-table.mode-wide td:nth-child(6) { width: 520px; }
+.items-table.mode-wide th:nth-child(7), .items-table.mode-wide td:nth-child(7) { width: 420px; }
+.items-table.mode-wide th:nth-child(10), .items-table.mode-wide td:nth-child(10) { width: 320px; }
+.items-table.mode-wide th:nth-child(11), .items-table.mode-wide td:nth-child(11) { width: 480px; }
 </style>
 
 <script>
@@ -433,14 +437,14 @@
     saveChangesBase: {{ tr("Save Changes")|tojson }},
     saveChangesQueued: {{ tr("Save Changes ({count} merges queued)", count="__COUNT__")|tojson }},
     confirmQueuedMerges: {{ tr("Save changes and apply {count} queued merge(s)?", count="__COUNT__")|tojson }},
-    mergePreview: {{ tr("Merge this row into:\n\n{preview}\n\nThis keeps one combined row with shared label/location and both platform IDs.", preview="__PREVIEW__")|tojson }},
+    mergePreview: {{ tr("Merge this row into:\n\n{preview}\n\nThis keeps one combined row with shared label/location and its marketplace IDs.", preview="__PREVIEW__")|tojson }},
     mergePreviewError: {{ tr("Could not build merge preview")|tojson }},
     mergeOldA: {{ tr("Old Row A")|tojson }},
     mergeOldB: {{ tr("Old Row B")|tojson }},
     mergeNew: {{ tr("Merged Result")|tojson }},
     platformAmazon: {{ tr("Amazon")|tojson }},
     platformEbay: {{ tr("eBay")|tojson }},
-    platformBoth: {{ tr("Both")|tojson }},
+    platformBoth: {{ tr("Linked")|tojson }},
     clearReviewProceed: {{ tr("Proceed with clearing review rows?")|tojson }},
     deleteAutoAdded: {{ tr("Also delete auto-added rows from items.csv? Click Cancel to keep rows and only clear flags.")|tojson }},
     pasteLinkFirst: {{ tr("Paste a link first.")|tojson }},

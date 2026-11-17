@@ -17,7 +17,8 @@ from .item_db import ItemDB
 from .label_sources import extract_archives, inset_letter_label, prepare_label_sources, restage_label_source, staged_files
 from .label_text_extractor import extract_label_signals
 from .label_matcher import match_label
-from .order_parser import parse_amazon_packing_slips, parse_amazon_tsv, parse_ebay_csv
+from .label_duplicates import find_duplicate_labels
+from .order_parser import parse_amazon_packing_slips, parse_amazon_tsv, parse_ebay_csv, parse_walmart_xlsx
 from .overlay_renderer import build_overlay_lines, build_compact_overlay_lines, create_backside_pdf, create_info_panel_overlay_pdf, create_overlay_pdf, create_summary_half_page, get_page_size
 from .pdf_merge import append_backside_page, merge_overlay_on_first_page, merge_overlays_on_first_page
 from .platform_detector import detect_platform_from_path, parse_order_id_from_filename
@@ -82,6 +83,7 @@ class BatchManager:
         self.item_db = ItemDB(settings.items_csv_path, settings.config.get("new_item_defaults", {}))
         self.unresolved_queue_path = settings.processed_root_folder / "unresolved_queue.json"
         self._label_sources: dict[str, dict[str, Any]] = {}
+        self._label_signal_cache: dict[tuple[str, bool], dict[str, Any]] = {}
 
     def _batch_resolution_overrides_path(self, batch_dir: Path | None) -> Path | None:
         if batch_dir is None:
@@ -288,6 +290,7 @@ class BatchManager:
             "png_count": png_count,
             "ebay_csv_found": ebay_csv is not None,
             "amazon_txt_found": amazon_txt is not None,
+            "walmart_xlsx_found": any(p.suffix.lower() == ".xlsx" for p in files),
             "unresolved_count": len(unresolved),
             "files": [str(p) for p in files],
             "staged_file_names": [self._describe_staged_file(p) for p in files],
@@ -327,6 +330,8 @@ class BatchManager:
         shutil.rmtree(runtime, ignore_errors=True)
         sources = prepare_label_sources(self.settings.incoming_batch_folder, label_pdfs, runtime, self.settings.config)
         self._label_sources = {Path(s["pdf"]).name: s for s in sources}
+        source_ids = {source["source_id"] for source in sources}
+        self._label_signal_cache = {key: value for key, value in self._label_signal_cache.items() if key[0] in source_ids}
         return [Path(s["pdf"]) for s in sources]
 
     def _find_packing_slips(self, files: list[Path]) -> list[Path]:
@@ -447,6 +452,8 @@ class BatchManager:
             kind = 'Amazon TXT'
         elif path.suffix.lower() == '.csv' and 'ordersreport' in lower:
             kind = 'eBay CSV'
+        elif path.suffix.lower() == '.xlsx':
+            kind = 'Walmart XLSX'
         elif path.suffix.lower() == '.zip':
             kind = 'Amazon ZIP' if ('amzn' in lower or 'amazon' in lower) else 'ZIP'
         elif path.suffix.lower() == '.png':
@@ -482,8 +489,12 @@ class BatchManager:
             for rec in parsed_ebay.values():
                 self._merge_order_record(orders, rec)
 
+        for walmart_xlsx in (p for p in files if p.suffix.lower() == ".xlsx"):
+            for record in parse_walmart_xlsx(walmart_xlsx).values():
+                self._merge_order_record(orders, record)
+
         amazon_label_pdfs = [p for p in label_pdfs
-                             if self._label_sources.get(p.name, {}).get("platform", detect_platform_from_path(p)) != "ebay"]
+                             if self._label_sources.get(p.name, {}).get("platform", detect_platform_from_path(p)) not in ("ebay", "walmart")]
         amazon_ids = self._extract_amazon_order_ids_from_labels(amazon_label_pdfs)
         filter_by_ids = self._should_filter_amazon_report_by_label_ids(amazon_label_pdfs, amazon_ids)
         for amazon_txt in amazon_txts:
@@ -614,18 +625,18 @@ class BatchManager:
         return {"processed_slips": len(slips), "items_touched": touched}
     def _label_platform_partition(self, label_pdf: Path, signals: dict[str, Any]) -> str:
         sig = str(signals.get("platform_hint", "") or "").strip().lower()
-        if sig in ("amazon", "ebay"):
+        if sig in ("amazon", "ebay", "walmart"):
             return sig
         name_hint = str(detect_platform_from_path(label_pdf) or "").strip().lower()
-        if name_hint in ("amazon", "ebay"):
+        if name_hint in ("amazon", "ebay", "walmart"):
             return name_hint
         return "unknown"
 
     def _partition_orders_by_platform(self, orders: dict[str, dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
-        out: dict[str, dict[str, dict[str, Any]]] = {"amazon": {}, "ebay": {}, "unknown": {}}
+        out: dict[str, dict[str, dict[str, Any]]] = {"amazon": {}, "ebay": {}, "walmart": {}, "unknown": {}}
         for order_id, order in orders.items():
             platform = str(order.get("platform", "") or "").strip().lower()
-            if platform not in ("amazon", "ebay"):
+            if platform not in ("amazon", "ebay", "walmart"):
                 platform = "unknown"
             out[platform][order_id] = order
         return out
@@ -637,17 +648,12 @@ class BatchManager:
         all_orders: dict[str, dict[str, Any]],
     ) -> tuple[dict[str, dict[str, Any]], str]:
         lp = str(label_platform or "").strip().lower()
-        amz = orders_partition.get("amazon", {}) or {}
-        ebay = orders_partition.get("ebay", {}) or {}
-        unknown = orders_partition.get("unknown", {}) or {}
-        if lp in ("amazon", "ebay"):
+        if lp in ("amazon", "ebay", "walmart"):
             return (orders_partition.get(lp, {}) or {}), lp
-        if amz and not ebay:
-            return amz, "amazon"
-        if ebay and not amz:
-            return ebay, "ebay"
-        if unknown and not amz and not ebay:
-            return unknown, ""
+        populated = [(platform, rows) for platform, rows in orders_partition.items() if rows]
+        if len(populated) == 1:
+            platform, rows = populated[0]
+            return rows, "" if platform == "unknown" else platform
         # The matcher requires unique exact destination evidence for unknown labels.
         return all_orders, ""
     def _build_preflight_partition(
@@ -657,7 +663,7 @@ class BatchManager:
         signals_for: Any,
     ) -> dict[str, Any]:
         label_platforms: dict[str, str] = {}
-        label_counts = {"amazon": 0, "ebay": 0, "unknown": 0}
+        label_counts = {"amazon": 0, "ebay": 0, "walmart": 0, "unknown": 0}
         for label_pdf in label_pdfs:
             platform = self._label_platform_partition(label_pdf, signals_for(label_pdf))
             label_platforms[str(label_pdf)] = platform
@@ -666,6 +672,7 @@ class BatchManager:
         order_counts = {
             "amazon": len(orders_partition.get("amazon", {}) or {}),
             "ebay": len(orders_partition.get("ebay", {}) or {}),
+            "walmart": len(orders_partition.get("walmart", {}) or {}),
             "unknown": len(orders_partition.get("unknown", {}) or {}),
         }
         return {
@@ -675,7 +682,9 @@ class BatchManager:
             "order_counts": order_counts,
         }
 
-    def process_batch(self) -> dict[str, Any]:
+    def process_batch(self, duplicate_action: str = "confirm") -> dict[str, Any]:
+        if duplicate_action not in ("confirm", "skip", "include"):
+            raise ValueError("Choose confirm, skip, or include for duplicate labels.")
         logging.info("Batch start")
         try:
             self._extract_zip_files()
@@ -712,9 +721,50 @@ class BatchManager:
             logging.info("Batch end (packing slip sync): %s", report["summary"])
             return {"ok": True, "batch_dir": str(batch_dir), "report": report}
 
-        orders, build_warnings = self._build_orders(files, label_pdfs)
+        try:
+            orders, build_warnings = self._build_orders(files, label_pdfs)
+        except Exception as error:
+            return {"ok": False, "error": f"Could not read order report: {error}"}
         if not orders:
-            return {"ok": False, "error": "No order data found. Add eBay OrdersReport CSV and/or Amazon Order Report TXT."}
+            return {"ok": False, "error": "No order data found. Add eBay OrdersReport CSV, Amazon Order Report TXT, or Walmart PO Data XLSX."}
+
+        signals_cache: dict[str, dict[str, Any]] = {}
+        def _signals_for(path: Path) -> dict[str, Any]:
+            key = path.name
+            if key not in signals_cache:
+                source_id = self._label_sources[path.name]["source_id"]
+                text_key = (source_id, False)
+                if text_key not in self._label_signal_cache:
+                    self._label_signal_cache[text_key] = extract_label_signals(path, allow_ocr=False)
+                signals = self._label_signal_cache[text_key].copy()
+                hard_ids = (parse_order_id_from_filename(path), signals.get("order_id_amazon"), signals.get("order_id_ebay"))
+                tracking = _norm_tracking_value(signals.get("tracking_number", ""))
+                has_exact_tracking = bool(tracking and any(_norm_tracking_value(o.get("tracking_number", "")) == tracking for o in orders.values()))
+                if not any(oid in orders for oid in hard_ids if oid) and not has_exact_tracking and (not signals.get("recipient_name") or not signals.get("ship_postal")):
+                    ocr_key = (source_id, True)
+                    if ocr_key not in self._label_signal_cache:
+                        self._label_signal_cache[ocr_key] = extract_label_signals(path)
+                    signals = self._label_signal_cache[ocr_key].copy()
+                signals_cache[key] = signals
+                source_hint = self._label_sources.get(path.name, {}).get("platform")
+                if source_hint in ("amazon", "ebay", "walmart"):
+                    signals_cache[key]["platform_hint"] = source_hint
+            return signals_cache[key]
+        try:
+            duplicates = find_duplicate_labels(list(self._label_sources.values()), _signals_for,
+                                               self.settings.processed_root_folder)
+        except (OSError, ValueError) as error:
+            return {"ok": False, "error": f"Could not check for duplicate labels: {error}"}
+        if duplicates and duplicate_action == "confirm":
+            return {"ok": False, "needs_duplicate_confirmation": True, "duplicates": duplicates}
+        skipped = {row["label_name"] for row in duplicates} if duplicate_action == "skip" else set()
+        label_pdfs = [path for path in label_pdfs if path.name not in skipped]
+        self._label_sources = {name: source for name, source in self._label_sources.items() if name not in skipped}
+        if not label_pdfs:
+            self.clear_staged_files()
+            return {"ok": True, "all_duplicates_skipped": True,
+                    "report": {"results": [], "summary": {"matched": 0, "unresolved": 0, "errors": 0,
+                              "duplicates_skipped": len(skipped)}}}
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         batch_dir = self.settings.processed_root_folder / f"batch_{ts}"
@@ -738,7 +788,7 @@ class BatchManager:
         order_source_dir.mkdir(parents=True, exist_ok=True)
         packing_slips = set(self._find_packing_slips(files))
         for source in files:
-            if source.suffix.lower() not in (".txt", ".csv") and source not in packing_slips:
+            if source.suffix.lower() not in (".txt", ".csv", ".xlsx") and source not in packing_slips:
                 continue
             relative = source.relative_to(self.settings.incoming_batch_folder)
             target = order_source_dir / relative
@@ -746,27 +796,13 @@ class BatchManager:
             shutil.copy2(source, target)
 
         unresolved_queue = self._load_unresolved_queue()
-        signals_cache: dict[str, dict[str, Any]] = {}
-        def _signals_for(path: Path) -> dict[str, Any]:
-            key = str(path)
-            if key not in signals_cache:
-                signals = extract_label_signals(path, allow_ocr=False)
-                hard_ids = (parse_order_id_from_filename(path), signals.get("order_id_amazon"), signals.get("order_id_ebay"))
-                tracking = _norm_tracking_value(signals.get("tracking_number", ""))
-                has_exact_tracking = bool(tracking and any(_norm_tracking_value(o.get("tracking_number", "")) == tracking for o in orders.values()))
-                if not any(oid in orders for oid in hard_ids if oid) and not has_exact_tracking and (not signals.get("recipient_name") or not signals.get("ship_postal")):
-                    signals = extract_label_signals(path)
-                signals_cache[key] = signals
-                source_hint = self._label_sources.get(path.name, {}).get("platform")
-                if source_hint in ("amazon", "ebay"):
-                    signals_cache[key]["platform_hint"] = source_hint
-            return signals_cache[key]
         preflight = self._build_preflight_partition(label_pdfs, orders, _signals_for)
         report: dict[str, Any] = {
             "timestamp": ts,
             "results": [],
             "warnings": build_warnings,
             "summary": {
+                "duplicates_skipped": len(skipped),
                 "matched": 0,
                 "unresolved": 0,
                 "errors": 0,
@@ -2184,7 +2220,7 @@ class BatchManager:
             return {"ok": False, "error": "Could not restage files from latest archive."}
 
         source_batch_dir = archive.parent
-        result = self.process_batch()
+        result = self.process_batch(duplicate_action="include")
         reapplied = self._reapply_resolution_overrides(source_batch_dir)
         result["reapplied_resolutions"] = int(reapplied.get("applied", 0) or 0)
         result["remaining_resolution_overrides"] = int(reapplied.get("remaining", 0) or 0)
@@ -2232,7 +2268,7 @@ class BatchManager:
             return {"ok": False, "error": "Could not restage files from latest archive."}
 
         source_batch_dir = archive.parent
-        result = self.process_batch()
+        result = self.process_batch(duplicate_action="include")
         reapplied = self._reapply_resolution_overrides(source_batch_dir)
         result["reapplied_resolutions"] = int(reapplied.get("applied", 0) or 0)
         result["remaining_resolution_overrides"] = int(reapplied.get("remaining", 0) or 0)

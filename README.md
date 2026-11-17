@@ -6,7 +6,7 @@ It is designed for teams that print marketplace labels in batches and need fast 
 
 ## What It Does
 
-- Processes eBay and Amazon label batches locally
+- Processes eBay, Amazon and Walmart label batches locally
 - Reads order data from uploaded marketplace exports when available
 - Matches label files to item records in `items.csv`
 - Prints overlay text into configured label margins or onto follow-up pages
@@ -121,6 +121,48 @@ the Letter page. This does not change the image scale or require a format mode.
 Run regression checks with `python -m unittest discover -s tests -v`. Tests create
 synthetic labels and reports in temporary directories; customer data should
 remain in ignored local runtime folders.
+
+## Walmart Orders And Duplicate Labels
+
+Upload Walmart's original `PO_Data*.xlsx` order export alongside the combined
+label PDF through the Dashboard. The `Po Details` sheet supplies order IDs,
+recipient details, SKU, quantities and amounts. Walmart items use their SKU as
+the initial custom label and enter Review Items for checking; edits are retained.
+Walmart SKUs have their own column and do not automatically share Amazon mappings.
+The existing **Merge Into** selections also support Walmart, Amazon and eBay in
+one item record. Matching SKUs or the existing label/title/location rules can
+suggest a merge; no merge is automatic. Choose the item whose custom label and
+location you want to keep, then click **Save Changes**. The resulting linked row
+retains its Walmart SKU, Amazon SKU/ASIN and eBay item number for future batches.
+
+Image-only Walmart USPS labels use offline Windows OCR. Matching requires a unique
+exact recipient and ZIP; uncertain matches stay in Unprocessed. The supplied USPS
+format also gets a focused recipient read to avoid adjacent barcode interference.
+Full 4x6 labels are placed at their original physical size on Letter paper, leaving
+the existing margins for enrichment. The legacy
+`input_normalization.amazon_4x6_letter_rect` setting controls all 4x6 placement,
+including Walmart.
+
+Dashboard processing checks individual label artwork and readable tracking numbers
+for duplicates within the staged batch and against successful processing in the
+last 24 hours. A confirmation screen lists file/page, recipient, tracking, previous
+batch and processing time. Choose **Skip duplicates and continue** or **Include
+duplicates and continue**; Cancel leaves staging intact. A renamed or overlapping
+PDF can still contain duplicates. The check also covers Amazon PNG/ZIP inputs.
+Processing history is local to this app's processed folder and does not prove a
+label was physically printed. Failed or unresolved labels are not counted as
+previously processed. The existing explicit reprocess actions remain available
+for intentional regeneration after item/layout changes or a printer problem.
+Unchanged staged labels reuse extracted text/OCR during duplicate confirmation
+and reprocessing in the same app session. Changed uploads are read again.
+
+Walmart amounts assume `Item Cost` is the unit price: item subtotal is
+`Qty × Item Cost`, with reported shipping and tax each added once per row.
+This follows Walmart's supplier order-interface convention for unit item cost
+(https://developer.walmart.com/suppliers/docs/order-flow). The initial Marketplace
+XLSX sample has only quantity-one rows, so applying that convention to this export
+is an assumption pending a real multi-quantity example. A synthetic quantity-two
+regression check verifies the calculation through the printed label.
 
 ## Manual Entry Workflow
 
