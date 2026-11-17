@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>{{ tr("Duplicate labels detected") }}</h2>
+  <p>{{ tr("These labels repeat within this batch or were processed in the last 24 hours. Processing does not confirm that they were printed.") }}</p>
+  <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>{{ tr("Label") }}</th><th>{{ tr("Recipient / Tracking") }}</th><th>{{ tr("Previous source") }}</th><th>{{ tr("Processed at") }}</th></tr></thead>
+      <tbody>
+      {% for row in duplicates %}
+        <tr>
+          <td>{{ row.file }} · {{ tr("Page") }} {{ row.page }}</td>
+          <td>{{ row.recipient or '-' }}<br>{{ row.tracking or '-' }}</td>
+          <td>{{ row.previous_file }} · {{ tr("Page") }} {{ row.previous_page }}<br>{{ row.previous_batch }}</td>
+          <td>{{ tr(row.processed_at) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form action="/process" method="post" class="actions" style="margin-top:20px;display:flex;gap:12px;flex-wrap:wrap">
+    <input type="hidden" name="quick_action" value="{{ quick_action }}">
+    <input type="hidden" name="auto_print_after_process" value="{{ auto_print_after_process }}">
+    <button type="submit" class="btn" name="duplicate_action" value="skip">{{ tr("Skip duplicates and continue") }}</button>
+    <button type="submit" class="btn btn-outline" name="duplicate_action" value="include">{{ tr("Include duplicates and continue") }}</button>
+    <a href="/" class="btn btn-outline">{{ tr("Cancel") }}</a>
+  </form>
+</section>
+{% endblock %}

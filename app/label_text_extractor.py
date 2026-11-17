@@ -511,6 +511,13 @@ def _pick_zip_from_ocr_lines(lines: list[str]) -> str:
 
 def _recipient_address_from_lines(lines: list[str]) -> tuple[str, str]:
     """Require an anchored destination, a street and a city/state/ZIP together."""
+    # Walmart USPS labels omit SHIP TO, but delimit the destination after this
+    # carrier instruction. Never treat the preceding return address as recipient.
+    if any("WALMART" in line.upper() for line in lines) and any("USPS" in line.upper() for line in lines):
+        boundary = next((i for i, line in enumerate(lines)
+                         if re.search(r"CARRIER.*LEAVE.*NO RESPONSE", line, re.I)), None)
+        if boundary is not None:
+            lines = ["SHIP TO:", *lines[boundary + 1:]]
     cleaned: list[str] = []
     active = False
     for line in lines:
@@ -540,7 +547,7 @@ def _recipient_address_from_lines(lines: list[str]) -> tuple[str, str]:
         if "SHIP TO:" in block:
             block = block[:block.index("SHIP TO:")]
         for j, city in enumerate(block):
-            postal = re.search(r"\b[A-Z]{2}\s+(\d{5})(?:\s*-\s*(\d{4}))?\b", city.upper())
+            postal = re.search(r"\b[A-Z]{2}[,\s]+(\d{5})(?:\s*-\s*(\d{4}))?\b", city.upper())
             if not postal or j < 2:
                 continue
             before = block[:j]
@@ -567,6 +574,26 @@ def _ocr_shipping_label(pdf_path: Path) -> tuple[list[str], str]:
                 image_path = Path(temporary) / f"label_{rotation}.png"
                 document[0].get_pixmap(matrix=fitz.Matrix(3, 3).prerotate(rotation), alpha=False).save(str(image_path))
                 lines = _ocr_windows_image_lines(image_path)
+                if (any("WALMART" in line.upper() for line in lines)
+                        and any("USPS" in line.upper() for line in lines)):
+                    images = document[0].get_images(full=True)
+                    boundary = next((i for i, line in enumerate(lines)
+                                     if re.search(r"CARRIER.*LEAVE.*NO RESPONSE", line, re.I)), None)
+                    if len(images) == 1 and boundary is not None and images[0][3] > images[0][2]:
+                        # The adjacent 2D barcode confuses surname OCR on these
+                        # Walmart USPS images. Read the address alone at native resolution.
+                        image = document.extract_image(images[0][0])["image"]
+                        with fitz.open(stream=image) as artwork:
+                            rect = artwork[0].rect
+                            crop = fitz.Rect(rect.width * .12, rect.height * .40, rect.width * .98, rect.height * .62)
+                            cropped_path = Path(temporary) / "walmart_recipient.png"
+                            artwork[0].get_pixmap(matrix=fitz.Matrix(3, 3), clip=crop, alpha=False).save(cropped_path)
+                        cropped = _ocr_windows_image_lines(cropped_path)
+                        if _recipient_address_from_lines(["SHIP TO:", *cropped])[0]:
+                            end = next((i + 1 for i in range(boundary + 1, len(lines))
+                                        if re.search(r"\b[A-Z]{2}[,\s]+\d{5}\b", lines[i])), None)
+                            if end is not None:
+                                lines = [*lines[:boundary + 1], *cropped, *lines[end:]]
                 if len(" ".join(lines)) > len(" ".join(best)):
                     best = lines
                 if _recipient_address_from_lines(lines)[0] or AMZ_ORDER_RE.search(" ".join(lines)) or EBAY_ORDER_RE.search(" ".join(lines)):
@@ -649,6 +676,8 @@ def extract_label_signals(pdf_path: Path, allow_ocr: bool = True) -> dict[str, A
         platform_hint = "amazon"
     elif "ebay" in lower or "ebay international shipping" in lower or _looks_like_ebay_label_pdf(pdf_path):
         platform_hint = "ebay"
+    elif "walmart" in lower:
+        platform_hint = "walmart"
 
     return {
         "text": search_text,

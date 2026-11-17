@@ -22,6 +22,7 @@ FIELDS = [
     "ebay_item_number",
     "amazon_sku",
     "amazon_asin",
+    "walmart_sku",
     "item_id",  # legacy compatibility column
     "item_title",
     "custom_label",
@@ -47,6 +48,7 @@ class ItemRecord:
     ebay_item_number: str = ""
     amazon_sku: str = ""
     amazon_asin: str = ""
+    walmart_sku: str = ""
     item_id: str = ""
     item_title: str = ""
     custom_label: str = ""
@@ -71,6 +73,7 @@ class ItemRecord:
                 "ebay_item_number": self.ebay_item_number,
                 "amazon_sku": self.amazon_sku,
                 "amazon_asin": self.amazon_asin,
+                "walmart_sku": self.walmart_sku,
                 "item_id": self.item_id,
                 "item_title": self.item_title,
                 "custom_label": self.custom_label,
@@ -95,11 +98,13 @@ def _is_asin(value: str) -> bool:
     return bool(ASIN_RE.fullmatch((value or "").strip()))
 
 
-def _platform_for_ids(ebay_item_number: str, amazon_sku: str, amazon_asin: str, fallback: str) -> str:
+def _platform_for_ids(ebay_item_number: str, amazon_sku: str, amazon_asin: str, fallback: str, walmart_sku: str = "") -> str:
     has_ebay = bool(ebay_item_number.strip())
     has_amz = bool(amazon_sku.strip() or amazon_asin.strip())
-    if has_ebay and has_amz:
+    if sum((has_ebay, has_amz, bool(walmart_sku))) > 1:
         return "both"
+    if walmart_sku:
+        return "walmart"
     if has_ebay:
         return "ebay"
     if has_amz:
@@ -116,6 +121,8 @@ def _normalize_row(row: dict[str, str]) -> dict[str, str]:
     if legacy_id:
         if p == "ebay" and not clean.get("ebay_item_number"):
             clean["ebay_item_number"] = legacy_id
+        elif p == "walmart" and not clean.get("walmart_sku"):
+            clean["walmart_sku"] = legacy_id
         elif p == "amazon" and not clean.get("amazon_sku") and not clean.get("amazon_asin"):
             if _is_asin(legacy_id):
                 clean["amazon_asin"] = legacy_id.upper()
@@ -126,12 +133,12 @@ def _normalize_row(row: dict[str, str]) -> dict[str, str]:
     clean["variation_options"] = (clean.get("variation_options", "") or "").strip()
 
     lp = (clean.get("linked_platform", "") or "").strip().lower()
-    if lp not in ("", "amazon", "ebay"):
+    if lp not in ("", "amazon", "ebay", "walmart"):
         lp = ""
     clean["linked_platform"] = lp
 
     lit = (clean.get("linked_id_type", "") or "").strip().lower()
-    if lit not in ("", "amazon_asin", "amazon_sku", "ebay_item_number", "item_id"):
+    if lit not in ("", "amazon_asin", "amazon_sku", "ebay_item_number", "walmart_sku", "item_id"):
         lit = ""
     clean["linked_id_type"] = lit
 
@@ -145,21 +152,25 @@ def _normalize_row(row: dict[str, str]) -> dict[str, str]:
     clean["show_location"] = "1"
     clean["show_title"] = "1" if str(clean.get("show_title", "0")).strip() == "1" else "0"
     clean["needs_review_reason"] = (clean.get("needs_review_reason", "") or "").strip()
-    clean["platform"] = _platform_for_ids(clean["ebay_item_number"], clean["amazon_sku"], clean["amazon_asin"], p)
+    clean["platform"] = _platform_for_ids(clean["ebay_item_number"], clean["amazon_sku"], clean["amazon_asin"], p, clean["walmart_sku"])
 
     # keep legacy item_id populated for backward compatibility
-    if clean["platform"] == "ebay":
+    if clean["platform"] == "walmart":
+        clean["item_id"] = clean["walmart_sku"]
+    elif clean["platform"] == "ebay":
         clean["item_id"] = clean.get("ebay_item_number", "")
     elif clean["platform"] == "amazon":
         clean["item_id"] = clean.get("amazon_sku", "") or clean.get("amazon_asin", "")
     elif clean["platform"] == "both":
-        clean["item_id"] = clean.get("amazon_sku", "") or clean.get("ebay_item_number", "") or clean.get("amazon_asin", "")
+        clean["item_id"] = clean.get("amazon_sku", "") or clean.get("ebay_item_number", "") or clean.get("amazon_asin", "") or clean["walmart_sku"]
 
     return clean
 
 
 def _row_ids(row: dict[str, str], platform: str) -> list[str]:
     p = platform.lower()
+    if p == "walmart":
+        return [row["walmart_sku"]] if row.get("walmart_sku") else []
     if p == "ebay":
         return [x for x in [row.get("ebay_item_number", "").strip()] if x]
     if p == "amazon":
@@ -176,7 +187,7 @@ def _merge_two_rows(base: dict[str, str], other: dict[str, str]) -> dict[str, st
     out = dict(base)
 
     # IDs: preserve both sets.
-    for key in ["ebay_item_number", "amazon_sku", "amazon_asin"]:
+    for key in ["ebay_item_number", "amazon_sku", "amazon_asin", "walmart_sku"]:
         if not out.get(key) and other.get(key):
             out[key] = other[key]
 
@@ -214,9 +225,9 @@ def _merge_two_rows(base: dict[str, str], other: dict[str, str]) -> dict[str, st
 
 def _merge_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     # Intentionally do NOT auto-merge rows by inferred IDs.
-    # Cross-platform linking is manual-only via linked_* fields.
+    # Marketplace IDs are combined only by explicit user merges or links.
     out: list[dict[str, str]] = []
-    seen: set[tuple[str, str, str, str, str]] = set()
+    seen: set[tuple[str, ...]] = set()
     for raw in rows:
         row = _normalize_row(raw)
         sig = (
@@ -225,6 +236,7 @@ def _merge_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             (row.get("amazon_sku", "") or "").strip(),
             (row.get("amazon_asin", "") or "").strip().upper(),
             (row.get("item_id", "") or "").strip(),
+            (row.get("walmart_sku", "") or "").strip(),
         )
         if sig in seen:
             continue
@@ -327,6 +339,8 @@ class ItemDB:
             (row.get("amazon_asin", "") or "").strip().upper(),
             (row.get("item_id", "") or "").strip(),
         ]
+        if row.get("walmart_sku"):
+            parts.append(row["walmart_sku"].strip())
         return "|".join(parts)
 
     def _append_change_log(self, action: str, before_rows: list[dict[str, str]], after_rows: list[dict[str, str]]) -> None:
@@ -452,10 +466,12 @@ class ItemDB:
                 idx[("ebay", ident)] = row
             for ident in _row_ids(row, "amazon"):
                 idx[("amazon", ident)] = row
+            for ident in _row_ids(row, "walmart"):
+                idx[("walmart", ident)] = row
             # legacy mapping fallback (limit Amazon legacy matching to rows lacking explicit Amazon IDs).
             legacy = (row.get("item_id") or "").strip()
             if legacy:
-                if row.get("platform") in ("ebay", "both"):
+                if row.get("platform") == "ebay":
                     idx[("ebay", legacy)] = row
         return idx
 
@@ -470,7 +486,7 @@ class ItemDB:
             if i in _row_ids(row, p):
                 return row
             # Legacy fallback only for eBay lookups.
-            if p == "ebay" and i == (row.get("item_id") or "").strip():
+            if p == "ebay" and row.get("platform") == "ebay" and i == (row.get("item_id") or "").strip():
                 return row
         return None
 
@@ -504,10 +520,11 @@ class ItemDB:
             platform=p,
             ebay_item_number=iid if p == "ebay" else "",
             amazon_sku=iid if p == "amazon" and not _is_asin(iid) else "",
+            walmart_sku=iid if p == "walmart" else "",
             amazon_asin=(asin or (iid if p == "amazon" and _is_asin(iid) else "")).upper(),
             item_id=iid,
             item_title=(title or "")[:220].strip(),
-            custom_label=(title or "")[:80].strip(),
+            custom_label=iid if p == "walmart" else (title or "")[:80].strip(),
             location="",
             show_label=int(bool(self.defaults.get("show_label", True))),
             show_qty=1,
@@ -558,6 +575,7 @@ class ItemDB:
 
                 row["ebay_item_number"] = form.get(prefix + "_ebay_item_number", row.get("ebay_item_number", "")).strip()
                 row["amazon_sku"] = form.get(prefix + "_amazon_sku", row.get("amazon_sku", "")).strip()
+                row["walmart_sku"] = form.get(prefix + "_walmart_sku", row.get("walmart_sku", "")).strip()
                 row["amazon_asin"] = form.get(prefix + "_amazon_asin", row.get("amazon_asin", "")).strip().upper()
                 row["item_title"] = form.get(prefix + "_item_title", row.get("item_title", "")).strip()
                 row["custom_label"] = form.get(prefix + "_custom_label", row.get("custom_label", "")).strip()
@@ -635,6 +653,7 @@ class ItemDB:
                     continue
                 row["ebay_item_number"] = form.get(prefix + "ebay_item_number", row.get("ebay_item_number", "")).strip()
                 row["amazon_sku"] = form.get(prefix + "amazon_sku", row.get("amazon_sku", "")).strip()
+                row["walmart_sku"] = form.get(prefix + "walmart_sku", row.get("walmart_sku", "")).strip()
                 row["amazon_asin"] = form.get(prefix + "amazon_asin", row.get("amazon_asin", "")).strip().upper()
                 row["item_title"] = form.get(prefix + "item_title", row.get("item_title", "")).strip()
                 row["custom_label"] = form.get(prefix + "custom_label", row.get("custom_label", "")).strip()

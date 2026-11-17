@@ -1,7 +1,8 @@
 <!doctype html>
-<html lang="{{ ui_language_mode|default('en') }}">
+<html lang="{{ ui_language_mode|default('en') }}" style="color-scheme: {{ ui_theme_mode|default('dark') }}; background-color: {{ '#eef5f4' if ui_theme_mode|default('dark') == 'light' else '#06101f' }};">
 <head>
   <meta charset="utf-8">
+  <meta name="color-scheme" content="{{ ui_theme_mode|default('dark') }}">
   <title>{{ tr("Label Enricher") }}</title>
   <link rel="icon" type="image/svg+xml" href="/static/app_icon_source.svg?v=7">
   <link rel="icon" type="image/x-icon" href="/static/app_icon.ico?v=7">

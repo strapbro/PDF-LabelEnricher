@@ -9,7 +9,7 @@
   <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
     <input id="fileInput" type="file" name="files" multiple required style="display:none;">
     <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="{{ tr('Drop files or click to choose files') }}">
-      <div class="drop-title">{{ tr("Drag & drop .zip/.pdf/.png/.csv/.txt here") }}</div>
+      <div class="drop-title">{{ tr("Drag & drop .zip/.pdf/.png/.csv/.txt/.xlsx here") }}</div>
       <div class="drop-sub">{{ tr("or click anywhere in this box to choose files") }}</div>
       <div class="drop-choose">{{ tr("Choose Files") }}</div>
     </div>
@@ -50,6 +50,10 @@
   <div class="card stat-card {{ 'stat-ok' if status.amazon_txt_found else 'stat-miss' }}">
     <div class="stat-label">{{ tr("Amazon TXT") }}</div>
     <div class="stat-value">{{ tr('Yes') if status.amazon_txt_found else tr('None') }}</div>
+  </div>
+  <div class="card stat-card {{ 'stat-ok' if status.walmart_xlsx_found else 'stat-miss' }}">
+    <div class="stat-label">{{ tr("Walmart XLSX") }}</div>
+    <div class="stat-value">{{ tr('Yes') if status.walmart_xlsx_found else tr('None') }}</div>
   </div>
   <div class="card stat-card {{ 'stat-alert' if status.unresolved_count > 0 else '' }}">
     <div class="stat-label">{{ tr("Unprocessed Queue") }}</div>
@@ -138,9 +142,10 @@
     <ul>
       {% for r in needs_review_rows %}
         <li>
-          {% if r.platform == 'amazon' %}{{ tr("Amazon") }}{% elif r.platform == 'ebay' %}{{ tr("eBay") }}{% elif r.platform == 'both' %}{{ tr("Both") }}{% else %}{{ r.platform }}{% endif %}
+          {% if r.platform == 'amazon' %}{{ tr("Amazon") }}{% elif r.platform == 'ebay' %}{{ tr("eBay") }}{% elif r.platform == 'both' %}{{ tr("Linked") }}{% else %}{{ r.platform }}{% endif %}
           | {{ tr("eBay Item #") }} {{ r.ebay_item_number or '-' }}
           | {{ tr("Amazon SKU") }} {{ r.amazon_sku or '-' }}
+          {% if r.walmart_sku %}| {{ tr("Walmart SKU") }} {{ r.walmart_sku }}{% endif %}
           | {{ tr("ASIN") }} {{ r.amazon_asin or '-' }}
           | {{ r.custom_label or r.item_title or tr('No label') }}{% if r.needs_review_reason %} | {{ tr('Reason:') }} {{ tr(r.needs_review_reason) }}{% endif %}
         </li>
@@ -306,6 +311,7 @@ function refreshPending() {
       return T.csv;
     }
     if (lower.endsWith('.txt')) return T.amazonTxt;
+    if (lower.endsWith('.xlsx')) return 'Walmart XLSX';
     if (lower.endsWith('.png')) return T.png;
     if (lower.endsWith('.pdf')) {
       if (lower.includes('ebay')) return T.ebayPdf;
