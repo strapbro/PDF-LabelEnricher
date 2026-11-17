@@ -519,10 +519,11 @@ def parse_ebay_csv(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any
                     pass
                 continue
 
-            line_total = explicit_total if explicit_total > 0 else (sold_for + shipping)
-            line_subtotal = explicit_subtotal if explicit_subtotal > 0 else (sold_for + shipping)
-            item_subtotal = sold_for
+            # Item rows contain a unit price; summary rows above already contain order totals.
+            item_subtotal = sold_for * qty
             shipping_subtotal = shipping
+            line_subtotal = item_subtotal + shipping_subtotal
+            line_total = explicit_total if explicit_total > 0 else line_subtotal
 
             variation_details_raw = str(row.get("Variation Details", "") or "").strip()
             variation_detail = _normalize_ebay_variation_details(variation_details_raw)
