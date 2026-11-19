@@ -345,6 +345,51 @@ class OcrMatchingTests(unittest.TestCase):
         self.assertEqual(_recipient_address_from_lines(OCR_LINES), ("JANE SAMPLE", "75001-1234"))
         self.assertEqual(_recipient_address_from_lines(OCR_LINES[:3]), ("", ""))
 
+    def test_ups_ground_saver_ocr_matches_final_usps_recipient(self):
+        lines = [
+            "WALMART", "SHIP TO: ALEX EXAMPLE", "10 HANDOFF AVE", "HANDOFF CITY CA 90210",
+            "UPS GROUND SAVER", "USPS PARCEL SELECT", "CARRIER - LEAVE IF NO RESPONSE",
+            "USPS Deliver To:", "JANE SAMPLE", "20 DELIVERY RD", "TEST CITY TX 75001-1234",
+            "USPS TRACKING # USPS Ship", "9261 0000 1234 5678 9012 3456 78",
+        ]
+        walmart_id = "200000000000001"
+        ebay_id = "12-12345-12345"
+        orders = {
+            walmart_id: order(walmart_id, "walmart"),
+            ebay_id: order(ebay_id, "ebay", "Alex Example", "90210"),
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            label = Path(temporary) / "uuid.pdf"
+            with fitz.open(stream=label_pdf(), filetype="pdf") as source, fitz.open() as image_only:
+                page = image_only.new_page(width=288, height=432)
+                page.insert_image(page.rect, stream=source[0].get_pixmap().tobytes("png"))
+                image_only.save(label)
+            with patch("app.label_text_extractor._ocr_windows_image_lines", side_effect=[[], lines]) as ocr:
+                signals = extract_label_signals(label)
+                result = match_label(label, orders, signals=signals)
+            self.assertEqual(ocr.call_count, 2)
+        self.assertTrue(signals["recipient_block_verified"])
+        self.assertEqual(signals["ocr_status"], "recognized")
+        self.assertEqual(result.get("method"), "exact_recipient_zip")
+        self.assertEqual(result["order"]["order_id"], walmart_id)
+
+    def test_text_handoff_uses_final_delivery_address(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            label = Path(temporary) / "uuid.pdf"
+            with fitz.open() as document:
+                page = document.new_page(width=288, height=432)
+                page.insert_text((12, 24), "SHIP TO: ALEX EXAMPLE\n10 HANDOFF AVE\nHANDOFF CITY CA 90210\n"
+                                 "USPS Deliver To: JANE SAMPLE\n20 DELIVERY RD\nTEST CITY TX 75001-1234")
+                document.save(label)
+            signals = extract_label_signals(label, allow_ocr=False)
+        self.assertTrue(signals["recipient_block_verified"])
+        self.assertEqual((signals["recipient_name"], signals["ship_postal"]), ("JANE SAMPLE", "75001-1234"))
+
+    def test_incomplete_final_delivery_never_uses_handoff_address(self):
+        lines = ["SHIP TO: ALEX EXAMPLE", "10 HANDOFF AVE", "HANDOFF CITY CA 90210",
+                 "USPS Deliver To:", "JANE SAMPLE", "TEST CITY TX 75001"]
+        self.assertEqual(_recipient_address_from_lines(lines), ("", ""))
+
     def test_unique_exact_recipient_matches(self):
         result = match_label(Path("uuid.pdf"), {ID1: order()}, "amazon", signals=self.signals())
         self.assertEqual(result["status"], "matched")

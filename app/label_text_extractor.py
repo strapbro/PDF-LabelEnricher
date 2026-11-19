@@ -17,6 +17,7 @@ TRACKING_UPS_RE = re.compile(r"\b1Z[0-9A-Z]{16}\b", re.IGNORECASE)
 TRACKING_FEDEX_RE = re.compile(r"\b(\d{12}|\d{15}|\d{20}|\d{22})\b")
 AMZ_ORDER_RE = re.compile(r"\b\d{3}-\d{7}-\d{7}\b")
 EBAY_ORDER_RE = re.compile(r"\b\d{2}-\d{5}-\d{5}\b")
+USPS_DELIVERY_HEADING_RE = re.compile(r"^\s*USPS\s+DELIVER\s+TO\b", re.IGNORECASE)
 
 BUSINESS_WORDS = {"group", "llc", "inc", "company", "corp", "corporation", "goods", "supply", "supplies", "logistics", "shipping"}
 
@@ -511,9 +512,12 @@ def _pick_zip_from_ocr_lines(lines: list[str]) -> str:
 
 def _recipient_address_from_lines(lines: list[str]) -> tuple[str, str]:
     """Require an anchored destination, a street and a city/state/ZIP together."""
-    # Walmart USPS labels omit SHIP TO, but delimit the destination after this
-    # carrier instruction. Never treat the preceding return address as recipient.
-    if any("WALMART" in line.upper() for line in lines) and any("USPS" in line.upper() for line in lines):
+    # Dual-carrier labels place the final USPS delivery below the UPS handoff address.
+    delivery_start = next((i for i, line in enumerate(lines) if USPS_DELIVERY_HEADING_RE.match(line)), None)
+    if delivery_start is not None:
+        lines = lines[delivery_start:]
+    elif any("WALMART" in line.upper() for line in lines) and any("USPS" in line.upper() for line in lines):
+        # Walmart USPS Ground Advantage omits an address heading.
         boundary = next((i for i, line in enumerate(lines)
                          if re.search(r"CARRIER.*LEAVE.*NO RESPONSE", line, re.I)), None)
         if boundary is not None:
@@ -522,7 +526,7 @@ def _recipient_address_from_lines(lines: list[str]) -> tuple[str, str]:
     active = False
     for line in lines:
         line = _normalize_space(line).replace("—", "-").replace("–", "-")
-        match = re.match(r"^(?:SHIP\s*TO|SHIPTO|DELIVER TO|RECIPIENT|SHIP)\s*:?\s*(.*)$", line, re.I)
+        match = re.match(r"^(?:SHIP\s*TO|SHIPTO|(?:USPS )?DELIVER TO|RECIPIENT|SHIP)\s*:?\s*(.*)$", line, re.I)
         if match:
             cleaned.append("SHIP TO:")
             if match.group(1):
@@ -575,7 +579,8 @@ def _ocr_shipping_label(pdf_path: Path) -> tuple[list[str], str]:
                 document[0].get_pixmap(matrix=fitz.Matrix(3, 3).prerotate(rotation), alpha=False).save(str(image_path))
                 lines = _ocr_windows_image_lines(image_path)
                 if (any("WALMART" in line.upper() for line in lines)
-                        and any("USPS" in line.upper() for line in lines)):
+                        and any("USPS" in line.upper() for line in lines)
+                        and not any(USPS_DELIVERY_HEADING_RE.match(line) for line in lines)):
                     images = document[0].get_images(full=True)
                     boundary = next((i for i, line in enumerate(lines)
                                      if re.search(r"CARRIER.*LEAVE.*NO RESPONSE", line, re.I)), None)
@@ -623,7 +628,10 @@ def extract_label_signals(pdf_path: Path, allow_ocr: bool = True) -> dict[str, A
     ocr_used = False
     ocr_general_used = False
     ocr_status = "not_needed"
-    verified_recipient, verified_postal = _recipient_address_from_lines(text.splitlines())
+    text_lines = text.splitlines()
+    verified_recipient, verified_postal = _recipient_address_from_lines(text_lines)
+    if any(USPS_DELIVERY_HEADING_RE.match(line) for line in text_lines):
+        recipient, postal = verified_recipient, verified_postal
 
     # eBay UPS labels often have no embedded text; use a tight OCR crop around
     # the recipient panel only when the normal text pass did not produce usable
