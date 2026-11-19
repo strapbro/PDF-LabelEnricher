@@ -9,6 +9,7 @@ import shutil
 import fitz
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from pypdf import PdfReader, PdfWriter
@@ -84,6 +85,7 @@ class BatchManager:
         self.unresolved_queue_path = settings.processed_root_folder / "unresolved_queue.json"
         self._label_sources: dict[str, dict[str, Any]] = {}
         self._label_signal_cache: dict[tuple[str, bool], dict[str, Any]] = {}
+        self._process_lock = Lock()
 
     def _batch_resolution_overrides_path(self, batch_dir: Path | None) -> Path | None:
         if batch_dir is None:
@@ -267,7 +269,9 @@ class BatchManager:
         merged["sale_date_sort"] = sale_date_sort
         return merged
     def scan_inputs(self) -> dict[str, Any]:
-        files = self._all_batch_files()
+        root = self.settings.incoming_batch_folder
+        files = [p for p in self._all_batch_files()
+                 if p.relative_to(root).parts[0] not in {"_unzipped", "_source_manifest.json"}]
         labels = self._find_label_pdfs(files)
         ebay_csv = self._find_ebay_csv(files)
         amazon_txt = self._find_amazon_txt(files)
@@ -685,6 +689,14 @@ class BatchManager:
     def process_batch(self, duplicate_action: str = "confirm") -> dict[str, Any]:
         if duplicate_action not in ("confirm", "skip", "include"):
             raise ValueError("Choose confirm, skip, or include for duplicate labels.")
+        if not self._process_lock.acquire(blocking=False):
+            return {"ok": False, "error": "A batch is already processing."}
+        try:
+            return self._process_batch(duplicate_action)
+        finally:
+            self._process_lock.release()
+
+    def _process_batch(self, duplicate_action: str) -> dict[str, Any]:
         logging.info("Batch start")
         try:
             self._extract_zip_files()
@@ -1278,6 +1290,7 @@ class BatchManager:
             if row.get("label_pdf") == target_label_pdf and queue_entry.get("source"):
                 row["source"] = manifest[source_pdf.name]
                 row["source_id"] = queue_entry.get("source_id", "")
+        report.setdefault("timestamp", latest.name.removeprefix("batch_"))
         report["results"] = results
         self._recount_batch_summary(report)
         atomic_write_json(report_path, report)
@@ -2281,11 +2294,14 @@ class BatchManager:
         result["combined"] = combined
         return result
 
+    def completed_batch_dirs(self) -> list[Path]:
+        # Batch names sort by creation time even when an older batch is edited.
+        return [path.parent for path in sorted(
+            self.settings.processed_root_folder.glob("batch_*/batch_report.json"), reverse=True
+        ) if path.is_file()]
+
     def _latest_batch_dir(self) -> Path | None:
-        batches = [p for p in self.settings.processed_root_folder.glob("batch_*") if p.is_dir()]
-        if not batches:
-            return None
-        return max(batches, key=lambda p: p.stat().st_mtime)
+        return next(iter(self.completed_batch_dirs()), None)
 
     def latest_batch_snapshot(self) -> dict[str, Any]:
         batch_dir = self._latest_batch_dir()

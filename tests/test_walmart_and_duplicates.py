@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Event
+from unittest.mock import patch
 import zipfile
 
 import fitz
@@ -182,12 +186,22 @@ class DuplicateTests(unittest.TestCase):
     def test_amazon_pngs_in_separate_archives_are_checked(self):
         with tempfile.TemporaryDirectory() as temporary:
             settings = settings_for(Path(temporary))
+            manager = BatchManager(settings)
             write_orders(settings.incoming_batch_folder / "orders.txt", ids=(ID1,))
             for name in ("amznbulklabels.zip", "amznbulklabels-copy.zip"):
                 (settings.incoming_batch_folder / name).write_bytes(bulk_zip(ids=(ID1,)))
-            result = BatchManager(settings).process_batch()
+            before = manager.scan_inputs()
+            result = manager.process_batch()
             self.assertTrue(result["needs_duplicate_confirmation"])
             self.assertEqual(len(result["duplicates"]), 1)
+            self.assertEqual(before["staged_file_count"], 3)
+            self.assertEqual(manager.scan_inputs(), before)
+            manager.clear_unresolved_queue()
+            self.assertTrue(manager.process_batch()["needs_duplicate_confirmation"])
+            self.assertEqual(manager.scan_inputs(), before)
+            skipped = manager.process_batch(duplicate_action="skip")
+            self.assertEqual(skipped["report"]["summary"]["matched"], 1)
+            self.assertEqual(manager.scan_inputs()["staged_file_count"], 0)
 
     def test_duplicate_pages_require_confirmation_and_can_be_skipped(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -235,6 +249,74 @@ class DuplicateTests(unittest.TestCase):
             self.assertTrue(blocked["duplicates"][0]["processed_at"])
             included = manager.process_batch(duplicate_action="include")
             self.assertEqual(included["report"]["summary"]["matched"], 1)
+
+    def test_missing_history_timestamp_still_detects_duplicates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = settings_for(Path(temporary))
+            manager = BatchManager(settings)
+            order_report = settings.incoming_batch_folder / "PO_Data.xlsx"
+            label = settings.incoming_batch_folder / "label.pdf"
+            walmart_report(order_report)
+            shipping_pdf(label)
+            first = manager.process_batch()
+            report_path = Path(first["batch_dir"]) / "batch_report.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            del report["timestamp"]
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+
+            walmart_report(order_report)
+            shipping_pdf(label)
+            warning = manager.process_batch()
+            self.assertTrue(warning["needs_duplicate_confirmation"])
+            self.assertEqual(warning["duplicates"][0]["previous_batch"], report_path.parent.name)
+            processed = manager.process_batch(duplicate_action="include")
+            self.assertEqual(processed["report"]["summary"]["matched"], 1)
+
+    def test_combined_pdf_uses_latest_completed_batch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = settings_for(Path(temporary))
+            manager = BatchManager(settings)
+            order_report = settings.incoming_batch_folder / "PO_Data.xlsx"
+            label = settings.incoming_batch_folder / "label.pdf"
+            walmart_report(order_report)
+            shipping_pdf(label)
+            first = Path(manager.process_batch()["batch_dir"])
+            walmart_report(order_report)
+            shipping_pdf(label, tracking="9400123456781234567891")
+            second = Path(manager.process_batch()["batch_dir"])
+            os.utime(first, (second.stat().st_mtime + 60,) * 2)
+            (settings.processed_root_folder / "batch_20990101_000000").mkdir()
+
+            self.assertEqual(manager.completed_batch_dirs(), [second, first])
+            self.assertEqual(Path(manager.latest_batch_snapshot()["batch_dir"]), second)
+            combined = manager.combine_latest_output_pdfs()
+            self.assertEqual(Path(combined["path"]).parents[1], second)
+
+    def test_overlapping_process_calls_do_not_share_staging_work(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = settings_for(Path(temporary))
+            manager = BatchManager(settings)
+            walmart_report(settings.incoming_batch_folder / "PO_Data.xlsx")
+            shipping_pdf(settings.incoming_batch_folder / "label.pdf")
+            started, resume = Event(), Event()
+            extract = manager._extract_zip_files
+
+            def wait_then_extract():
+                started.set()
+                if not resume.wait(timeout=10):
+                    raise TimeoutError("Test did not resume batch processing")
+                return extract()
+
+            with patch.object(manager, "_extract_zip_files", side_effect=wait_then_extract), ThreadPoolExecutor() as executor:
+                first = executor.submit(manager.process_batch)
+                try:
+                    self.assertTrue(started.wait(timeout=5))
+                    second = executor.submit(manager.process_batch).result(timeout=5)
+                    self.assertEqual(second.get("error"), "A batch is already processing.")
+                finally:
+                    resume.set()
+                self.assertEqual(first.result()["report"]["summary"]["matched"], 1)
+            self.assertEqual(len(manager.completed_batch_dirs()), 1)
 
     def test_tracking_detects_different_artwork_and_skip_all_keeps_latest_output(self):
         with tempfile.TemporaryDirectory() as temporary:

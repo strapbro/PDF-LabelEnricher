@@ -1958,12 +1958,6 @@ def _order_link_for(platform: str, order_id: str) -> str:
     return ""
 
 
-def _batch_dirs() -> list[Path]:
-    rows = [p for p in settings.processed_root_folder.glob("batch_*") if p.is_dir()]
-    rows.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return rows
-
-
 def _load_batch_report_rows(batch_dir: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     report_path = batch_dir / "batch_report.json"
     if not report_path.exists():
@@ -2044,7 +2038,7 @@ def create_app() -> FastAPI:
 
     @app.get("/batch-table", response_class=HTMLResponse)
     def batch_table_page(request: Request, batch: str = "latest", msg: str = ""):
-        dirs = _batch_dirs()
+        dirs = batch_manager.completed_batch_dirs()
         if not dirs:
             return _templates().TemplateResponse("batch_table.html", {"request": request, "message": _ui("No processed batches found."), "rows": [], "batch_options": [], "selected_batch": "", "summary": {}, "default_sort": "process_index"})
 

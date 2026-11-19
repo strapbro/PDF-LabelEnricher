@@ -85,7 +85,7 @@
     {% endif %}
     <div class="actions-grid main-actions">
       <form action="/process" method="post"><button class="btn btn-lg btn-primary" type="submit">{{ tr("Process Batch") }}</button></form>
-      <form action="/batch/open-combined-latest" method="post"><button class="btn btn-lg btn-open" type="submit">{{ tr("Open Combined PDF") }}</button></form>
+      <form action="/batch/open-combined-latest" method="post"><button class="btn btn-lg btn-open" type="submit">{{ tr("Open Last Combined PDF" if status.staged_file_count else "Open Combined PDF") }}</button></form>
       <a class="btn btn-md btn-secondary" href="/process/reprocess-latest/confirm">{{ tr("Reprocess Previous Batch") }}</a>
       <a class="btn btn-md btn-secondary" href="/reprocess-select">{{ tr("Reprocess Select PDFs (Prev Batch)") }}</a>
     </div>

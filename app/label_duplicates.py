@@ -19,6 +19,11 @@ def label_fingerprint(path: Path, source: dict[str, Any]) -> str:
         return hashlib.sha256(f"{pixels.width}x{pixels.height}:".encode() + pixels.samples).hexdigest()
 
 
+def _parse_batch_timestamp(timestamp: str) -> datetime:
+    fmt = "%Y%m%d_%H%M%S_%f" if len(timestamp) > 15 else "%Y%m%d_%H%M%S"
+    return datetime.strptime(timestamp, fmt)
+
+
 def find_duplicate_labels(sources: list[dict[str, Any]], signals_for: Callable,
                           processed_root: Path, now: datetime | None = None) -> list[dict[str, Any]]:
     now = now or datetime.now()
@@ -27,8 +32,11 @@ def find_duplicate_labels(sources: list[dict[str, Any]], signals_for: Callable,
     for report_path in sorted(processed_root.glob("batch_*/batch_report.json"), reverse=True):
         try:
             report = json.loads(report_path.read_text(encoding="utf-8"))
-            timestamp = report.get("timestamp", "")
-            processed_at = datetime.strptime(timestamp, "%Y%m%d_%H%M%S_%f" if len(timestamp) > 15 else "%Y%m%d_%H%M%S")
+            try:
+                processed_at = _parse_batch_timestamp(str(report.get("timestamp", "")))
+            except ValueError:
+                # Some reports written by manual resolution lack the timestamp.
+                processed_at = _parse_batch_timestamp(report_path.parent.name.removeprefix("batch_"))
             if not cutoff <= processed_at <= now:
                 continue
             for row in report.get("results", []):
